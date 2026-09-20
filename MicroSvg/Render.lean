@@ -19,6 +19,12 @@ structure Options where
   zoom : Option Fx := none
   /-- Background colour; default transparent. -/
   background : Option Rgba := none
+  /-- Render only the window `(x, y, w, h)` of the zoomed image, in output
+  pixels: the result is `w × h` pixels showing that rectangle.  `x` and `y` may
+  be negative or past the edge of the image; what falls outside the document is
+  transparent (or the background colour).  The zoom is still the one `width`
+  or `zoom` asks for, so the caller can tile a large virtual image. -/
+  viewport : Option (Int × Int × Nat × Nat) := none
 deriving Inhabited
 
 /-- Largest output edge, in pixels. -/
@@ -30,8 +36,20 @@ namespace Render
 
 open Svg
 
-/-- Decide the output size and the root transform. -/
-def canvasSetup (root : RootInfo) (opts : Options) : Except String (Nat × Nat × Mat) := do
+/-- Decide the output size and the root transform.
+
+With `opts.viewport` the size is the tile's, not the whole image's, and the
+tile's offset is applied *after* the zoom, so document geometry lands directly
+in tile coordinates.  `maxDim` and `maxPixels` then bound the tile; the virtual
+image it is a window of may be far larger.  The zoom itself is bounded by the
+16.16 matrix: `Mat.linMax` clamps the linear part at 4096×.
+
+The third result is the document rectangle in canvas pixels, which the
+rasterizer clips to.  For a tile it is the whole image's rectangle seen from
+the tile's origin, so an edge is cut at the same place whichever tile (or the
+whole image) is being drawn. -/
+def canvasSetup (root : RootInfo) (opts : Options) :
+    Except String (Nat × Nat × Mat × Raster.Rect) := do
   let (wFx, hFx) ← match root.width, root.height, root.viewBox with
     | some w, some h, _ => pure (w, h)
     | some w, none, some (_, _, vw, vh) => pure (w, if vw > 0 then Int.ediv (w * vh) vw else w)
@@ -62,10 +80,15 @@ def canvasSetup (root : RootInfo) (opts : Options) : Except String (Nat × Nat �
       (Nat.max 1 (Int.ediv (wFx * z16 + 32768 * 256) (65536 * 256)).toNat,
        Nat.max 1 (Int.ediv (hFx * z16 + 32768 * 256) (65536 * 256)).toNat, z16)
     | none, none => (baseW, baseH, 65536)
-  return (W, H, (Mat.scale16 zoom16 zoom16).mul vbMat)
+  let mat := (Mat.scale16 zoom16 zoom16).mul vbMat
+  match opts.viewport with
+  | none => return (W, H, mat, ⟨0, 0, W, H⟩)
+  | some (vx, vy, vw, vh) =>
+    return (vw, vh, (Mat.translate (-(vx * 256)) (-(vy * 256))).mul mat,
+            ⟨-vx, -vy, (W : Int) - vx, (H : Int) - vy⟩)
 
 /-- Draw one shape (fill, then stroke) onto the canvas. -/
-def drawShape (rootMat : Mat) (cv : Canvas) (s : Shape) : Canvas :=
+def drawShape (rootMat : Mat) (doc : Raster.Rect) (cv : Canvas) (s : Shape) : Canvas :=
   let st := s.style
   let ctm := rootMat.mul st.ctm
   let W := cv.w
@@ -74,7 +97,7 @@ def drawShape (rootMat : Mat) (cv : Canvas) (s : Shape) : Canvas :=
   let cv := match st.fill with
     | .solid c =>
       let dev := polys.map fun p => p.pts.map ctm.apply
-      match Raster.rasterize W H dev st.evenOdd with
+      match Raster.rasterize W H doc dev st.evenOdd with
       | some m => cv.fillMask m c (st.fillOpacity * st.opacity / 256)
       | none => cv
     | .none => cv
@@ -85,7 +108,7 @@ def drawShape (rootMat : Mat) (cv : Canvas) (s : Shape) : Canvas :=
       let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
       let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
       let dev := outline.map fun p => p.map ctm.apply
-      match Raster.rasterize W H dev false with
+      match Raster.rasterize W H doc dev false with
       | some m => cv.fillMask m c (st.strokeOpacity * st.opacity / 256)
       | none => cv
   | .none => cv
@@ -96,11 +119,11 @@ end Render
 def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
   let events ← Xml.parse input
   let doc ← Svg.interpret events
-  let (w, h, rootMat) ← Render.canvasSetup doc.root opts
+  let (w, h, rootMat, docRect) ← Render.canvasSetup doc.root opts
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
   if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
-  let canvas := doc.shapes.foldl (Render.drawShape rootMat) (Canvas.new w h opts.background)
+  let canvas := doc.shapes.foldl (Render.drawShape rootMat docRect) (Canvas.new w h opts.background)
   return Png.encode w h canvas.toRgbaBytes
 
 end MicroSvg

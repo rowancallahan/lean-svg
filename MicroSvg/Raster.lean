@@ -12,9 +12,17 @@ Contributions are stored as differences so that a prefix sum along the row
 yields the signed winding-weighted coverage of every pixel.  Coverage is then
 `min(|sum|, 1)` for the nonzero rule or a triangle-wave fold for even-odd.
 
-Edges are clipped to the shape's bounding box intersected with the canvas, so
-all coordinates inside the hot loop are non-negative and fit in Lean's unboxed
-63-bit `Nat`.  Full coverage of a pixel is `65536`.
+Edges are clipped to the *document* rectangle, which is the same rectangle for
+the whole image and for a tile of it.  They are **not** clipped to the mask,
+which is the shape's bounding box intersected with the canvas and so differs
+between a tile and the full image: instead only the rows and columns the mask
+holds are visited, and the area function supplies "nothing yet" for a column
+left of an edge and "all of it" for one to its right.  Coverage of a pixel
+therefore does not depend on where the mask boundary falls, which is what makes
+a tile agree bit for bit with the same window of the full render.  The loops
+stay in `Nat` (Lean's unboxed 63-bit integer): an edge piece reaching outside
+the mask is shifted by whole pixels until it is non-negative, which only moves
+the row and column indices by a constant.  Full coverage of a pixel is `65536`.
 -/
 
 namespace MicroSvg
@@ -36,57 +44,109 @@ deriving Inhabited
   else if k ≥ xr then 512 * k - 256 * (xl + xr)
   else 256 * (k - xl) * (k - xl) / (xr - xl)
 
-/-- Accumulate one edge piece with `0 ≤ xa, xb ≤ bwFx` and `ya < yb`, all in `Fx`
-relative to the mask origin. -/
-def accumPiece (acc : Array Int) (stride : Nat) (dir : Int) (xa ya xb yb : Nat) :
+/-- The document rectangle in canvas pixels: `(0, 0, W, H)` for a whole image,
+and the window's complement for a tile, where it is the same rectangle of the
+document seen from the tile's origin. -/
+structure Rect where
+  x0 : Int
+  y0 : Int
+  x1 : Int
+  y1 : Int
+deriving Inhabited, Repr
+
+/-- Accumulate one edge piece with `ya < yb`, in `Fx` relative to the origin of
+a `bw × bh` pixel mask.  The piece may lie outside the mask.
+
+Only rows `[0, bh)` and columns `[0, bw]` of the difference buffer are touched,
+but the x position at each row boundary is always interpolated from the piece's
+*own* endpoints, never from a copy cut down to the mask.  Together with the area
+function `r2` — which already gives no coverage for a column left of the piece
+and full coverage for one right of it — that makes what a pixel accumulates
+independent of where the mask boundary falls: a piece crossing it contributes
+exactly what it would if the mask were larger.  This is what lets a tile match
+the same window of the full image bit for bit.
+
+The loops themselves run in `Nat`: the piece is first shifted right and down by
+a whole number of pixels, enough to make every coordinate non-negative.  A shift
+by whole pixels moves row and column indices by a constant, which is subtracted
+back when indexing, and leaves the arithmetic alone — `r2` and the interpolation
+of `x` along the piece are both invariant under a common shift. -/
+def accumPiece (acc : Array Int) (stride bw bh : Nat) (dir : Int) (xa ya xb yb : Int) :
     Array Int := Id.run do
+  if yb ≤ ya || bh == 0 then return acc
+  if yb ≤ 0 || ya ≥ (bh : Int) * 256 then return acc
+  -- shift into `Nat`, by whole pixels so that only the index origin moves
+  let sx : Nat := if xa ≤ xb then
+      (if xa < 0 then ((-xa).toNat + 255) / 256 else 0)
+    else (if xb < 0 then ((-xb).toNat + 255) / 256 else 0)
+  let sy : Nat := if ya < 0 then ((-ya).toNat + 255) / 256 else 0
+  let xA : Nat := (xa + sx * 256).toNat
+  let xB : Nat := (xb + sx * 256).toNat
+  let yA : Nat := (ya + sy * 256).toNat
+  let yB : Nat := (yb + sy * 256).toNat
+  -- rows of the mask the piece meets, in the shifted frame
+  let rowFirst : Nat := Nat.max sy (yA / 256)
+  let rowLast : Nat := Nat.min (sy + bh - 1) ((yB - 1) / 256)
+  let dyTotal : Nat := yB - yA
+  let rising : Bool := xB ≥ xA
+  let dxAbs : Nat := if rising then xB - xA else xA - xB
   let mut acc := acc
-  if yb ≤ ya then return acc
-  let dyTotal := yb - ya
-  let rowStart := ya / 256
-  let rowEnd := (yb - 1) / 256
-  for r in [rowStart:rowEnd + 1] do
-    let yt := Nat.max ya (r * 256)
-    let yb' := Nat.min yb ((r + 1) * 256)
-    let dy := yb' - yt
-    let xt := if xb ≥ xa then xa + (xb - xa) * (yt - ya) / dyTotal
-              else xa - (xa - xb) * (yt - ya) / dyTotal
-    let xu := if xb ≥ xa then xa + (xb - xa) * (yb' - ya) / dyTotal
-              else xa - (xa - xb) * (yb' - ya) / dyTotal
+  for r in [rowFirst:rowLast + 1] do
+    let yt : Nat := Nat.max yA (r * 256)
+    let yu : Nat := Nat.min yB ((r + 1) * 256)
+    if yu ≤ yt then continue
+    let dy := yu - yt
+    -- x where the piece meets this row band, from the piece's own endpoints
+    let xt := if rising then xA + dxAbs * (yt - yA) / dyTotal else xA - dxAbs * (yt - yA) / dyTotal
+    let xu := if rising then xA + dxAbs * (yu - yA) / dyTotal else xA - dxAbs * (yu - yA) / dyTotal
     let xl := Nat.min xt xu
     let xr := Nat.max xt xu
-    let colStart := xl / 256
-    let colEnd := if xr ≤ xl then colStart else (xr - 1) / 256
-    let base := r * stride
+    -- first column that is not empty, last one that is not yet full
+    let colLo := xl / 256
+    let colHi := if xr ≤ xl then colLo else (xr - 1) / 256
+    let colStart := Nat.max sx colLo
+    let colEnd := Nat.min (sx + bw) colHi
+    let base := (r - sy) * stride
     let full := dy * 256
     let mut prev : Nat := 0
     for c in [colStart:colEnd + 1] do
       let cov := dy * (r2 xl xr ((c + 1) * 256) - r2 xl xr (c * 256)) / 512
-      let idx := base + c
+      let idx := base + c - sx
       acc := acc.setIfInBounds idx (acc.getD idx 0 + dir * ((cov : Int) - (prev : Int)))
       prev := cov
-    let idx := base + colEnd + 1
-    acc := acc.setIfInBounds idx (acc.getD idx 0 + dir * ((full : Int) - (prev : Int)))
+    -- every column further right gets the piece's whole winding step
+    let last := if colStart ≤ colEnd then colEnd + 1 - sx else colStart - sx
+    if last < stride then
+      let idx := base + last
+      acc := acc.setIfInBounds idx (acc.getD idx 0 + dir * ((full : Int) - (prev : Int)))
   return acc
 
 /-- Accumulate an edge given in mask-relative `Fx` coordinates, clipping it to
-`[0, bwFx] × [0, bhFx]`.  Parts left of the mask are projected onto its left
-edge (which preserves winding for every visible pixel); parts above or below
-are discarded. -/
-def accumEdge (acc : Array Int) (stride bwFx bhFx : Nat) (p q : Pt) : Array Int := Id.run do
+the *document* rectangle `doc` (also mask-relative, in `Fx`).  Parts left of the
+document are projected onto its left edge (which preserves winding for every
+pixel); parts above or below it are discarded.
+
+The document rectangle is the same rectangle whether the whole image or one
+tile of it is being rasterized, so this clipping — unlike clipping to the mask,
+which `accumPiece` does exactly — cannot make a tile disagree with the full
+image. -/
+def accumEdge (acc : Array Int) (stride bw bh : Nat) (doc : Rect) (p q : Pt) :
+    Array Int := Id.run do
   if p.y == q.y then return acc
   let dir : Int := if p.y < q.y then 1 else -1
   let (x0, y0, x1, y1) := if p.y < q.y then (p.x, p.y, q.x, q.y) else (q.x, q.y, p.x, p.y)
-  let bh : Int := bhFx
-  let bw : Int := bwFx
-  if y1 ≤ 0 || y0 ≥ bh then return acc
+  if y1 ≤ doc.y0 || y0 ≥ doc.y1 then return acc
   let xAt (y : Int) : Int := x0 + Int.ediv ((x1 - x0) * (y - y0)) (y1 - y0)
-  let (x0, y0) := if y0 < 0 then (xAt 0, (0 : Int)) else (x0, y0)
-  let (x1, y1) := if y1 > bh then (xAt bh, bh) else (x1, y1)
-  -- split at x = 0 and x = bw so each piece is entirely inside or outside
+  let (x0, y0) := if y0 < doc.y0 then (xAt doc.y0, doc.y0) else (x0, y0)
+  let (x1, y1) := if y1 > doc.y1 then (xAt doc.y1, doc.y1) else (x1, y1)
+  if doc.x0 ≤ x0 && x0 ≤ doc.x1 && doc.x0 ≤ x1 && x1 ≤ doc.x1 then
+    -- wholly inside: no split needed
+    return accumPiece acc stride bw bh dir x0 y0 x1 y1
+  -- split at the document's left and right edge so each piece is entirely
+  -- inside or outside
   let mut pieces : Array (Int × Int × Int × Int) := #[(x0, y0, x1, y1)]
   for k in [0:2] do
-    let xc : Int := if k == 0 then 0 else bw
+    let xc : Int := if k == 0 then doc.x0 else doc.x1
     let mut next : Array (Int × Int × Int × Int) := #[]
     for (a, b, c, d) in pieces do
       if (a < xc && c > xc) || (a > xc && c < xc) then
@@ -97,13 +157,16 @@ def accumEdge (acc : Array Int) (stride bwFx bhFx : Nat) (p q : Pt) : Array Int 
     pieces := next
   let mut acc := acc
   for (a, b, c, d) in pieces do
-    let cl (x : Int) : Nat := Int.toNat (if x < 0 then 0 else if x > bw then bw else x)
-    acc := accumPiece acc stride dir (cl a) b.toNat (cl c) d.toNat
+    let cl (x : Int) : Int := if x < doc.x0 then doc.x0 else if x > doc.x1 then doc.x1 else x
+    acc := accumPiece acc stride bw bh dir (cl a) b (cl c) d
   return acc
 
 /-- Rasterize closed polygons (device-space `Fx` coordinates) into a coverage mask
-clipped to a `W × H` canvas.  Returns `none` if nothing is visible. -/
-def rasterize (W H : Nat) (polys : Array (Array Pt)) (evenOdd : Bool) : Option Mask := Id.run do
+clipped to a `W × H` canvas.  `doc` is the document rectangle in canvas pixels —
+`(0, 0, W, H)` for a whole image, and the same document rectangle seen from the
+tile's origin for a tile.  Returns `none` if nothing is visible. -/
+def rasterize (W H : Nat) (doc : Rect) (polys : Array (Array Pt)) (evenOdd : Bool) :
+    Option Mask := Id.run do
   -- bounding box
   let mut any := false
   let mut minx : Int := 0
@@ -136,13 +199,15 @@ def rasterize (W H : Nat) (polys : Array (Array Pt)) (evenOdd : Bool) : Option M
   let mut acc : Array Int := Array.replicate (stride * bh) 0
   let ox : Int := x0i * 256
   let oy : Int := y0i * 256
+  let docFx : Rect :=
+    ⟨doc.x0 * 256 - ox, doc.y0 * 256 - oy, doc.x1 * 256 - ox, doc.y1 * 256 - oy⟩
   for poly in polys do
     let n := poly.size
     if n < 3 then continue
     for i in [0:n] do
       let p := poly.getD i default
       let q := poly.getD ((i + 1) % n) default
-      acc := accumEdge acc stride (bw * 256) (bh * 256) ⟨p.x - ox, p.y - oy⟩ ⟨q.x - ox, q.y - oy⟩
+      acc := accumEdge acc stride bw bh docFx ⟨p.x - ox, p.y - oy⟩ ⟨q.x - ox, q.y - oy⟩
   -- prefix sums → coverage
   let mut cov : Array Nat := Array.replicate (bw * bh) 0
   for r in [0:bh] do

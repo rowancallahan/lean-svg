@@ -78,7 +78,9 @@ Composition `m.mul n` applies `n` first (SVG's `transform="A B"` = `A.mul B`).
 
 Lean runtime detail that shaped the code: unboxed `Int` is 31-bit on 64-bit
 hosts (`LEAN_MAX_SMALL_INT = INT_MAX`), unboxed `Nat` is 63-bit. So the
-per-pixel loops are written in `Nat` after clipping to the canvas.
+per-pixel loops are written in `Nat`; geometry that reaches outside the mask
+is shifted into `Nat` by a whole number of pixels rather than cut down to it
+(§3.5).
 
 ### 3.2 XML subset
 
@@ -129,13 +131,20 @@ so a prefix sum along the row gives each pixel's coverage, in units where
 65536 = full. Nonzero: `min(|sum|, 65536)`. Even-odd: fold `|sum| mod 131072`
 as a triangle wave.
 
-Edges are clipped: vertically to the mask (discard outside), horizontally by
-splitting at `x = 0` and `x = bw` and clamping the outside pieces onto the
-boundary, which preserves winding for every visible pixel. After clipping
-every coordinate is a non-negative `Nat` below 2^22, so all products fit in
-63 bits.
+Edges are clipped to the **document rectangle**: vertically (discard outside),
+horizontally by splitting at its left and right edge and clamping the outside
+pieces onto the boundary, which preserves winding for every visible pixel.
 
-Masks cover only the shape's bounding box ∩ canvas.
+They are *not* clipped to the mask, which covers only the shape's bounding box
+∩ canvas and so is a different rectangle for a tile than for the whole image
+(§3.8). Instead `accumPiece` visits only the rows and columns the mask holds,
+interpolating `x` at each row boundary from the piece's own endpoints; `R` is
+already 0 for a column left of the piece and full for one to its right, so
+leaving columns out loses nothing. Coverage of a pixel is therefore the same
+whatever the mask boundary is. Each piece is shifted right and down by whole
+pixels first, which makes every coordinate a non-negative `Nat` and moves row
+and column indices by a constant that is subtracted back when indexing; `R`
+and the interpolation are invariant under a common shift.
 
 ### 3.6 Stroking
 
@@ -152,6 +161,18 @@ Canvas: premultiplied RGBA8 packed into one `Nat` per pixel. Source-over with
 `div255(x) = (x + 127) / 255`. Output: straight alpha, 8-bit RGBA, filter 0,
 zlib stream of stored DEFLATE blocks, CRC-32 and Adler-32 computed in Lean.
 PNG size is therefore a closed-form function of `(w, h)`; see PLAN M3.
+
+### 3.8 Viewport (tiles)
+
+`Options.viewport = (x, y, w, h)` renders only that window of the zoomed image:
+`canvasSetup` returns `w × h` as the canvas size and composes
+`translate(−x, −y)` after the zoom, so `maxDim` / `maxPixels` bound the tile
+rather than the virtual image it is a window of. It also returns the document
+rectangle in canvas pixels — `(0, 0, W, H)` normally, `(−x, −y, W−x, H−y)` for
+a tile, i.e. the same rectangle of the document either way, which is what keeps
+clipping tile-independent (§3.5). A tile is byte-identical to that window of
+the full render (`tests/run_tiles.py`). Maximum zoom is 4096×, where
+`Mat.linMax` clamps the 16.16 linear part.
 
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
