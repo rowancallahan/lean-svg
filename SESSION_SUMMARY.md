@@ -1,39 +1,52 @@
-# Session summary — 2026-09-19
+# Session summary — 2026-09-19 → 2026-09-20 (paused 01:35)
 
-## What was done
+## State of `main` (commit 5db8f14, all local, nothing pushed)
 
-- Pivoted from "PDF renderer" to **micro-SVG → PNG in Lean 4**, safety-only
-  goal, after research showed PDF's exploited subsystems (JBIG2, JPX, fonts,
-  JS) are out of reach and no verified rasterizer exists anywhere.
-- Decided **fixed-point integers, no floats** (Lean `Float` is opaque; NaN/Inf
-  are attacker-controlled values). Hot loops in `Nat` because Lean's unboxed
-  `Int` is only 31-bit.
-- Built the whole pipeline in `/Users/rowancallahan/pdf_renderer`
-  (package `microsvg`, Lean v4.34.0, no deps): effect monad + 6 kernel-checked
-  theorems (`propext` only), XML subset parser, SVG interpreter, fixed-point
-  geometry/stroker, accumulation rasterizer, compositing, PNG writer, CLI.
-- First corpus (11 SVGs) vs resvg 0.48.1: triangle 99.00% exact / 100% ≤ 8;
-  all files ≥ 99% ≤ 32. Adversarial files (billion laughs, XXE, external
-  refs, huge dims/numbers, malformed, empty): all handled < 20 ms, no output
-  on error.
-- Wrote `PLAN.md` (milestones with Opus/design markers, settled decisions),
-  `DESIGN.md` (claims, threat model, algorithms, results), `README.md`.
-- Launched two Opus agents: `tests/run_tests.py` + `tests/run_adversarial.py`
-  + `Makefile`; and `playground/` (server + single-page draw-and-compare app
-  with `.claude/launch.json`).
+Builds clean. Harnesses on this binary:
+- `tests/run_tests.py`: **15/20** at the strict bar (≥ 99% of pixels within 8
+  levels of resvg); all 20 files ≥ 99.6% within 32. Failing five: 12_badge,
+  14_flower, 15_spiral, 16_stress, 17_koch (hairline strokes, coarse curve
+  flattening, stroker seams — see T1's report).
+- `tests/run_tiles.py`: **20/20** quadrant tiles byte-identical to full render.
+- `tests/run_adversarial.py`: **37/37** clean.
+- Theorems in `MicroSvg/Effect.lean` unchanged; `#print axioms` = `propext`.
 
-## State of key files
+Merged tonight (each verified before merge): T1 tiny-skia anti-aliasing port,
+T2 blend arithmetic, T4/T4m viewport tiles (`--viewport X Y W H`), T5 opacity
+quantisation, T7 opaque-coverage fast path (~1.4×). Also added: T3 size
+benchmark (`tests/run_sizes.py`), playground (`playground/`), harness design
+(`harness/README.md`, deferred M10).
 
-- `MicroSvg/*.lean`, `Main.lean`: compile clean with `lake build`.
-- `tests/svg/01..11*.svg`, `tests/adversarial/*.svg`: corpus.
-- `tests/out/`: gitignored scratch (composites `*_cmp.png`).
-- Git repo initialised, **nothing committed yet**.
+## Paused on branches (worktrees still in place under `.worktrees/`)
 
-## Next steps
+| branch | worktree | state | decision needed |
+|---|---|---|---|
+| `t6-raster-walk` | T6 | **complete**, 1.5× (natural) / 1.8× (1600 px) faster, adversarial clean | loses 3 and 7 within-8 pixels on 15_spiral and 16_stress (0.008 pts), gains 21 on 19_sierpinski; cause is seams in *our* stroker. Merge as-is, or fix the stroker seams first (then it is strictly better). |
+| `t8-output` | T8 | code written (Png.lean, Canvas.toRgbaBytes/new); byte-identity and timing verification **not finished** | resume the agent with `tasks/T8-perf-output-path.md`: finish sha256 check + timings, then merge. |
+| `t10-cull` | T10 | **partial**: bbox helper in progress, not built | resume from `tasks/T10-tile-culling.md`. |
 
-1. Check the two Opus deliverables (`make test`, `make adversarial`, open the
-   playground via the `playground` launch config).
-2. Commit selectively (source, docs, tests; not `tests/out`).
-3. M3 output-shape theorem (see PLAN.md for the approach).
-4. M4 fidelity features, M5 usvg route + resvg-test-suite, M6 benchmarks.
-5. lean-zip: PR idea and DEFLATE integration (M7).
+Resume any of them with an Opus agent pointed at its task file and worktree.
+Note T8/T10 branched before T7 merged; expect a trivial conflict in
+`Canvas.lean` for T8 (resolve like T7m did: keep main's `fillMask`).
+
+## Measured performance (before T6/T8/T10)
+
+~356 ms/Mpx mean, linear in pixels; ≈35× resvg at 3200 px (T3). 512×512 tile
+at 4000 px wide: 600–960 ms, mostly fixed cost of flattening every shape
+(T4m) → T10 culling + T8 output path are the levers for interactive tiles.
+
+## Next steps (in order)
+
+1. Decide T6; finish T8; finish T10; merge; re-run `make test tiles adversarial`.
+2. Stroker seams (single outline per subpath, like kurbo) — fixes T6's
+   regression and part of the five failing files.
+3. Hairline strokes (device width ≤ 1 px → tiny-skia's `hairline_aa`) and finer
+   curve flattening (Skia's cubic subdivision) — the rest of the failing five.
+4. M3 output-size theorem; usvg route + resvg test suite; lean-zip; M10 Aeneas.
+
+## How to run
+
+```bash
+lake build && make test && make tiles && make adversarial
+python3 playground/server.py   # http://127.0.0.1:8765
+```
