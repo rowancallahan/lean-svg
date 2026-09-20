@@ -1,98 +1,86 @@
 # Session summary — 2026-09-19 → 2026-09-20
 
-## Update 2026-09-20 evening: T6, T11, T12, T13, T14 merged (main a7feb5e)
+## Update 2026-09-20 night: wave 1 landing (main a7053eb, all local, nothing pushed)
 
-- **T6 sorted edge walk** (1.5–1.8× rasterizer), merged on Rowan's call
-  despite −3/−7 within-8 px on two stroke files; **T11 seamless stroker**
-  then recovered them and lifted 10 files (spiral 97.15→97.28, stress
-  95.83→96.21, function plot →99.78); one pixel lost on 12_badge.
-- **T12 hairline strokes** (tiny-skia `hairline_aa` port for device width
-  ≤ 1 px): 17_koch 96.9→99.2 PASS, new `21_hairlines.svg` 99.6; other files
-  byte-identical. Corpus is now **17/21** at ≥99% within 8; failing:
-  12_badge 97.66, 14_flower 97.61, 15_spiral 97.28, 16_stress 96.21.
-- **T14 parallel bands** via pure `Task.spawn`/`Task.get`: `--threads N`,
-  byte-identical (1 920 renders), stress @1600 px 2.34 s → 0.79 s on 4
-  threads, `Effect.lean` untouched, `render` type unchanged, axioms
-  `propext`. Finding: 4 processes beat 4 tasks (atomic RC on the shared
-  `Doc`), noted in PLAN M6b.
-- **T13 playground**: re-render at displayed size on resize, thumbnail
-  strip, 1:1 draw canvas, timing strip. Server on port 8766 during the
-  session (`python3 playground/server.py --port 8766`).
-- Harnesses after every merge: tiles 21/21, adversarial 38/38; a 2000 px
-  spot render hashed against the pre-merge binary where output should be
-  unchanged.
-- **T15 external corpora** (resvg-test-suite, simple-icons, feather;
-  direct and via-usvg routes) is running; results go in its task file.
+Merged today, each after `lake build`, `run_tests` (no regression),
+`run_tiles` byte-identical, `run_adversarial` clean, `Effect.lean` untouched:
+
+- **T15 external corpora harness** (`tests/run_corpora.py`; resvg-test-suite
+  1 679 files, simple-icons 3 461, feather 287; routes *direct* and *usvg*).
+  Baseline at f02dad9: resvg 24%/57%, simple-icons 18%/44%, feather 31%/50%.
+  Failure analysis and wave plan in `FEATURES.md`.
+- **T15b harness flags**: `--fast` (100/64 px, all cores), `--dir`, `--out`,
+  `--failing-from`, `--compare` (same width only!), `--has-arcs`.
+- **T17 tiny-skia cubic subdivision** (`Geom.lean` flatten): simple-icons via
+  usvg 42.5% → 86.5%; ten corpus files up; 15_spiral −0.03 (quadratic
+  elevation, fixed by T30). `ellipsePath` confirmed identical to usvg's.
+- **T16 elliptical arcs** (`Svg.lean` `A`/`a` → 90° κ cubics, fixed point, no
+  atan2): simple-icons arc files 0.2% → 24.8%, feather arc files 0 → 38.4%,
+  non-arc files unchanged; new `tests/svg/22_arcs.svg`. Ceiling for arc files
+  is flattening (usvg route reaches 31.6%), not the conversion.
+- **T24a** 148 CSS colours (checked vs Pillow, `tests/check_colors.py`),
+  `color`/`currentColor`, 100×100 default size. Corpus byte-identical.
+- Corpus now **18/22** at the strict bar. Failing: 12_badge, 14_flower,
+  15_spiral, 16_stress (all < 1 pt short, curve/stroke antialiasing).
+
+Design decisions today: fonts ship embedded (OFL Noto Sans subsets) and the
+TrueType parser is a pure total function `bytes → outlines`, so the effect
+layer and theorems do not change; reading system fonts is a PLAN M11 TODO
+(a future `Op.readFont` under one fixed directory). Fan-out rule: Sonnet
+agents for scoped, mechanically checked tasks; at most 2 Opus at once; Opus
+agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
+(usage) and a break once the in-flight work lands.**
+
+## In flight at the pause (worktrees under `.worktrees/`, branch per task)
+
+| task | model | branch | what | merge check |
+|---|---|---|---|---|
+| T23 dashes | Opus | `t23-dashes` (base c0d4fe4) | `Geom.dashPoly`, one call in `Render.drawShape` | painting/stroke-dasharray, dashoffset slices; run_tests no regression |
+| T25 fonts | Sonnet | `t25-fonts` | `MicroSvg/Font.lean` pure total TrueType parser, embedded Noto Sans subsets, `fontdump` exe, fontTools oracle + fuzz | 0 mismatches vs fontTools, fuzz clean, corpus byte-identical |
+| T27 switch | Sonnet | `t27-switch` | `<switch>`, `systemLanguage`, required* in `interpret` | structure/switch ≥10/13, systemLanguage ≥8/10 |
+| T29 CSS | Sonnet | `t29-css` | `MicroSvg/Css.lean` (simplecss subset), `<style>` integration in `interpret`, `tests/CssTests.lean` `#guard`s | structure/style ≥13/16 |
+| T30 quadratics | Sonnet | `t30-quads` | `PathCmd.quadTo` + tiny-skia `QuadraticEdge` rule; `Q`/`T` no longer elevated | no file drops > 0.02; usvg-route medians not lower |
+| T24b | Sonnet | `t24b-transform-origin` | `transform-origin`, percent root `width`/`height` | structure/transform-origin ≥80%, structure/svg up |
+
+If a report arrives after the break, merge with:
+```bash
+git merge --no-edit <branch> && lake build && \
+  python3 tests/run_tests.py | tail -3 && \
+  python3 tests/run_tiles.py | tail -1 && \
+  python3 tests/run_adversarial.py | tail -1
+```
+T27 and T29 both edit `interpret`; expect a small conflict on the second
+merge (resolve by keeping both pre-passes). Unfinished agents: resume from
+the task file and worktree with the same model.
+
+## Next steps after the break (no new Opus until usage allows)
+
+1. Merge whatever landed; refresh corpora numbers with
+   `python3 tests/run_corpora.py --fast --out tests/out/corpora-fast`.
+2. Wave 2 (Opus, one at a time): **T19** defs table + `use`/`symbol`
+   (`interpret`; after T27/T29), then **T22** group opacity as a layer.
+3. Sonnet-eligible leftovers: paint-order and crispEdges (after T23), nested
+   `<svg>`/`overflow` (after T19), quadratic outlines from `Font.lean`
+   (after T30), `structure/svg/no-size` bbox refit.
+4. Wave 3: T18 gradients (needs T19), T20 clipPath, T21 mask.
+5. Fonts: T-B text layout and rendering of `text`/`tspan` using `Font.lean`.
+6. Theorems: M3 PNG size bound, M3b no-clobber/work bound; M7 lean-zip; M10 Aeneas.
+
+## Earlier today (kept for continuity)
+
+- T6 sorted edge walk, T11 seamless stroker, T12 hairlines, T14 parallel
+  bands (`--threads N`, byte-identical), T13 playground (port 8766 via
+  `python3 playground/server.py --port 8766`), T8 output path, T10 tile
+  culling, T1 AA port, T2 blend, T4/T4m viewport tiles, T5 opacity, T7 fast
+  path, T3 size benchmark, harness design (`harness/README.md`, M10 deferred).
 - Conventions: `tasks/README.md` rules 8 (multiline shell) and 9 (short
-  verification loop). PLAN additions: M3b stronger effect theorems
-  (no-clobber, size bound, work bound, max input), M6b parallel bands.
-- Remaining fidelity gap, per reports: curve flattening (Skia-style cubic
-  subdivision; circles inscribe an ~83-gon), input rounding (truncate vs
-  round at 1/256 px), group opacity as a real layer.
-
-## Update 2026-09-20 afternoon: T8 and T10 merged (main b0a298d)
-
-- **T10 tile culling** merged: byte-identical (80 CLI renders, 160 viewport
-  renders, 1 960 stitched tiles, 2 184 synthetic edge cases). 64×64 tile of
-  16_stress at 1600 px: 145 → 40 ms; 1×1 tile 137 → 29 ms (the rest is parse).
-- **T8 output path** merged: byte-identical (40 renders). Empty 3200² canvas
-  fixed cost 600 → 135 ms (4.4×): Adler-32 tuple boxing was 369 ms of it.
-  01_triangle at 800 px: 100 → 67 ms.
-- After each merge: build clean, 15/20, tiles 20/20, adversarial 37/37, and a
-  2000 px spot render sha256-identical to the pre-merge binary.
-- **T6 still unmerged on `t6-raster-walk`** (worktree `.worktrees/T6`):
-  1.5–1.8× faster rasterizer, −3/−7 within-8 px on two stroke files. Decision
-  pending (merge as-is, or fix stroker seams first).
-- Conventions added to `tasks/README.md`: multiline shell commands (rule 8),
-  short verification loop (rule 9).
-
-## State of `main` at the overnight pause (commit 5db8f14, all local, nothing pushed)
-
-Builds clean. Harnesses on this binary:
-- `tests/run_tests.py`: **15/20** at the strict bar (≥ 99% of pixels within 8
-  levels of resvg); all 20 files ≥ 99.6% within 32. Failing five: 12_badge,
-  14_flower, 15_spiral, 16_stress, 17_koch (hairline strokes, coarse curve
-  flattening, stroker seams — see T1's report).
-- `tests/run_tiles.py`: **20/20** quadrant tiles byte-identical to full render.
-- `tests/run_adversarial.py`: **37/37** clean.
-- Theorems in `MicroSvg/Effect.lean` unchanged; `#print axioms` = `propext`.
-
-Merged tonight (each verified before merge): T1 tiny-skia anti-aliasing port,
-T2 blend arithmetic, T4/T4m viewport tiles (`--viewport X Y W H`), T5 opacity
-quantisation, T7 opaque-coverage fast path (~1.4×). Also added: T3 size
-benchmark (`tests/run_sizes.py`), playground (`playground/`), harness design
-(`harness/README.md`, deferred M10).
-
-## Paused on branches (worktrees still in place under `.worktrees/`)
-
-| branch | worktree | state | decision needed |
-|---|---|---|---|
-| `t6-raster-walk` | T6 | **complete**, 1.5× (natural) / 1.8× (1600 px) faster, adversarial clean | loses 3 and 7 within-8 pixels on 15_spiral and 16_stress (0.008 pts), gains 21 on 19_sierpinski; cause is seams in *our* stroker. Merge as-is, or fix the stroker seams first (then it is strictly better). |
-| `t8-output` | T8 | code written (Png.lean, Canvas.toRgbaBytes/new); byte-identity and timing verification **not finished** | resume the agent with `tasks/T8-perf-output-path.md`: finish sha256 check + timings, then merge. |
-| `t10-cull` | T10 | **partial**: bbox helper in progress, not built | resume from `tasks/T10-tile-culling.md`. |
-
-Resume any of them with an Opus agent pointed at its task file and worktree.
-Note T8/T10 branched before T7 merged; expect a trivial conflict in
-`Canvas.lean` for T8 (resolve like T7m did: keep main's `fillMask`).
-
-## Measured performance (before T6/T8/T10)
-
-~356 ms/Mpx mean, linear in pixels; ≈35× resvg at 3200 px (T3). 512×512 tile
-at 4000 px wide: 600–960 ms, mostly fixed cost of flattening every shape
-(T4m) → T10 culling + T8 output path are the levers for interactive tiles.
-
-## Next steps (in order)
-
-1. Decide T6; finish T8; finish T10; merge; re-run `make test tiles adversarial`.
-2. Stroker seams (single outline per subpath, like kurbo) — fixes T6's
-   regression and part of the five failing files.
-3. Hairline strokes (device width ≤ 1 px → tiny-skia's `hairline_aa`) and finer
-   curve flattening (Skia's cubic subdivision) — the rest of the failing five.
-4. M3 output-size theorem; usvg route + resvg test suite; lean-zip; M10 Aeneas.
+  verification loop); PLAN M3b stronger effect theorems, M6b parallel bands,
+  M11 text/fonts.
 
 ## How to run
 
 ```bash
 lake build && make test && make tiles && make adversarial
-python3 playground/server.py   # http://127.0.0.1:8765
+python3 tests/run_corpora.py --fast --limit 50   # quick corpora sample
+python3 playground/server.py --port 8766         # http://127.0.0.1:8766
 ```
