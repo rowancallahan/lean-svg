@@ -180,6 +180,79 @@ def flatten (ctm : Mat) (cmds : Array PathCmd) : Array Poly := Id.run do
   if cur.size ≥ 1 then polys := polys.push ⟨cur, false⟩
   return polys
 
+/-! ## Bounding boxes
+
+Used to skip a shape whose pixels cannot land on the canvas.  A box is closed:
+it contains its own bounds. -/
+
+structure Box where
+  x0 : Fx
+  y0 : Fx
+  x1 : Fx
+  y1 : Fx
+deriving Repr, Inhabited
+
+namespace Box
+
+/-- Grow a box (or start one) so that it contains `p`. -/
+def cover (b : Option Box) (p : Pt) : Option Box :=
+  match b with
+  | none => some ⟨p.x, p.y, p.x, p.y⟩
+  | some b => some ⟨Fx.min b.x0 p.x, Fx.min b.y0 p.y, Fx.max b.x1 p.x, Fx.max b.y1 p.y⟩
+
+/-- Grow a box by `dx` horizontally and `dy` vertically. -/
+def inflate (b : Box) (dx dy : Fx) : Box :=
+  ⟨Fx.clamp (b.x0 - dx), Fx.clamp (b.y0 - dy), Fx.clamp (b.x1 + dx), Fx.clamp (b.y1 + dy)⟩
+
+/-- Does the box meet the half-open rectangle `[0, w) × [0, h)`? -/
+def meets (b : Box) (w h : Fx) : Bool :=
+  b.x1 ≥ 0 && b.y1 ≥ 0 && b.x0 < w && b.y0 < h
+
+end Box
+
+/-- Box of a path's control points in device space: every `Pt` that appears in
+`cmds` (both cubic control points as well as the endpoint), plus the implicit
+current point that `flatten` starts a subpath from, all mapped through `ctm`.
+
+The flattened path lies inside this box up to rounding.  A cubic lies inside the
+convex hull of its four control points, and an affine map takes that hull to the
+hull of the four mapped points, which this box contains; `flatten` emits hull
+points floored to the `Fx` grid (`cubicAt` divides with `Int.ediv`), and
+`Mat.apply` floors again, so a caller must allow one `Fx` unit of user-space
+slack (worth `(|a| + |c|)/65536` in device x) and one of device slack per side.
+
+The state machine mirrors `flatten`'s exactly, so that the implicit start point
+of a path that begins with a `lineTo` is accounted for. -/
+def ctrlBox (ctm : Mat) (cmds : Array PathCmd) : Option Box := Id.run do
+  let mut b : Option Box := none
+  -- `empty` tracks `flatten`'s `cur.isEmpty`; `pt`/`start` its current points.
+  let mut empty := true
+  let mut pt : Pt := ⟨0, 0⟩
+  let mut start : Pt := ⟨0, 0⟩
+  for c in cmds do
+    match c with
+    | .moveTo p =>
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      start := p
+      empty := false
+    | .lineTo p =>
+      if empty then b := Box.cover b (ctm.apply pt)
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      empty := false
+    | .cubicTo c1 c2 p =>
+      if empty then b := Box.cover b (ctm.apply pt)
+      b := Box.cover b (ctm.apply c1)
+      b := Box.cover b (ctm.apply c2)
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      empty := false
+    | .close =>
+      pt := start
+      empty := true
+  return b
+
 /-! ## Stroking
 
 A stroke is converted to a set of polygons (one quad per segment, one wedge per
@@ -201,6 +274,27 @@ structure StrokeStyle where
   /-- Miter limit as `Fx` (SVG default 4 → 1024). -/
   miterLimit : Fx
 deriving Repr, Inhabited
+
+/-- How far, in the path's own coordinate space, `strokePoly` can put a point
+away from the polyline it strokes, along either axis.
+
+`hw = width/2` is the half width `strokePoly` uses.  Segment quads, round caps
+and round joins (`circlePoly`) and bevel joins stay within `hw`; a square cap
+adds a half width along the segment *and* across it, so `2·hw` covers it; a
+miter tip is at `hw · miterRatio` and `emitJoin` only emits one when
+`miterRatio ≤ miterLimit/256`.  So `hw · max(2, ⌈miterLimit/256⌉)` bounds the
+exact constructions.
+
+`normalOf`, `dirOf`, `circlePoly` and the miter tip each divide with
+`Int.ediv`, which can lower a component by one `Fx` unit, and a square cap
+stacks two such offsets; using `hw + 2` in place of `hw` and adding a final
+`2` absorbs every one of those floors. -/
+def strokeReach (st : StrokeStyle) : Fx :=
+  let hw := Int.ediv st.width 2
+  if hw ≤ 0 then 0
+  else
+    let ml := -(Int.ediv (-st.miterLimit) 256)
+    Fx.clamp ((hw + 2) * (if ml < 2 then 2 else ml) + 2)
 
 /-- Twice the signed area (shoelace). -/
 def signedArea2 (poly : Array Pt) : Int := Id.run do
