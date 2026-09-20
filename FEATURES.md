@@ -26,8 +26,8 @@ routes. What is missing is *features*, plus one numeric term.
 | F5 | **clipPath** (then mask) | masking 9% / 23% | ~90 | T20 / T21 |
 | F6 | **Group opacity as a layer**, `mix-blend-mode`, `isolation` | painting/opacity 44–56%, mix-blend 0% | ~30 | T22 |
 | F7 | **`stroke-dasharray` / `dashoffset`** | 29% / 0% | 23 | T23 |
-| F8 | Small parse/semantics bundle: default size when no `width`/`height`/`viewBox` (resvg: 100×100), `transform-origin`, `paint-order`, `shape-rendering="crispEdges"` (non-AA rasterize), `switch`/`systemLanguage`, nested `<svg>` viewport, `overflow`, `<style>` with type/class/id selectors, all 147 named colours, `color`/`currentColor`, percent lengths on root | dozens of 0–50% directories | T24 |
-| F9 | Harness: `--failing-from`, `--dir`, `--fast` sizes | needed for fast iteration on failures | T15b |
+| F8 | [Sonnet-eligible, split into checkable pieces] Small parse/semantics bundle: default size when no `width`/`height`/`viewBox` (resvg: 100×100), `transform-origin`, `paint-order`, `shape-rendering="crispEdges"` (non-AA rasterize), `switch`/`systemLanguage`, nested `<svg>` viewport, `overflow`, `<style>` with type/class/id selectors, all 147 named colours, `color`/`currentColor`, percent lengths on root | dozens of 0–50% directories | T24 |
+| F9 | [Sonnet-eligible] Harness: `--failing-from`, `--dir`, `--fast` sizes | needed for fast iteration on failures | T15b |
 
 **Not doing (by design or scope):** text and fonts (use the usvg route),
 `image` (no decoders in the trusted base), filters (397 files; a small
