@@ -12,13 +12,17 @@ open MicroSvg
 
 def usage : String :=
   "usage: microsvg <input.svg> <output.png> [--width N] [--zoom Z] [--background COLOR]\n" ++
-  "                [--viewport X Y W H]\n" ++
+  "                [--viewport X Y W H] [--threads N]\n" ++
   "  --viewport X Y W H  render only the W x H window whose top-left corner is\n" ++
   "                      at (X, Y) in the zoomed image; X and Y are integers and\n" ++
   "                      may be negative.  The zoom is still whatever --width or\n" ++
   "                      --zoom asks for, so a viewer can tile a large virtual\n" ++
   "                      image; the size limits apply to the tile.  Zoom factors\n" ++
-  "                      above 4096x are clamped."
+  "                      above 4096x are clamped.\n" ++
+  "  --threads N         render the image in up to N horizontal bands in\n" ++
+  "                      parallel (0 or 1 = serial, the default).  The output is\n" ++
+  "                      byte-identical whatever N is.  Set LEAN_NUM_THREADS to\n" ++
+  "                      size the runtime's worker pool."
 
 /-- A decimal integer argument; a leading `-` is allowed. -/
 def parseIntArg (s : String) : Option Int :=
@@ -46,6 +50,10 @@ def parseArgs : List String → Option (String × String × Options) → Option 
         parseArgs rest (some (i, o, { opts with viewport := some (vx, vy, vw, vh) }))
       else none
     | _, _, _, _ => none
+  | "--threads" :: n :: rest, some (i, o, opts) =>
+    match n.toNat? with
+    | some t => parseArgs rest (some (i, o, { opts with threads := t }))
+    | none => none
   | "--background" :: c :: rest, some (i, o, opts) =>
     match Svg.parsePaint c.toUTF8 with
     | some (.solid col) => parseArgs rest (some (i, o, { opts with background := some col }))

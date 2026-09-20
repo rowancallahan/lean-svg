@@ -25,6 +25,12 @@ structure Options where
   transparent (or the background colour).  The zoom is still the one `width`
   or `zoom` asks for, so the caller can tile a large virtual image. -/
   viewport : Option (Int × Int × Nat × Nat) := none
+  /-- How many horizontal bands of the output to render in parallel.  `0` or `1`
+  is the serial path, unchanged and the reference.  Higher values split the
+  output into at most that many bands of consecutive rows, render each as a
+  `Task`, and concatenate the rows.  A band *is* a `viewport` tile (§3.8), so
+  the output is byte-identical whatever this is set to. -/
+  threads : Nat := 0
 deriving Inhabited
 
 /-- Largest output edge, in pixels. -/
@@ -187,17 +193,92 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
       | none => cv
   | .none => cv
 
-end Render
+/-- An interpreted document and one set of options to straight-alpha RGBA bytes,
+together with the canvas size they were produced at.
 
-/-- Render SVG bytes to PNG bytes, or fail with a message. -/
-def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
-  let events ← Xml.parse input
-  let doc ← Svg.interpret events
-  let (w, h, rootMat, clip) ← Render.canvasSetup doc.root opts
+This is the whole of the old body of `render` between `Svg.interpret` and
+`Png.encode`, and it is the only place a canvas is built: the serial path calls
+it once with the user's options, the parallel path calls it once per band with
+the band's `viewport`.  Everything a band does — the size checks, the culling in
+`drawShape`, `clipMask` — is therefore literally the tile path of §3.8. -/
+def renderRgba (opts : Options) (doc : Svg.Doc) :
+    Except String (Nat × Nat × ByteArray) := do
+  let (w, h, rootMat, clip) ← canvasSetup doc.root opts
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
   if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
-  let canvas := doc.shapes.foldl (Render.drawShape rootMat clip) (Canvas.new w h opts.background)
-  return Png.encode w h canvas.toRgbaBytes
+  let canvas := doc.shapes.foldl (drawShape rootMat clip) (Canvas.new w h opts.background)
+  return (w, h, canvas.toRgbaBytes)
+
+/-- How many bands to cut `h` output rows into for `threads` threads.
+
+`1` means "render serially", which is what happens unless the caller asked for
+at least two threads and the canvas is tall enough to be worth splitting: at
+least `2·threads` rows, and never a band shorter than 32 rows, so the per-band
+overhead (one `Canvas`, one culling pass over the shapes) stays small next to
+the work a band does. -/
+def bandCount (threads h : Nat) : Nat :=
+  if threads < 2 || h < 2 * threads then 1
+  else Nat.max 1 (Nat.min threads (h / 32))
+
+/-- Split a `w × h` output into `k` bands of rows, render them in parallel and
+concatenate their RGBA bytes.
+
+Band `i` covers output rows `[y0, y1)` and is rendered as the tile
+`viewport := (vx, vy + y0, w, y1 - y0)`, where `(vx, vy)` is the user's viewport
+origin (or `(0, 0)`).  `canvasSetup` composes `translate(-vx, -(vy + y0))` after
+the zoom, so a band's device geometry is the full render's shifted up by a whole
+number of pixels, which is exactly the shift the rasterizer is invariant under
+(§3.5) — the band's pixels are the full render's rows `[y0, y1)`, bit for bit.
+The document window `clipMask` restricts to is shifted by the same `y0`, so a
+band of a tile that hangs off the document clips like that part of the tile.
+
+`Task.spawn`/`Task.get` are pure (`Task.get (Task.spawn f) = f ()` holds by
+`rfl`), so this is a pure function and nothing about `render`'s type, its
+totality or `Effect.lean` changes.  Bands are collected in order and the first
+error wins, so the message does not depend on which task finished first. -/
+def renderBands (opts : Options) (doc : Svg.Doc) (w h k : Nat) :
+    Except String ByteArray := do
+  let (vx, vy) : Int × Int := match opts.viewport with
+    | some (x, y, _, _) => (x, y)
+    | none => (0, 0)
+  let bh := h / k
+  let tasks : Array (Task (Except String (Nat × Nat × ByteArray))) := Id.run do
+    let mut ts : Array (Task (Except String (Nat × Nat × ByteArray))) :=
+      Array.emptyWithCapacity k
+    for i in [0:k] do
+      let y0 := i * bh
+      let y1 := if i + 1 == k then h else y0 + bh
+      let bandOpts : Options :=
+        { opts with viewport := some (vx, vy + (y0 : Int), w, y1 - y0), threads := 0 }
+      ts := ts.push (Task.spawn fun _ => renderRgba bandOpts doc)
+    return ts
+  let mut out := ByteArray.emptyWithCapacity (w * h * 4)
+  for t in tasks do
+    match t.get with
+    | .error e => throw e
+    | .ok (_, _, b) => out := out ++ b
+  return out
+
+end Render
+
+/-- Render SVG bytes to PNG bytes, or fail with a message.
+
+With `opts.threads ≥ 2` the canvas is cut into bands of rows that are rendered
+in parallel and concatenated; the bytes are the same either way (see
+`Render.renderBands`).  The PNG encoding stays serial: Adler-32 is sequential. -/
+def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
+  let events ← Xml.parse input
+  let doc ← Svg.interpret events
+  let (w, h, _, _) ← Render.canvasSetup doc.root opts
+  if w == 0 || h == 0 then throw "empty canvas"
+  if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
+  if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
+  let k := Render.bandCount opts.threads h
+  let rgba ← if k < 2 then
+      (·.2.2) <$> Render.renderRgba opts doc
+    else
+      Render.renderBands opts doc w h k
+  return Png.encode w h rgba
 
 end MicroSvg
