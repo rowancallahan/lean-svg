@@ -152,6 +152,22 @@ def shapeOnCanvas (ctm : Mat) (s : Shape) (W H : Nat) : Bool :=
   let dy := Fx.clamp (Int.ediv ((reach + 4) * ay) 65536 + 258)
   ctrlBoxMeets ctm s.cmds (-dx) (-dy) ((W : Int) * 256 + dx) ((H : Int) * 256 + dy)
 
+/-- `painter.rs::treat_as_hairline`.  The translation is dropped from the CTM,
+the two vectors `(w, 0)` and `(0, w)` are mapped through what is left, and each
+is measured with the octagonal norm `max(|x|, |y|) + min(|x|, |y|)/2`.  When
+*both* come out at `≤ 1` device pixel the stroke is a hairline and the coverage
+is their average; otherwise the stroke is outlined and filled as usual.
+
+Returned in 16.16, which is `w`'s own precision (`Fx`) times 256. -/
+def hairCoverage (ctm : Mat) (w : Fx) : Option Int :=
+  let fastLen := fun (x y : Int) =>
+    let a := Fx.abs x
+    let b := Fx.abs y
+    if a < b then b + Int.ediv a 2 else a + Int.ediv b 2
+  let len0 := fastLen (Int.ediv (ctm.a * w) 256) (Int.ediv (ctm.b * w) 256)
+  let len1 := fastLen (Int.ediv (ctm.c * w) 256) (Int.ediv (ctm.d * w) 256)
+  if len0 ≤ 65536 && len1 ≤ 65536 then some (Int.ediv (len0 + len1) 2) else none
+
 /-- Draw one shape (fill, then stroke) onto the canvas.
 
 A shape that `shapeOnCanvas` rules out is skipped before `flatten`, which is
@@ -179,12 +195,24 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
   | .solid c =>
     if st.strokeWidth ≤ 0 then cv
     else
-      let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
-      let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
-      let dev := outline.map fun p => p.map ctm.apply
-      match (Raster.rasterize W H dev false).bind (clipMask clip) with
-      | some m => cv.fillMask m c (opacityToU8 c.a st.strokeOpacity st.opacity)
-      | none => cv
+      let a8 := opacityToU8 c.a st.strokeOpacity st.opacity
+      match hairCoverage ctm st.strokeWidth with
+      | some cov16 =>
+        -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
+        -- the coverage rather than the paint alpha (see `Raster.hairline`).
+        let scale := Int.ediv cov16 256
+        let covScale := (Int.ediv (255 * scale) 256).toNat
+        let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
+        match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
+        | some m => cv.fillMask m c a8
+        | none => cv
+      | none =>
+        let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+        let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
+        let dev := outline.map fun p => p.map ctm.apply
+        match (Raster.rasterize W H dev false).bind (clipMask clip) with
+        | some m => cv.fillMask m c a8
+        | none => cv
   | .none => cv
 
 end Render
