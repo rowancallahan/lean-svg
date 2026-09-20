@@ -131,17 +131,31 @@ def fillMask (cv : Canvas) (m : Raster.Mask) (c : Rgba) (opacity256 : Nat) : Can
   return ⟨w, h, px⟩
 
 /-- Straight-alpha RGBA bytes, row-major, 4 bytes per pixel.  This is what
-`Pixmap::encode_png` writes: it demultiplies every pixel first. -/
+`Pixmap::encode_png` writes: it demultiplies every pixel first.
+
+The two extreme alphas are special-cased, which covers almost every pixel of
+almost every render and is bit-for-bit the same as calling `unpremul`:
+
+* `a = 0` is `unpremul`'s own `0` case, and the three colour channels of a
+  premultiplied transparent pixel are 0 anyway;
+* `a = 255` leaves each channel alone, because for `c ≤ 255`
+  `unpremul c 255 = min 255 ((c * 510 + 255) / 510) = c` — the remainder 255 is
+  below the divisor 510, so the floor is exactly `c`.
+
+The general branch also no longer builds a closure over `a` per pixel. -/
 def toRgbaBytes (cv : Canvas) : ByteArray := Id.run do
   let mut out := ByteArray.emptyWithCapacity (cv.w * cv.h * 4)
   for v in cv.px do
     let a := v &&& 255
     if a == 0 then
       out := (((out.push 0).push 0).push 0).push 0
+    else if a == 255 then
+      out := (((out.push ((v >>> 24) &&& 255).toUInt8).push ((v >>> 16) &&& 255).toUInt8).push
+        ((v >>> 8) &&& 255).toUInt8).push 255
     else
-      let un (c : Nat) : UInt8 := (unpremul c a).toUInt8
-      out := (((out.push (un ((v >>> 24) &&& 255))).push (un ((v >>> 16) &&& 255))).push
-        (un ((v >>> 8) &&& 255))).push a.toUInt8
+      out := (((out.push (unpremul ((v >>> 24) &&& 255) a).toUInt8).push
+        (unpremul ((v >>> 16) &&& 255) a).toUInt8).push
+        (unpremul ((v >>> 8) &&& 255) a).toUInt8).push a.toUInt8
   return out
 
 end Canvas
