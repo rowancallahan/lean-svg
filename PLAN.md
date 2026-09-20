@@ -148,6 +148,44 @@ by input size or a constant, every parsed number clamped, indices via
   (4) `Canvas.px` as `Array UInt32`? No: `UInt32` boxes in arrays; keep `Nat`.
 - Target: within 5× of resvg on the corpus at 2000 px. Report, don't guess.
 
+## M6b — Parallel rendering with `Task`, same theorems  [design done → Opus]
+
+Requested 2026-09-20. Lean's `Task.spawn : (Unit → α) → Task α` and
+`Task.get : Task α → α` are *pure*: `Task` is a structure holding its result
+and `Task.get (Task.spawn f) = f ()` is definitional. So parallelism lives
+inside `render` with no change to its type and no change to `Effect.lean`;
+every effect theorem carries over untouched, and totality is unaffected
+(each task body is one of our existing total functions).
+
+Design (decided):
+1. **Horizontal bands.** Split the canvas into `k` bands of rows
+   (`k = min(cores, H / 64)`, never more than 64). For each band, cull shapes
+   against the band (T10's test with the band rectangle), render the band as
+   its own `Canvas` with the band's translate composed into the root matrix
+   (exactly the viewport mechanism of T4, so band borders are byte-identical
+   by the same argument), then concatenate the bands' RGBA rows. Blending
+   order per pixel is unchanged, so the output is **byte-identical** to the
+   serial render; `tests/run_tiles.py`'s stitching check is the test.
+2. Wrap each band in `Task.spawn` (priority default), collect with
+   `Task.get` in order. Provide `Options.threads : Nat` (0 = serial) so the
+   serial path remains available and is the reference.
+3. Theorem: `renderPar opts inp = render opts inp` — by unfolding the band
+   composition and the `Task.get`/`Task.spawn` identity; if the band
+   composition is stated as "concatenate rows of independent band renders",
+   the proof reduces to the tile-identity argument (M4-level effort; at
+   minimum state it and prove the `Task` layer, leaving band-identity as a
+   tested claim).
+4. PNG output stays serial (Adler-32 is sequential); T8 made it cheap.
+   Later: per-band Adler combination is possible (Adler-32 is combinable)
+   if it shows up.
+5. Runtime: Lean executables run tasks on a thread pool sized to the
+   machine; check `LEAN_NUM_THREADS` behaviour and report scaling on
+   `16_stress_2000` at 1600 px for 1, 2, 4, 8 threads. Memory: each band
+   canvas is `4·W·rows`, total unchanged.
+
+Not started. Do after T11/T12 land to avoid touching `Render.drawShape`
+concurrently.
+
 ## M7 — Verified DEFLATE via lean-zip  [Opus after checking the API]
 
 - Add `kim-em/lean-zip` as a Lake dependency; replace `Png.zlibStored` with
