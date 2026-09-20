@@ -49,15 +49,31 @@ def scale16 (a : Fx) (s : Int) : Fx := clamp (Int.ediv (a * s) 65536)
 
 end Fx
 
+/-- `round (mant * 10 ^ exp10 * scale)`, rounding halves away from zero and
+saturating at `cap`.  Used to land a parsed decimal on whatever fixed-point
+grid the caller wants: 1/256 for coordinates, 1/10^18 for opacity.
+
+Because the grid is exact integer arithmetic, a decimal that sits exactly on a
+half-way point of the target grid is detected as such and rounded up; no
+intermediate value is ever lost.  Exponents past ±60 saturate, which is what
+bounds the cost of `10 ^ exp10` for adversarial inputs. -/
+def scaleDecimal (mant : Nat) (exp10 : Int) (scale cap : Nat) : Nat :=
+  if mant == 0 then 0
+  else if exp10 > 60 then cap
+  else if exp10 < -60 then 0
+  else if exp10 ≥ 0 then Nat.min cap (mant * scale * 10 ^ exp10.toNat)
+  else Nat.min cap ((mant * scale * 2 / 10 ^ (-exp10).toNat + 1) / 2)
+
 open Bytes in
-/-- Parse a decimal number in SVG/CSS syntax starting at byte `i`.
-Returns the value and the index just past the number.
+/-- Lex a decimal number in SVG/CSS syntax starting at byte `i`.  Returns the
+sign, the mantissa, the base-10 exponent and the index just past the number —
+i.e. the *exact* value `±mant * 10 ^ exp10`, with no grid chosen yet.
 
 Cost bounds (all deliberate): only the first 18 significant digits are kept,
-further digits only shift the exponent; exponents saturate; the result is
-clamped to `Fx.maxVal`.  So `1e999999999` and a megabyte of digits both parse
-in linear time and produce a bounded value. -/
-def parseNumber (bs : ByteArray) (i : Nat) : Option (Fx × Nat) := Id.run do
+further digits only shift the exponent; exponents saturate.  So `1e999999999`
+and a megabyte of digits both lex in linear time and produce a bounded
+mantissa. -/
+def parseDecimal (bs : ByteArray) (i : Nat) : Option (Bool × Nat × Int × Nat) := Id.run do
   let mut j := i
   let mut neg := false
   let c0 := at' bs j
@@ -117,15 +133,16 @@ def parseNumber (bs : ByteArray) (i : Nat) : Option (Fx × Nat) := Id.run do
         k := k + 1
       exp10 := if eneg then exp10 - e else exp10 + e
       j := k
-  -- assemble
-  let v : Nat :=
-    if mant == 0 then 0
-    else if exp10 > 60 then Fx.maxVal.toNat
-    else if exp10 < -60 then 0
-    else if exp10 ≥ 0 then mant * 256 * 10 ^ exp10.toNat
-    else (mant * 256 * 2 / 10 ^ (-exp10).toNat + 1) / 2
-  let r : Fx := Fx.clamp (Int.ofNat v)
-  return some (if neg then -r else r, j)
+  return some (neg, mant, exp10, j)
+
+/-- Parse a decimal number in SVG/CSS syntax starting at byte `i`, on the `Fx`
+grid of 1/256 px.  Returns the value and the index just past the number. -/
+def parseNumber (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
+  match parseDecimal bs i with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    let r : Fx := Fx.clamp (Int.ofNat (scaleDecimal mant exp10 256 Fx.maxVal.toNat))
+    some (if neg then -r else r, j)
 
 open Bytes in
 /-- Parse a length: a number with an optional unit.  Absolute units are converted

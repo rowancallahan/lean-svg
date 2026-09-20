@@ -96,18 +96,17 @@ are the premultiplied, coverage-scaled source channels. -/
        (Nat.min 255 (sb + div255 (db * inv)))
        (Nat.min 255 (sa + div255 (da * inv)))
 
-/-- Fill the mask with a solid colour.  `opacity256` is an extra multiplier in
-`[0, 256]` holding the fill/stroke opacity times the inherited group opacity.
+/-- Fill the mask with a solid colour.  `alpha8` is the final paint alpha in
+`[0, 255]`: the colour's own alpha, the fill/stroke opacity and the inherited
+group opacity already collapsed into one `u8` by `Svg.opacityToU8`, exactly as
+resvg does with `set_color_rgba8(r, g, b, fill.opacity().to_u8())`.
 
-resvg builds the paint as `set_color_rgba8(r, g, b, fill.opacity().to_u8())`,
-so the opacity is collapsed into a single 0..255 alpha and the colour is
-premultiplied by it *before* the rasteriser's coverage is applied.  We do the
-same: quantise to `a8`, premultiply once, then scale by the 0..255 coverage. -/
-def fillMask (cv : Canvas) (m : Raster.Mask) (c : Rgba) (opacity256 : Nat) : Canvas := Id.run do
+The colour is premultiplied by it *before* the rasteriser's coverage is
+applied, so `c.a` plays no part below — only `alpha8` does. -/
+def fillMask (cv : Canvas) (m : Raster.Mask) (c : Rgba) (alpha8 : Nat) : Canvas := Id.run do
   let w := cv.w
   let h := cv.h
-  -- `opacity256` is 256 = fully opaque; resvg's paint alpha is 255 = fully opaque.
-  let a8 := Nat.min 255 ((c.a * opacity256 + 128) >>> 8)
+  let a8 := Nat.min 255 alpha8
   if a8 == 0 then return cv
   let sr := premul c.r a8
   let sg := premul c.g a8

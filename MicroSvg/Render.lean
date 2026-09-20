@@ -75,7 +75,7 @@ def drawShape (rootMat : Mat) (cv : Canvas) (s : Shape) : Canvas :=
     | .solid c =>
       let dev := polys.map fun p => p.pts.map ctm.apply
       match Raster.rasterize W H dev st.evenOdd with
-      | some m => cv.fillMask m c (st.fillOpacity * st.opacity / 256)
+      | some m => cv.fillMask m c (opacityToU8 c.a st.fillOpacity st.opacity)
       | none => cv
     | .none => cv
   match st.stroke with
@@ -86,7 +86,7 @@ def drawShape (rootMat : Mat) (cv : Canvas) (s : Shape) : Canvas :=
       let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
       let dev := outline.map fun p => p.map ctm.apply
       match Raster.rasterize W H dev false with
-      | some m => cv.fillMask m c (st.strokeOpacity * st.opacity / 256)
+      | some m => cv.fillMask m c (opacityToU8 c.a st.strokeOpacity st.opacity)
       | none => cv
   | .none => cv
 
