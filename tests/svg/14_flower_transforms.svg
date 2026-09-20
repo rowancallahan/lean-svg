@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280">
+  <rect width="280" height="280" fill="#0b132b"/>
+  <g transform="translate(140 140)">
+    <g fill="#ff6b6b" fill-opacity="0.55" stroke="#ffe66d" stroke-width="1.5">
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(45)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(90)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(135)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(180)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(225)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(270)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(315)"/>
+    </g>
+    <g fill="#4ecdc4" fill-opacity="0.6" transform="rotate(22.5) scale(0.6)">
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(45)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(90)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(135)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(180)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(225)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(270)"/>
+      <path d="M 0 0 C 30 -40 60 -40 80 0 C 60 40 30 40 0 0 Z" transform="rotate(315)"/>
+    </g>
+    <circle r="14" fill="#ffe66d"/>
+    <circle r="120" fill="none" stroke="#4ecdc4" stroke-width="2" stroke-opacity="0.5" transform="skewX(15) scale(1 0.9)"/>
+    <g stroke="#ffe66d" stroke-width="4" stroke-linecap="square" fill="none" transform="matrix(0.8 0.2 -0.2 0.8 0 0)">
+      <polyline points="-110,110 -80,90 -100,60 -70,50"/>
+      <polyline points="110,-110 80,-90 100,-60 70,-50"/>
+    </g>
+  </g>
+</svg>

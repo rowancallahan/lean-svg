@@ -1,0 +1,13 @@
+name = "microsvg"
+version = "0.1.0"
+defaultTargets = ["microsvg"]
+
+# No dependencies on purpose: the trusted computing base is Lean core only.
+# (No mathlib, no FFI, no C libraries.)
+
+[[lean_lib]]
+name = "MicroSvg"
+
+[[lean_exe]]
+name = "microsvg"
+root = "Main"

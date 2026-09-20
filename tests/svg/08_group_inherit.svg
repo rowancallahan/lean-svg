@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <g fill="#2a9d8f" stroke="#264653" stroke-width="3">
+    <rect x="10" y="10" width="50" height="50"/>
+    <rect x="70" y="10" width="50" height="50" fill="#e76f51"/>
+    <g transform="translate(0 70)" fill-rule="evenodd">
+      <path d="M 10 0 L 60 0 L 60 50 L 10 50 Z M 25 15 L 45 15 L 45 35 L 25 35 Z"/>
+      <circle cx="95" cy="25" r="25" stroke="none"/>
+    </g>
+  </g>
+  <defs>
+    <rect id="hidden" x="0" y="0" width="200" height="200" fill="#000"/>
+  </defs>
+  <title>Should not render title text</title>
+  <rect x="140" y="140" width="50" height="50" fill="#ffbe0b"/>
+</svg>

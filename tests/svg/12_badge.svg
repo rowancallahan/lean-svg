@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <rect x="0" y="0" width="300" height="300" fill="#f8f4ec"/>
+  <g transform="translate(150 150)">
+    <circle r="130" fill="#264653"/>
+    <circle r="118" fill="none" stroke="#e9c46a" stroke-width="6"/>
+    <g fill="#2a9d8f" opacity="0.85">
+      <path d="M 0 -100 L 24 -32 L 95 -31 L 38 12 L 59 80 L 0 38 L -59 80 L -38 12 L -95 -31 L -24 -32 Z"/>
+    </g>
+    <g transform="rotate(36)" fill="#e76f51" fill-opacity="0.7">
+      <path d="M 0 -100 L 24 -32 L 95 -31 L 38 12 L 59 80 L 0 38 L -59 80 L -38 12 L -95 -31 L -24 -32 Z"/>
+    </g>
+    <path d="M -70 20 C -40 -60 40 -60 70 20 C 40 60 -40 60 -70 20 Z" fill="#f4a261" stroke="#264653" stroke-width="4" stroke-linejoin="round"/>
+    <ellipse cx="0" cy="18" rx="22" ry="26" fill="#264653"/>
+    <circle cx="0" cy="18" r="12" fill="#f8f4ec"/>
+    <circle cx="4" cy="14" r="5" fill="#264653"/>
+    <g stroke="#e9c46a" stroke-width="3" stroke-linecap="round" fill="none">
+      <path d="M -110 -40 Q -80 -70 -50 -40 T 10 -40"/>
+      <path d="M 110 40 Q 80 70 50 40 T -10 40"/>
+    </g>
+    <g transform="translate(0 95) scale(0.6)">
+      <rect x="-90" y="-14" width="180" height="28" rx="14" fill="#e9c46a" stroke="#264653" stroke-width="3"/>
+      <rect x="-70" y="-6" width="140" height="12" rx="6" fill="#264653"/>
+    </g>
+  </g>
+</svg>
