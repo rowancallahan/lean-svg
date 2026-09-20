@@ -638,4 +638,167 @@ def strokePoly (st : StrokeStyle) (poly : Poly) (out : Array (Array Pt)) : Array
       lp := lp.push ((p0.sub nS).add par)
     return pushRing out lp
 
+/-! ## Dashing
+
+`stroke-dasharray` / `stroke-dashoffset` (SVG 1.1 §11.4).  A dashed stroke is
+the stroke of the "on" runs of the path, so dashing happens between `flatten`
+and `strokePoly`: each flattened subpath is cut into shorter **open** polylines
+and every one of those is then stroked normally, which is what puts a cap on
+each end of each dash (`Render.drawShape` does the same for the hairline path,
+where `Raster.hairline` caps each dash instead).
+
+Lengths are measured along the *flattened* polyline, in the path's own
+coordinate space, with `Fx.hypot`.  tiny-skia measures along the curve itself
+(`ContourMeasure`), so on a flattened curve our dash phase drifts by the
+difference between the chords and the arcs they cut — below a tenth of a pixel
+on a circle, since `segCount` keeps the chords near a pixel long. -/
+
+/-- The most dashes one subpath may be cut into.  A pattern whose sum is tiny
+next to the subpath — `stroke-dasharray="0.0001"` on a long path — would
+otherwise cost a dash per fraction of a pixel; past this many the subpath is
+drawn **solid** instead.  The bound is what makes every loop below finite. -/
+def maxDashes : Nat := 100000
+
+/-- Normalise a `stroke-dasharray` value into an even-length pattern and its
+sum, or `none` for "draw solid".
+
+Following SVG 1.1 §11.4 and usvg's `conv_dasharray`: a negative entry makes the
+whole list an error, a sum of zero means no dashing, and an odd-length list is
+repeated once so that entries alternate on/off forever.  The first entry is
+"on". -/
+def dashPattern (pat : Array Fx) : Option (Array Fx × Fx) := Id.run do
+  if pat.isEmpty then return none
+  let mut s : Fx := 0
+  for d in pat do
+    if d < 0 then return none
+    s := s + d
+  if s ≤ 0 then return none
+  if pat.size % 2 == 1 then return some (pat ++ pat, 2 * s) else return some (pat, s)
+
+/-- Cut one flattened subpath into its "on" runs, appending each as an open
+`Poly` to `out`.  `pat` is the raw `stroke-dasharray` list and `off` the
+`stroke-dashoffset`.
+
+The pattern starts afresh at each subpath, which is what resvg does (and what
+`painting/stroke-dasharray/multiple-subpaths.svg` checks).  `off` is reduced
+`mod S` euclidean-ly, so a negative offset walks backwards through the pattern
+and an offset larger than the sum wraps; the pattern is then walked to find the
+entry the subpath starts inside and how much of it is left, exactly as
+tiny-skia's `StrokeDash::new` does.
+
+A **closed** subpath is dashed as an open path that starts at its first point —
+the pattern runs on across the closing segment — with one twist taken from
+Skia's `SkDashPath::InternalFilter` (which tiny-skia ports): when the walk
+starts inside an "on" entry with a positive length left, that initial dash is
+*deferred* and re-emitted at the end, joined onto the final dash if the subpath
+ends "on".  The start point of a closed dashed path is then an ordinary join
+rather than two dash ends, which is what resvg draws: without this, a dashed
+`<rect>` whose first dash runs through its top-left corner is missing the outer
+quadrant of that corner (8×8 px of a 16 px stroke — `max_d` 255 over 64 px).
+A zero-length initial dash is *not* deferred, matching Skia's
+`initialDashLength > 0`, so the dots of `0-n-with-*-caps.svg` stay put.
+
+A zero-length "on" entry yields a single-point `Poly`, which `strokePoly`
+renders as a dot for round and square caps and as nothing for butt caps —
+`painting/stroke-dasharray/0-n-with-*-caps.svg`.
+
+The subpath is appended unchanged (i.e. drawn solid) when the pattern says so
+and when the dash count would exceed `maxDashes`; a zero-length subpath is
+dropped instead. -/
+def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Array Poly :=
+  Id.run do
+    let some (pat, S) := dashPattern pat | return out.push poly
+    let m := pat.size
+    let pts := dedupe poly
+    let n := pts.size
+    -- a subpath of zero length has nothing to dash: tiny-skia's
+    -- `ContourMeasureIter` drops it, so resvg draws no dot for it either, even
+    -- with round caps.  (Undashed, `strokePoly` still draws that dot.)
+    if n < 2 then return out
+    let segs := if poly.closed then n else n - 1
+    -- total length first: it decides whether this subpath is dashable at all
+    let mut total : Nat := 0
+    for i in [0:segs] do
+      total := total + ((pts.getD i default).dist (pts.getD ((i + 1) % n) default)).toNat
+    if total * m > maxDashes * S.toNat then return out.push poly
+    -- the entry the subpath starts in, and how much of it is left
+    let mut idx : Nat := 0
+    let mut rem : Fx := pat.getD 0 0
+    let mut o : Fx := Int.emod off S
+    for k in [0:m] do
+      let d := pat.getD k 0
+      -- Skia's `phase > gap || (phase == gap && gap)` (`SkDashPath::
+      -- CalcDashParameters`).  The second half is what makes a *zero* entry
+      -- different from an entry the offset happens to land on the end of: an
+      -- offset of 0 stops inside a leading `0` and dots it, while an offset of
+      -- exactly `intervals[0]` steps over that entry into the gap.  resvg
+      -- draws both that way (`stroke-dasharray="0 26"` dots the start point;
+      -- `"10 20"` with offset 10 does not).
+      if o > d || (o == d && d > 0) then
+        o := o - d
+      else
+        idx := k
+        rem := d - o
+        break
+    let mut on := idx % 2 == 0
+    -- a closed subpath that starts inside a dash defers that dash to the end
+    let mut deferring := poly.closed && on && rem > 0
+    let mut first : Array Pt := #[]
+    let mut cur : Array Pt := if on then #[pts.getD 0 default] else #[]
+    let mut out := out
+    for i in [0:segs] do
+      let p := pts.getD i default
+      let q := pts.getD ((i + 1) % n) default
+      let dx := q.x - p.x
+      let dy := q.y - p.y
+      let L := Fx.hypot dx dy
+      if L ≤ 0 then continue
+      -- every pass either ends the segment or moves on to the next entry, and
+      -- the entries crossed by one segment are bounded by its own length
+      let fuel := (L.toNat * m) / S.toNat + m + 2
+      let mut pos : Fx := 0
+      for _ in [0:fuel] do
+        if rem > L - pos then
+          -- the rest of the segment lies inside the current entry
+          rem := rem - (L - pos)
+          if on then cur := cur.push q
+          break
+        -- a dash boundary falls on this segment, `pos` along it from `p`
+        pos := pos + rem
+        let bp : Pt :=
+          ⟨Fx.clamp (p.x + Int.ediv (dx * pos) L), Fx.clamp (p.y + Int.ediv (dy * pos) L)⟩
+        if on then
+          if deferring then
+            first := cur.push bp
+            deferring := false
+          else
+            out := out.push ⟨cur.push bp, false⟩
+          cur := #[]
+        else
+          cur := #[bp]
+        on := !on
+        idx := (idx + 1) % m
+        rem := pat.getD idx 0
+        -- Skia walks `while distance < length`, so a boundary that falls
+        -- exactly on the subpath's last point closes the run before it but
+        -- starts nothing after it: no dot there, and for a closed subpath the
+        -- deferred dash below is emitted on its own rather than joined.
+        if i + 1 == segs && pos == L then
+          cur := #[]
+          break
+    -- the run the subpath ends in, and the deferred initial dash behind it: one
+    -- polyline when the subpath ends "on" (a join at the start point), two
+    -- separate dashes otherwise.  `first` is empty unless a dash was deferred
+    -- *and* completed, so an open subpath and a too-short closed one fall
+    -- through to the plain case.
+    if on && cur.size ≥ 1 then
+      out := out.push ⟨if first.isEmpty then cur else cur ++ first, false⟩
+    else if !first.isEmpty then
+      out := out.push ⟨first, false⟩
+    return out
+
+/-- Dash every subpath of a flattened path.  `Render.drawShape`'s entry point. -/
+def dashPolys (pat : Array Fx) (off : Fx) (polys : Array Poly) : Array Poly :=
+  polys.foldl (fun out p => dashPoly pat off p out) (Array.emptyWithCapacity polys.size)
+
 end MicroSvg
