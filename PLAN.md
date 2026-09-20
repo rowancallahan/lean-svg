@@ -71,6 +71,32 @@ Approach (decided):
    prove by induction.
 5. `render` is a `do` block in `Except`; unfold and case on each bind.
 
+## M3b — Stronger effect theorems  [design → Opus for the proofs; future]
+
+Requested 2026-09-20, not started. Statements to add to `Effect.lean`:
+
+1. **No-clobber.** The program only writes the output path if that path did
+   not exist when the program started. Model: `FS := String → Option ByteArray`
+   (`none` = absent); add `Op.outputExists : Op` with `Res = Bool`; the
+   renderer program becomes: read input; if output exists, fail; else render
+   and write. Theorems: `runFS_frame` as today; new
+   `renderProgram_no_clobber : fs out = some b → (run …).2 = fs`; and the
+   existing input-only theorem generalises to "depends only on `fs inp` and
+   on whether `fs out` is present". The trusted `execIO` gains one
+   `System.FilePath.pathExists` call, still on the two given paths only.
+2. **Output size bound (reach; strengthens M3).** `render opts inp = .ok png →
+   png.size ≤ Png.maxSize` where `Png.maxSize = sizeFor maxDim maxDim` is the
+   uncompressed size of the largest permitted canvas: no blown-up files by
+   construction. M3's exact `sizeFor w h` implies it.
+3. **Bounded work (reach).** Two options, cheapest first: (a) a step budget
+   threaded through `render` as fuel (pure, provable: "returns within N
+   steps or fails"); (b) a wall-clock cap in the trusted shell (default one
+   hour, resettable to unlimited by flag), not provable but simple. Totality
+   already guarantees termination; this bounds *how long*.
+4. **Max input size.** `render` rejects `inp.size > maxInput` (say 64 MiB)
+   before parsing; theorem `render_rejects_large : inp.size > maxInput →
+   render opts inp = .error _`. Trivial once the check exists.
+
 ## M4 — Fidelity features  [Opus]
 
 Each is self-contained. Keep the invariants: no `partial`, every loop bounded
