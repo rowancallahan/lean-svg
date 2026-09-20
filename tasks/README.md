@@ -28,5 +28,5 @@ Verification commands:
 ```bash
 lake build
 python3 tests/run_tests.py            # fidelity vs resvg, all corpus files
-python3 tests/run_adversarial.py      # must stay 28/28 clean
+python3 tests/run_adversarial.py      # must stay N/N clean (N scales with tests/svg/*.svg)
 ```
