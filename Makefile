@@ -1,7 +1,7 @@
 PYTHON ?= python3
 LAKE ?= lake
 
-.PHONY: all build test adversarial clean
+.PHONY: all build test adversarial tiles clean
 
 all: test adversarial
 
@@ -13,6 +13,9 @@ test: build
 
 adversarial: build
 	$(PYTHON) tests/run_adversarial.py
+
+tiles: build
+	$(PYTHON) tests/run_tiles.py
 
 clean:
 	rm -rf tests/out
