@@ -200,30 +200,37 @@ def cover (b : Option Box) (p : Pt) : Option Box :=
   | none => some ⟨p.x, p.y, p.x, p.y⟩
   | some b => some ⟨Fx.min b.x0 p.x, Fx.min b.y0 p.y, Fx.max b.x1 p.x, Fx.max b.y1 p.y⟩
 
-/-- Grow a box by `dx` horizontally and `dy` vertically. -/
-def inflate (b : Box) (dx dy : Fx) : Box :=
-  ⟨Fx.clamp (b.x0 - dx), Fx.clamp (b.y0 - dy), Fx.clamp (b.x1 + dx), Fx.clamp (b.y1 + dy)⟩
-
-/-- Does the box meet the half-open rectangle `[0, w) × [0, h)`? -/
-def meets (b : Box) (w h : Fx) : Bool :=
-  b.x1 ≥ 0 && b.y1 ≥ 0 && b.x0 < w && b.y0 < h
+/-- Does this closed box meet the half-open rectangle
+`[lox, hix) × [loy, hiy)`? -/
+def meets (b : Box) (lox loy hix hiy : Fx) : Bool :=
+  b.x1 ≥ lox && b.y1 ≥ loy && b.x0 < hix && b.y0 < hiy
 
 end Box
 
-/-- Box of a path's control points in device space: every `Pt` that appears in
-`cmds` (both cubic control points as well as the endpoint), plus the implicit
-current point that `flatten` starts a subpath from, all mapped through `ctm`.
+/-- Does the device-space bounding box of `cmds`' control points meet the
+half-open rectangle `[lox, hix) × [loy, hiy)`?
 
-The flattened path lies inside this box up to rounding.  A cubic lies inside the
-convex hull of its four control points, and an affine map takes that hull to the
-hull of the four mapped points, which this box contains; `flatten` emits hull
-points floored to the `Fx` grid (`cubicAt` divides with `Int.ediv`), and
-`Mat.apply` floors again, so a caller must allow one `Fx` unit of user-space
-slack (worth `(|a| + |c|)/65536` in device x) and one of device slack per side.
+The box is over every `Pt` that appears in `cmds` (both cubic control points as
+well as the endpoint), plus the implicit current point that `flatten` starts a
+subpath from, each mapped through `ctm`.  The flattened path lies inside that
+box up to rounding: a cubic lies inside the convex hull of its four control
+points, and an affine map takes that hull to the hull of the four mapped
+points.  `flatten` emits hull points floored to the `Fx` grid (`cubicAt`
+divides with `Int.ediv`) and `Mat.apply` floors again, so a caller must widen
+the rectangle by one `Fx` unit of user-space slack (worth `(|a| + |c|)/65536`
+in device x) and one of device slack per side — which is what
+`Render.shapeOnCanvas` does, along with the stroke's reach.
 
 The state machine mirrors `flatten`'s exactly, so that the implicit start point
-of a path that begins with a `lineTo` is accounted for. -/
-def ctrlBox (ctm : Mat) (cmds : Array PathCmd) : Option Box := Id.run do
+of a path that begins with a `lineTo` is accounted for.
+
+The answer is returned as soon as the box built so far already meets the
+rectangle, because the box only ever grows and `Box.meets` is monotone under
+growth.  That is what keeps the test cheap for the shapes it cannot skip: a
+path large enough to straddle the canvas says so within a few commands, and
+only a path that really is off-canvas — where the `flatten` and `strokePoly`
+this test is about to save dwarf it — is walked to the end. -/
+def ctrlBoxMeets (ctm : Mat) (cmds : Array PathCmd) (lox loy hix hiy : Fx) : Bool := Id.run do
   let mut b : Option Box := none
   -- `empty` tracks `flatten`'s `cur.isEmpty`; `pt`/`start` its current points.
   let mut empty := true
@@ -251,7 +258,10 @@ def ctrlBox (ctm : Mat) (cmds : Array PathCmd) : Option Box := Id.run do
     | .close =>
       pt := start
       empty := true
-  return b
+    match b with
+    | some bb => if bb.meets lox loy hix hiy then return true
+    | none => pure ()
+  return false
 
 /-! ## Stroking
 

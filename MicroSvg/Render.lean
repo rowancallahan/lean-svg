@@ -124,47 +124,49 @@ def canvasSetup (root : RootInfo) (opts : Options) :
        Nat.min vw (Int.toNat ((W : Int) - vx)), Nat.min vh (Int.toNat ((H : Int) - vy))⟩
     return (vw, vh, (Mat.translate (-(vx * 256)) (-(vy * 256))).mul mat, clip)
 
-/-- Device-space box that every pixel this shape can paint lies inside.
+/-- Can any pixel this shape paints land on the `W × H` canvas?
 
-`ctrlBox` gives the box of the path's control points in device space, which
-contains the flattened path up to the floors in `cubicAt` and `Mat.apply`.  A
-stroke is built in the path's own space and only then transformed, so its
-`strokeReach r` of user-space slack is worth `r·(|a| + |c|)/65536` in device x
-and `r·(|b| + |d|)/65536` in device y.  `r + 4` buys four more `Fx` of
-user-space room, which covers `cubicAt`'s floor on the fill side; `258` is the
-two `Fx` that `Mat.apply` can floor away on each side of the box, plus a whole
-device pixel of margin on top. -/
-def shapeBox (ctm : Mat) (s : Shape) : Option Box :=
-  match ctrlBox ctm s.cmds with
-  | none => none
-  | some box =>
-    let st := s.style
-    let reach : Fx := match st.stroke with
-      | .solid _ => strokeReach ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
-      | .none => 0
-    let ax := Fx.abs ctm.a + Fx.abs ctm.c
-    let ay := Fx.abs ctm.b + Fx.abs ctm.d
-    some (box.inflate (Fx.clamp (Int.ediv ((reach + 4) * ax) 65536 + 258))
-                      (Fx.clamp (Int.ediv ((reach + 4) * ay) 65536 + 258)))
+The device-space box of the path's control points contains the flattened path
+up to the floors in `cubicAt` and `Mat.apply`, so it is compared not against
+the canvas `[0, W·256) × [0, H·256)` itself but against a rectangle widened by
+everything that can put a painted point outside that box:
+
+* A stroke is built in the path's own space and only then transformed, so
+  `strokeReach`'s `r` of user-space reach is worth `r·(|a| + |c|)/65536` in
+  device x and `r·(|b| + |d|)/65536` in device y.
+* `r + 4` buys four more `Fx` of user-space room, which covers `cubicAt`'s
+  floor on the fill side (one `Fx` per axis would do).
+* `258` is the two `Fx` that `Mat.apply` can floor away on each side of the
+  box, plus a whole device pixel of margin on top.
+
+Widening the rectangle is exactly equivalent to inflating the box by the same
+amounts, and it keeps the growing box the only thing the scan has to touch. -/
+def shapeOnCanvas (ctm : Mat) (s : Shape) (W H : Nat) : Bool :=
+  let st := s.style
+  let reach : Fx := match st.stroke with
+    | .solid _ => strokeReach ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+    | .none => 0
+  let ax := Fx.abs ctm.a + Fx.abs ctm.c
+  let ay := Fx.abs ctm.b + Fx.abs ctm.d
+  let dx := Fx.clamp (Int.ediv ((reach + 4) * ax) 65536 + 258)
+  let dy := Fx.clamp (Int.ediv ((reach + 4) * ay) 65536 + 258)
+  ctrlBoxMeets ctm s.cmds (-dx) (-dy) ((W : Int) * 256 + dx) ((H : Int) * 256 + dy)
 
 /-- Draw one shape (fill, then stroke) onto the canvas.
 
-A shape whose `shapeBox` cannot touch the canvas is skipped before `flatten`,
-which is what makes a small tile of a large image cheap: the flattening,
-stroking and transforming of every off-tile shape goes away.  The output does
-not change.  `Raster.rasterize` begins by taking the bounding box of the very
-device points `shapeBox` contains and returns `none` — leaving the canvas
-alone — as soon as that box misses `[0, W) × [0, H)` in whole pixels, so every
-shape culled here is one that `rasterize` would have thrown away anyway. -/
+A shape that `shapeOnCanvas` rules out is skipped before `flatten`, which is
+what makes a small tile of a large image cheap: the flattening, stroking and
+transforming of every off-tile shape goes away.  The output does not change.
+`Raster.rasterize` begins by taking the bounding box of the very device points
+the culling box contains and returns `none` — leaving the canvas alone — as
+soon as that box misses `[0, W) × [0, H)` in whole pixels, so every shape
+culled here is one that `rasterize` would have thrown away anyway. -/
 def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :=
   let st := s.style
   let ctm := rootMat.mul st.ctm
   let W := cv.w
   let H := cv.h
-  let onCanvas : Bool := match shapeBox ctm s with
-    | none => false
-    | some b => b.meets ((W : Int) * 256) ((H : Int) * 256)
-  if !onCanvas then cv else
+  if !(shapeOnCanvas ctm s W H) then cv else
   let polys := flatten ctm s.cmds
   let cv := match st.fill with
     | .solid c =>
