@@ -23,6 +23,8 @@ hand-written corpus renders ≥ 99% of pixels within a small tolerance.
 lake build
 .lake/build/bin/microsvg tests/svg/01_triangle.svg out.png
 .lake/build/bin/microsvg in.svg out.png --width 800 --background white
+# one 512x512 tile of a 4000 px wide image, for a zoomable viewer
+.lake/build/bin/microsvg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
 ```
 
 Exit codes: 0 success, 1 render error (message on stderr, no file written),
@@ -34,6 +36,7 @@ Exit codes: 0 success, 1 render error (message on stderr, no file written),
 brew install resvg        # oracle
 make test                 # fidelity vs resvg → tests/out/report.html
 make adversarial          # hostile inputs: no crash, no hang, no stray files
+make tiles                # --viewport tiles stitch back to the full render
 python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
 ```
 

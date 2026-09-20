@@ -96,38 +96,89 @@ are the premultiplied, coverage-scaled source channels. -/
        (Nat.min 255 (sb + div255 (db * inv)))
        (Nat.min 255 (sa + div255 (da * inv)))
 
-/-- Fill the mask with a solid colour.  `opacity256` is an extra multiplier in
-`[0, 256]` holding the fill/stroke opacity times the inherited group opacity.
+/-! ### Coverage thresholds
 
-resvg builds the paint as `set_color_rgba8(r, g, b, fill.opacity().to_u8())`,
-so the opacity is collapsed into a single 0..255 alpha and the colour is
-premultiplied by it *before* the rasteriser's coverage is applied.  We do the
-same: quantise to `a8`, premultiply once, then scale by the 0..255 coverage. -/
-def fillMask (cv : Canvas) (m : Raster.Mask) (c : Rgba) (opacity256 : Nat) : Canvas := Id.run do
+`fillMask` reduces the mask's `cov ∈ [0, 65536]` to tiny-skia's 0..255 coverage
+with `cov8 = (cov · 255 + 32768) >>> 16`.  Two values of `cov8` make the blend
+degenerate, and both are worth branching on before doing any arithmetic:
+
+* `cov8 = 0` — nothing is written.  `cov · 255 + 32768 < 65536 ↔ cov · 255 <
+  32768 ↔ cov ≤ ⌊32767/255⌋ = 128`.
+* `cov8 = 255` — full coverage.  `cov · 255 + 32768 ≥ 255 · 65536 ↔ cov ≥
+  ⌈16678912/255⌉ = 65408`; the upper end cannot overflow because `cov ≤ 65536`
+  gives `cov8 ≤ 255`.
+
+Both equivalences were checked over all 65537 values of `cov`.  Testing `cov`
+against these constants is exactly `cov8 == 0` / `cov8 == 255`, so the fast
+paths below are entered on precisely the pixels whose general-path result they
+reproduce, and `cov8` itself is only computed on the remaining pixels. -/
+
+/-- Largest `cov` whose `cov8` is `0`. -/
+@[inline] def covNone : Nat := 128
+
+/-- Smallest `cov` whose `cov8` is `255`. -/
+@[inline] def covFull : Nat := 65408
+
+/-- Fill the mask with a solid colour.  `alpha8` is the final paint alpha in
+`[0, 255]`: the colour's own alpha, the fill/stroke opacity and the inherited
+group opacity already collapsed into one `u8` by `Svg.opacityToU8`, exactly as
+resvg does with `set_color_rgba8(r, g, b, fill.opacity().to_u8())`.
+
+The colour is premultiplied by it *before* the rasteriser's coverage is
+applied, so `c.a` plays no part below — only `alpha8` does.
+
+The mask is walked row by row.  Per row, the destination index of its first
+pixel is computed once; per pixel, the coverage decides between three cases:
+
+* `cov ≤ covNone`: skip, without reading or writing the canvas.
+* `cov ≥ covFull`: full coverage.  For an opaque paint `blendLerp`'s `inv` is
+  `0`, so the destination drops out and the result is the constant `solid`,
+  written with no read and no arithmetic.  For a translucent paint the
+  coverage-scaled source is the loop-invariant `fr fg fb fa`, so only the
+  `source_over` step remains.
+* otherwise: the general blend, unchanged.
+
+`solid` and `fr fg fb fa` are *defined* as the corresponding general-path
+expressions at `cov8 = 255`, so the fast paths cannot drift from it. -/
+def fillMask (cv : Canvas) (m : Raster.Mask) (c : Rgba) (alpha8 : Nat) : Canvas := Id.run do
   let w := cv.w
   let h := cv.h
-  -- `opacity256` is 256 = fully opaque; resvg's paint alpha is 255 = fully opaque.
-  let a8 := Nat.min 255 ((c.a * opacity256 + 128) >>> 8)
+  let a8 := Nat.min 255 alpha8
   if a8 == 0 then return cv
   let sr := premul c.r a8
   let sg := premul c.g a8
   let sb := premul c.b a8
   let isOpaque := a8 == 255
+  -- `cov8 = 255`, opaque: `inv = 0`, so this is independent of the destination.
+  let solid := blendLerp 0 sr sg sb 255
+  -- `cov8 = 255`, translucent: the `scale_1_float` stage is loop-invariant.
+  let fr := div255 (sr * 255)
+  let fg := div255 (sg * 255)
+  let fb := div255 (sb * 255)
+  let fa := div255 (a8 * 255)
+  let mw := m.w
   let mut px := cv.px
   for y in [0:m.h] do
-    let row := (m.y0 + y) * w
-    for x in [0:m.w] do
-      let cov := m.cov.getD (y * m.w + x) 0
-      -- tiny-skia's blitter works on 0..255 coverage; ours is 0..65536.
-      let cov8 := (cov * 255 + 32768) >>> 16
-      if cov8 == 0 then continue
-      let idx := row + m.x0 + x
-      let dst := px.getD idx 0
-      let nv :=
-        if isOpaque then blendLerp dst sr sg sb cov8
-        else blendOver dst (div255 (sr * cov8)) (div255 (sg * cov8)) (div255 (sb * cov8))
-               (div255 (a8 * cov8))
-      px := px.setIfInBounds idx nv
+    let mrow := y * mw
+    let prow := (m.y0 + y) * w + m.x0
+    for x in [0:mw] do
+      let cov := m.cov.getD (mrow + x) 0
+      if cov ≤ covNone then continue
+      let idx := prow + x
+      if cov ≥ covFull then
+        if isOpaque then
+          px := px.setIfInBounds idx solid
+        else
+          px := px.setIfInBounds idx (blendOver (px.getD idx 0) fr fg fb fa)
+      else
+        -- tiny-skia's blitter works on 0..255 coverage; ours is 0..65536.
+        let cov8 := (cov * 255 + 32768) >>> 16
+        let dst := px.getD idx 0
+        let nv :=
+          if isOpaque then blendLerp dst sr sg sb cov8
+          else blendOver dst (div255 (sr * cov8)) (div255 (sg * cov8)) (div255 (sb * cov8))
+                 (div255 (a8 * cov8))
+        px := px.setIfInBounds idx nv
   return ⟨w, h, px⟩
 
 /-- Straight-alpha RGBA bytes, row-major, 4 bytes per pixel.  This is what

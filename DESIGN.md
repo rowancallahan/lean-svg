@@ -78,7 +78,9 @@ Composition `m.mul n` applies `n` first (SVG's `transform="A B"` = `A.mul B`).
 
 Lean runtime detail that shaped the code: unboxed `Int` is 31-bit on 64-bit
 hosts (`LEAN_MAX_SMALL_INT = INT_MAX`), unboxed `Nat` is 63-bit. So the
-per-pixel loops are written in `Nat` after clipping to the canvas.
+per-pixel loops are written in `Nat`; geometry that reaches outside the mask
+is shifted into `Nat` by a whole number of pixels rather than cut down to it
+(§3.5).
 
 ### 3.2 XML subset
 
@@ -157,6 +159,13 @@ reaching far outside the canvas cannot put huge numbers in the hot loop.
 Masks cover only the shape's bounding box ∩ canvas. The walk costs
 O(Σ edges × sub-scanlines crossed) plus O(16·bw·bh) for the row scans.
 
+Nothing here depends on *where* the mask sits, only on the geometry relative to
+its origin, and that origin is always a whole pixel: shifting a shape by a whole
+number of pixels shifts `top`/`bottom` by a multiple of 4 sub-scanlines (leaving
+`dy` and `slope` untouched) and `x` by a multiple of 4 sub-columns, so the same
+spans, the same `64,64,64,63` phase and the same partial alphas come out. That
+is what makes tiles byte-identical (§3.8).
+
 ### 3.6 Stroking
 
 Per subpath: one quad per segment, one wedge per join on the outer side
@@ -172,6 +181,26 @@ Canvas: premultiplied RGBA8 packed into one `Nat` per pixel. Source-over with
 `div255(x) = (x + 127) / 255`. Output: straight alpha, 8-bit RGBA, filter 0,
 zlib stream of stored DEFLATE blocks, CRC-32 and Adler-32 computed in Lean.
 PNG size is therefore a closed-form function of `(w, h)`; see PLAN M3.
+
+### 3.8 Viewport (tiles)
+
+`Options.viewport = (x, y, w, h)` renders only that window of the zoomed image:
+`canvasSetup` returns `w × h` as the canvas size and composes
+`translate(−x, −y)` after the zoom, so `maxDim` / `maxPixels` bound the tile
+rather than the virtual image it is a window of. `Mat.translate` has an
+identity linear part, so that composition only adds `(−256x, −256y)` to the
+root matrix's translation, exactly: a tile's device geometry is the whole
+image's device geometry shifted by a whole number of pixels, which is precisely
+the shift the rasterizer is invariant under (§3.5). A tile is therefore
+byte-identical to that window of the full render (`tests/run_tiles.py`).
+Maximum zoom is 4096×, where `Mat.linMax` clamps the 16.16 linear part.
+
+A tile may also hang off the document, and there the SVG viewport clips: a full
+render gets that from the canvas bounds, but a tile's canvas is the tile, so
+`canvasSetup` also returns the document's window in canvas pixels and
+`clipMask` restricts every coverage mask to it before compositing. Without a
+`--viewport` that window is the whole canvas and `clipMask` returns the mask
+untouched, so the ordinary path is unchanged, byte for byte.
 
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 

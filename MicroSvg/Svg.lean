@@ -23,17 +23,34 @@ inductive Paint where
   | solid (c : Rgba)
 deriving Repr, Inhabited
 
+/-- `1.0` on the opacity grid: opacities are `Nat` numerators over 10^18.
+
+resvg keeps an opacity as an `f32` in `[0, 1]` and only turns it into a `u8`
+at the very end, with `Opacity::to_u8` = `round (x * 255)`.  Any coarser grid
+of ours would have to round twice, and the two grids do not line up: on the
+1/256 grid `0.7` becomes 179/256, and `round (179/256 * 255) = 178`, where
+resvg says 179.
+
+A decimal denominator fixes that.  The half-way points of the 255ths grid are
+the odd multiples of 1/510, and the only ones in `[0, 1]` are `0.1`, `0.3`,
+`0.5`, `0.7` and `0.9` (a tie needs `51 ∣ 2j+1`, and `51 * 11 / 510 > 1`).
+They are one-digit decimals, so a power-of-ten grid represents every tie
+*exactly* and the tie is then decided by our own rule rather than by rounding
+noise.  10^18 also makes every decimal literal `parseDecimal` can return
+(18 significant digits) exact in its own right. -/
+def opacityOne : Nat := 1000000000000000000
+
 structure Style where
   fill : Paint := .solid ⟨0, 0, 0, 255⟩
-  fillOpacity : Nat := 256
+  fillOpacity : Nat := opacityOne
   evenOdd : Bool := false
   stroke : Paint := .none
-  strokeOpacity : Nat := 256
+  strokeOpacity : Nat := opacityOne
   strokeWidth : Fx := 256
   cap : Cap := .butt
   join : Join := .miter
   miterLimit : Fx := 1024
-  opacity : Nat := 256
+  opacity : Nat := opacityOne
   visible : Bool := true
   ctm : Mat := Mat.identity
 deriving Repr, Inhabited
@@ -109,15 +126,19 @@ def compOf (bs : ByteArray) : Option Nat :=
     if at' t j == 37 then some (Nat.min 255 ((Int.ediv (v * 255) 256).toNat / 100))
     else some (Nat.min 255 (Fx.round v).toNat)
 
-/-- Alpha component: number 0..1 or percentage. -/
+/-- Alpha component of `rgba()`: a number in 0..1, or a percentage.
+
+svgtypes stores it as a `u8` with `round (a * 255)`, and usvg then unpacks it
+again as an opacity (`Color::split_alpha` → `a / 255`), so this has to land on
+exactly the same 255ths grid as `parseOpacity`; going through the 1/256 grid
+loses `0.7` and `0.35` the same way `fill-opacity` used to. -/
 def alphaOf (bs : ByteArray) : Option Nat :=
   let t := trim bs
-  match parseNumber t 0 with
+  match parseDecimal t 0 with
   | none => none
-  | some (v, j) =>
-    let v := if at' t j == 37 then Int.ediv v 100 else v
-    let v := if v < 0 then 0 else if v > 256 then 256 else v
-    some ((v * 255 + 128) / 256).toNat
+  | some (neg, mant, exp10, j) =>
+    let exp10 := if at' t j == 37 then exp10 - 2 else exp10
+    some (if neg then 0 else scaleDecimal mant exp10 255 255)
 
 def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
   let close := findByte bs start 41
@@ -153,14 +174,42 @@ def parsePaint (bs : ByteArray) : Option Paint :=
     | some (_, v) => some (.solid ⟨(v >>> 16) &&& 255, (v >>> 8) &&& 255, v &&& 255, 255⟩)
     | none => none
 
-/-- Opacity in `[0, 256]`. -/
+/-- Opacity in `[0, opacityOne]`, i.e. usvg's `Opacity::new_clamped`.
+
+The decimal is taken straight from `parseDecimal`, so no precision is lost on
+the way in: a percentage is just an exponent shift, and the only rounding is
+onto the 1/10^18 grid, which is exact for everything the lexer can produce. -/
 def parseOpacity (bs : ByteArray) : Option Nat :=
   let t := trim bs
-  match parseNumber t 0 with
+  match parseDecimal t 0 with
   | none => none
-  | some (v, j) =>
-    let v := if at' t j == 37 then Int.ediv v 100 else v
-    some (if v < 0 then 0 else if v > 256 then 256 else v.toNat)
+  | some (neg, mant, exp10, j) =>
+    let exp10 := if at' t j == 37 then exp10 - 2 else exp10
+    some (if neg then 0 else scaleDecimal mant exp10 opacityOne opacityOne)
+
+/-- Multiply two opacities, staying on the 1/10^18 grid (halves up).
+
+usvg folds an element's opacities together as one `f32` product
+(`parser/style.rs`: `opacity: sub_opacity * fill_opacity`) and quantises only
+afterwards; nesting groups is the one place we have to round early, and a
+product of two short decimals is exact on this grid anyway. -/
+def mulOpacity (a b : Nat) : Nat := (a * b * 2 / opacityOne + 1) / 2
+
+/-- Collapse a paint alpha and the fill/stroke and group opacities into the
+single `u8` that resvg hands to tiny-skia.
+
+`crates/resvg/src/path.rs` builds the paint with
+`set_color_rgba8(r, g, b, fill.opacity().to_u8())`, and usvg has already folded
+the colour's own alpha into that opacity (`convert_paint` does
+`*opacity = alpha` from `Color::split_alpha`, i.e. `a / 255`, and `resolve_fill`
+returns `sub_opacity * fill_opacity`).  So the whole chain is one product,
+quantised once with `round (x * 255)`:
+
+  `a8 = round (alpha/255 * fillOp * groupOp * 255) = round (alpha * fillOp * groupOp)`
+
+computed here in exact integer arithmetic, halves away from zero. -/
+def opacityToU8 (alpha fillOp groupOp : Nat) : Nat :=
+  Nat.min 255 ((alpha * fillOp * groupOp * 2 / (opacityOne * opacityOne) + 1) / 2)
 
 /-! ## Transforms -/
 
@@ -368,7 +417,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "stroke" => match parsePaint v with | some p => { st with stroke := p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
   | "stroke-opacity" => match parseOpacity v with | some o => { st with strokeOpacity := o } | none => st
-  | "opacity" => match parseOpacity v with | some o => { st with opacity := st.opacity * o / 256 } | none => st
+  | "opacity" => match parseOpacity v with | some o => { st with opacity := mulOpacity st.opacity o } | none => st
   | "fill-rule" =>
     let t := trim v
     if eqAscii t "evenodd" then { st with evenOdd := true }
