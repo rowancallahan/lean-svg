@@ -219,6 +219,41 @@ unchanged. Design in `harness/README.md`, vertical-slice spike spec in
 `tasks/T9-aeneas-spike.md`. Not started; revisit once the Lean renderer's
 speed work (T6–T8) has reported.
 
+## M11 — Text and fonts, self-contained  [design done; future, after wave 3]
+
+Requested 2026-09-20 as a future requirement ("a functional SVG renderer").
+
+Design (decided):
+- **Fonts are constants.** Embed a fixed set of open-licence fonts (a Latin
+  subset of Noto Sans regular/bold/italic, plus the fonts the resvg test
+  suite ships in `fonts/` for oracle parity) as byte constants in the
+  binary (generate a Lean module from the `.ttf` bytes; ~100 KB each). No
+  new effect: the theorems in `Effect.lean` are unchanged. System fonts are
+  never read. Optional later: `@font-face` with `data:` URIs from the SVG
+  itself, which keeps "one file in" (no resvg oracle for that).
+- **Parser (total, bounded):** `head` (unitsPerEm, indexToLocFormat),
+  `maxp`, `cmap` (formats 4 and 12), `loca`, `glyf` (quadratic outlines →
+  cubics via exact degree elevation; composite glyphs with fuel ≤ 8 and a
+  component cap), `hhea`/`hmtx`, `kern` format 0 and GPOS pair adjustment
+  (single lookup type, format 1/2). Every table read is bounds-checked;
+  every loop bounded by table length. Reject fonts over a size cap.
+- **Layout:** `text`/`tspan` with `x y dx dy`, `font-size` (px, em,
+  percentages of parent), `font-family` fallback list, `font-weight`
+  (400/700) and `font-style` selecting among embedded faces, `text-anchor`,
+  `letter-spacing`, `word-spacing`, `baseline-shift`/`dominant-baseline`
+  basics, `xml:space`. Shaping is character → glyph plus pair kerning only
+  (no ligatures, no complex scripts; report those as out of scope).
+- **Rendering:** glyph outlines are `PathCmd`s fed to the existing fill and
+  stroke pipeline (text `fill`/`stroke` apply), with the text transform.
+- **Later:** `textPath` (glyph placement along a flattened path),
+  `text-decoration`, vertical `writing-mode`, CFF (`CFF ` table, Type 2
+  charstrings with fuel), `textLength`/`lengthAdjust`.
+
+Tasks (Opus): T-A font parsing + embedding + a `microsvg-fontinfo` debug
+dump; T-B layout and rendering of `text`/`tspan`; T-C `textPath`,
+decorations, vertical; T-D CFF. Measure on `resvg-test-suite/tests/text/`
+(356 files) on the direct route; target 60–80% with the suite's fonts.
+
 ## M9 — Write-up  [user]
 
 Design and results, in the user's own words. `DESIGN.md` has the material.
