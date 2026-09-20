@@ -249,10 +249,19 @@ Design (decided):
   `text-decoration`, vertical `writing-mode`, CFF (`CFF ` table, Type 2
   charstrings with fuel), `textLength`/`lengthAdjust`.
 
-Tasks (Opus): T-A font parsing + embedding + a `microsvg-fontinfo` debug
-dump; T-B layout and rendering of `text`/`tspan`; T-C `textPath`,
-decorations, vertical; T-D CFF. Measure on `resvg-test-suite/tests/text/`
-(356 files) on the direct route; target 60–80% with the suite's fonts.
+Tasks: **T25** [Sonnet, started 2026-09-20] font parsing + embedding +
+`fontdump`, verified glyph-by-glyph against fontTools and mutation-fuzzed
+for totality; T-B [Opus] layout and rendering of `text`/`tspan`; T-C
+`textPath`, decorations, vertical; T-D CFF. Measure on
+`resvg-test-suite/tests/text/` (356 files) on the direct route; target
+60–80% with the suite's fonts.
+
+**TODO (future, requested 2026-09-20): reading system fonts.** Would add a
+third operation to the effect monad, `Op.readFont (name : String) : Op
+(Option ByteArray)`, interpreted as a read under one fixed font directory
+only; theorems generalise to "reads only the input path and files under
+the font directory, writes only the output path". Keep behind a flag; the
+default stays embedded-fonts-only so the headline claim is unchanged.
 
 ## M9 — Write-up  [user]
 
