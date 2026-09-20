@@ -50,6 +50,9 @@ structure Style where
   cap : Cap := .butt
   join : Join := .miter
   miterLimit : Fx := 1024
+  /-- `stroke-dasharray`, raw: `Geom.dashPattern` normalises it.  Empty = solid. -/
+  dashes : Array Fx := #[]
+  dashOffset : Fx := 0
   opacity : Nat := opacityOne
   visible : Bool := true
   ctm : Mat := Mat.identity
@@ -434,6 +437,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     else if eqAscii t "bevel" then { st with join := .bevel }
     else if eqAscii t "miter" then { st with join := .miter } else st
   | "stroke-miterlimit" => match parseNumberAll v with | some m => { st with miterLimit := Fx.max 256 m } | none => st
+  -- `none`, a percentage, an `em` and plain junk all mean "not dashed" rather
+  -- than "inherit": usvg resolves the dash properties on the nearest ancestor
+  -- that *has* the attribute and drops them when that one does not parse.
+  | "stroke-dasharray" => { st with dashes := (parseAbsLengthList v).getD #[] }
+  | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
   | "transform" => { st with ctm := st.ctm.mul (parseTransform v) }
   | "visibility" =>
     let t := trim v

@@ -202,6 +202,10 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
     if st.strokeWidth ≤ 0 then cv
     else
       let a8 := opacityToU8 c.a st.strokeOpacity st.opacity
+      -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
+      -- actually inked, before stroking, so every dash end gets a cap.  The
+      -- fill above uses the undashed polylines; dashes are a stroke property.
+      let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
       match hairCoverage ctm st.strokeWidth with
       | some cov16 =>
         -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
