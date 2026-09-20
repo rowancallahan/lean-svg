@@ -138,6 +138,16 @@ by input size or a constant, every parsed number clamped, indices via
   number replacement with extreme values, tag duplication). N iterations,
   seeded. Same checks as the adversarial harness. Run for 10 minutes in CI.
 
+## M10 — Rust cores via Aeneas, fixed harness  [deferred, ideation only]
+
+Idea (2026-09-19): one never-changing `main.rs` (read one path, call a pure
+core, write one path) plus cores written in safe `no_std` Rust, translated to
+Lean by Aeneas and proven against a pre-specified contract (pure, total,
+panic-free, output bound). `Effect.lean`'s theorems apply to any core
+unchanged. Design in `harness/README.md`, vertical-slice spike spec in
+`tasks/T9-aeneas-spike.md`. Not started; revisit once the Lean renderer's
+speed work (T6–T8) has reported.
+
 ## M9 — Write-up  [user]
 
 Design and results, in the user's own words. `DESIGN.md` has the material.
