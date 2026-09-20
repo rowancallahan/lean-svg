@@ -265,9 +265,21 @@ def ctrlBoxMeets (ctm : Mat) (cmds : Array PathCmd) (lox loy hix hiy : Fx) : Boo
 
 /-! ## Stroking
 
-A stroke is converted to a set of polygons (one quad per segment, one wedge per
-join, one shape per cap) that are all oriented the same way and then filled with
-the nonzero rule, which computes their union. -/
+A stroke is converted to **one closed outline per subpath** and filled with the
+nonzero rule, following tiny-skia's `PathStroker` (a port of Skia's
+`SkStroke`).  An open subpath gives one polygon; a closed one gives two rings
+whose opposite orientations leave the hole at winding 0.
+
+The point of building it this way rather than as a quad per segment plus a
+wedge per join is that a seam between two abutting pieces takes the winding
+back through zero *inside* the ink, and the scan converter — a faithful port of
+tiny-skia's, which emits abutting spans separately rather than merging them —
+renders such a seam one alpha level differently (see the Report of
+`tasks/T6-perf-raster-walk.md`).  A single outline has no internal seam.
+
+Contours are emitted with whatever orientation they come out with:
+`Raster.insideW` is `w ≠ 0`, so only the magnitude of the winding matters, and
+a self-crossing polyline (winding ±2 in the overlap) still fills. -/
 
 inductive Cap where
   | butt | round | square
@@ -288,14 +300,15 @@ deriving Repr, Inhabited
 /-- How far, in the path's own coordinate space, `strokePoly` can put a point
 away from the polyline it strokes, along either axis.
 
-`hw = width/2` is the half width `strokePoly` uses.  Segment quads, round caps
-and round joins (`circlePoly`) and bevel joins stay within `hw`; a square cap
-adds a half width along the segment *and* across it, so `2·hw` covers it; a
-miter tip is at `hw · miterRatio` and `emitJoin` only emits one when
+`hw = width/2` is the half width `strokePoly` uses.  Segment offsets, round
+caps and round joins (`arcPts`, `capArcPts`, `circlePoly`), bevel joins and the
+pivot of an inner join all stay within `hw`; a square cap adds a half width
+along the segment *and* across it, so `2·hw` covers it; a miter tip is at
+`hw · miterRatio` and `outerJoin` only emits one when
 `miterRatio ≤ miterLimit/256`.  So `hw · max(2, ⌈miterLimit/256⌉)` bounds the
 exact constructions.
 
-`normalOf`, `dirOf`, `circlePoly` and the miter tip each divide with
+`normalOf`, `dirOf`, `rotBy`, `circlePoly` and the miter tip each divide with
 `Int.ediv`, which can lower a component by one `Fx` unit, and a square cap
 stacks two such offsets; using `hw + 2` in place of `hw` and adding a final
 `2` absorbs every one of those floors. -/
@@ -322,71 +335,148 @@ def emitPoly (out : Array (Array Pt)) (poly : Array Pt) : Array (Array Pt) :=
   else if signedArea2 poly < 0 then out.push poly.reverse
   else out.push poly
 
+/-- Vertices in a full turn at radius `r`, for `circlePoly`.  In `[8, 64]`. -/
+def arcSteps (r : Fx) : Nat :=
+  let rpx := (Int.ediv r 256).toNat
+  Nat.min 64 (Nat.max 8 (Nat.sqrt (rpx * 8) + 8))
+
+/-- Vertices in a full turn for a round join or cap: twice `arcSteps`, so at
+most 128, and every loop over it is still bounded by a constant.
+
+`arcSteps` is tuned for a standalone disc, where a coarse inscribed polygon is
+hard to tell from a circle.  A join or cap arc is not standalone: it has to
+meet two straight offsets, and the chord it cuts off shows up against them.
+Measured on the corpus (`within%` at natural size, the five stroke-heavy files
+plus `04` and `11`), doubling is the best of the multipliers tried —
+
+| ×  | 04     | 11     | 15     | 16     | 20     |
+|----|--------|--------|--------|--------|--------|
+| 1  | 99.955 | 99.692 | 97.154 | 95.826 | 99.763 |
+| 2  | 99.965 | 99.728 | 97.282 | 95.933 | 99.777 |
+| 3  | 99.950 | 99.713 | 97.294 | 95.933 | 99.777 |
+| 4  | 99.945 | 99.705 | 97.292 | 95.929 | 99.777 |
+| 6  | 99.938 | 99.703 | 97.274 | 95.926 | 99.777 |
+
+— and it is not monotone past 2, because an inscribed arc under-covers by
+`r(1 - cos(δ/2))` while the straight offsets beside it are a fraction of an
+`Fx` unit thin (`normalOf` floors).  At ×2 the two very nearly cancel; finer
+arcs remove the first without removing the second.  ×2 is also where the cost
+is still nothing: on a flattened curve the turn at a vertex is smaller than
+`δ`, so the arc emits no interior points at all. -/
+def joinSteps (r : Fx) : Nat := 2 * arcSteps r
+
 /-- Regular polygon approximating a circle. -/
 def circlePoly (c : Pt) (r : Fx) : Array Pt :=
-  let rpx := (Int.ediv r 256).toNat
-  let n := Nat.min 64 (Nat.max 8 (Nat.sqrt (rpx * 8) + 8))
+  let n := arcSteps r
   Array.ofFn (n := n) fun i =>
     let ang := Int.ediv ((i.val : Int) * 2 * pi16) n
     let (s, co) := sinCos16 ang
     ⟨Fx.clamp (c.x + Int.ediv (r * co) 65536), Fx.clamp (c.y + Int.ediv (r * s) 65536)⟩
 
-/-- Unit normal of segment `p→q`, scaled to length `hw`. -/
+/-- `256 · |q - p|`, i.e. the segment length with eight extra fractional bits.
+
+`Fx.hypot` floors, and an offset computed against a *floored* length comes out
+systematically **longer** than `hw`: `hw · L / ⌊L⌋`.  On the 1 px segments a
+flattened curve is made of that is 0.4 %, so a stroked curve is a consistent
+fraction of a pixel fat all the way along — small, but the antialiasing shows
+it, and nothing downstream cancels it once the joins are exact.  Eight more
+bits put the length error below what a single `Fx` unit of the result can
+see. -/
+def len8 (dx dy : Fx) : Fx :=
+  Int.ofNat (Nat.sqrt (65536 * (dx.natAbs * dx.natAbs + dy.natAbs * dy.natAbs)))
+
+/-- Unit normal of segment `p→q`, scaled to length `hw`.  Points to the
+traveller's right in screen axes (x right, y down). -/
 def normalOf (p q : Pt) (hw : Fx) : Pt :=
   let dx := q.x - p.x
   let dy := q.y - p.y
-  let len := Fx.hypot dx dy
+  let len := len8 dx dy
   if len == 0 then ⟨0, 0⟩
-  else ⟨Int.ediv (-dy * hw) len, Int.ediv (dx * hw) len⟩
+  else ⟨Int.ediv (-dy * hw * 256) len, Int.ediv (dx * hw * 256) len⟩
 
 /-- Unit direction of `p→q` scaled to length `hw`. -/
 def dirOf (p q : Pt) (hw : Fx) : Pt :=
   let dx := q.x - p.x
   let dy := q.y - p.y
-  let len := Fx.hypot dx dy
+  let len := len8 dx dy
   if len == 0 then ⟨0, 0⟩
-  else ⟨Int.ediv (dx * hw) len, Int.ediv (dy * hw) len⟩
+  else ⟨Int.ediv (dx * hw * 256) len, Int.ediv (dy * hw * 256) len⟩
 
-def emitJoin (st : StrokeStyle) (hw : Fx) (out : Array (Array Pt)) (prev cur next : Pt) :
-    Array (Array Pt) :=
-  let d1 := cur.sub prev
-  let d2 := next.sub cur
-  let cross := d1.x * d2.y - d1.y * d2.x
-  if cross == 0 then out
-  else
-    let n1 := normalOf prev cur hw
-    let n2 := normalOf cur next hw
-    -- Outer side of the turn is opposite the turn direction.
-    let s : Int := if cross > 0 then -1 else 1
-    let o1 : Pt := ⟨s * n1.x, s * n1.y⟩
-    let o2 : Pt := ⟨s * n2.x, s * n2.y⟩
-    let a := cur.add o1
-    let b := cur.add o2
-    match st.join with
-    | .round => emitPoly out (circlePoly cur hw)
-    | .bevel => emitPoly out #[cur, a, b]
-    | .miter =>
-      let sx := o1.x + o2.x
-      let sy := o1.y + o2.y
-      let l2 := sx * sx + sy * sy
-      -- miter ratio = 2·hw/|o1+o2| must not exceed the limit
-      let ok := l2 > 0 && (512 * hw) * (512 * hw) ≤ st.miterLimit * st.miterLimit * l2
-      if ok then
-        let tip : Pt := ⟨Fx.clamp (cur.x + Int.ediv (sx * 2 * hw * hw) l2),
-                         Fx.clamp (cur.y + Int.ediv (sy * 2 * hw * hw) l2)⟩
-        emitPoly out #[cur, a, tip, b]
-      else emitPoly out #[cur, a, b]
+/-- Rotate `v` by the angle whose 16.16 sine and cosine are `s` and `co`. -/
+def rotBy (v : Pt) (s co : Int) : Pt :=
+  ⟨Fx.clamp (Int.ediv (v.x * co - v.y * s) 65536),
+   Fx.clamp (Int.ediv (v.x * s + v.y * co) 65536)⟩
 
-/-- Cap at `to`, for the segment arriving from `from`. -/
-def emitCap (st : StrokeStyle) (hw : Fx) (out : Array (Array Pt)) (from_ to : Pt) :
-    Array (Array Pt) :=
-  match st.cap with
-  | .butt => out
-  | .round => emitPoly out (circlePoly to hw)
-  | .square =>
-    let n := normalOf from_ to hw
-    let e := dirOf from_ to hw
-    emitPoly out #[to.add n, (to.add n).add e, (to.sub n).add e, to.sub n]
+/-- Append an outline contour as it stands.  Unlike `emitPoly` this does **not**
+normalise the orientation: the two contours of a closed stroke must keep their
+opposite orientations, or the ring's hole would fill.  `Raster.insideW` is
+`w ≠ 0`, so the sign of a single contour never matters. -/
+def pushRing (out : Array (Array Pt)) (poly : Array Pt) : Array (Array Pt) :=
+  if poly.size < 3 then out else out.push poly
+
+/-- Interior points of the arc about `pivot` from `pivot + o1` to `pivot + o2`,
+turning in the direction of `sgn` (the sign of `o1 × o2`).  Each point is `o1`
+rotated by `k · 2π/N`, so rounding never accumulates; the walk stops as soon as
+the rotated vector has reached or passed `o2`, and after at most `N` steps. -/
+def arcPts (pivot o1 o2 : Pt) (hw : Fx) (sgn : Int) (acc : Array Pt) : Array Pt := Id.run do
+  let n := joinSteps hw
+  let step := Int.ediv (2 * pi16) n
+  let mut acc := acc
+  for k in [1:n] do
+    let (s, co) := sinCos16 (sgn * (k : Int) * step)
+    let v := rotBy o1 s co
+    if sgn * (v.x * o2.y - v.y * o2.x) ≤ 0 then break
+    acc := acc.push (pivot.add v)
+  return acc
+
+/-- Interior points of the half circle of radius `hw` about `pivot` running from
+`pivot + v` to `pivot - v`.  `v` is the offset normal, which points to the
+traveller's right, so turning the negative way bulges the cap forward, away
+from the path — the same half circle `round_capper` builds from two conics. -/
+def capArcPts (pivot v : Pt) (hw : Fx) (acc : Array Pt) : Array Pt := Id.run do
+  let n := joinSteps hw
+  let step := Int.ediv (2 * pi16) n
+  let mut acc := acc
+  for k in [1:(n + 1) / 2] do
+    let (s, co) := sinCos16 (-((k : Int) * step))
+    acc := acc.push (pivot.add (rotBy v s co))
+  return acc
+
+/-- The join geometry for the **outside** of a turn, appended to that side's
+list, which currently ends at `pivot + o1` and must end at `pivot + o2`.
+`o1`/`o2` are the two segment normals signed onto the outer side. -/
+def outerJoin (st : StrokeStyle) (hw : Fx) (outer : Array Pt) (pivot o1 o2 : Pt) (sgn : Int) :
+    Array Pt :=
+  match st.join with
+  | .bevel => outer.push (pivot.add o2)
+  | .round => (arcPts pivot o1 o2 hw sgn outer).push (pivot.add o2)
+  | .miter =>
+    let sx := o1.x + o2.x
+    let sy := o1.y + o2.y
+    let l2 := sx * sx + sy * sy
+    -- miter ratio = 2·hw/|o1+o2| must not exceed the limit; this is Skia's
+    -- `sin(θ/2) ≥ 1/miterLimit`, since |o1+o2| = 2·hw·sin(θ/2).
+    let ok := l2 > 0 && (512 * hw) * (512 * hw) ≤ st.miterLimit * st.miterLimit * l2
+    if ok then
+      -- Skia's `do_miter` *replaces* the list's last point with the tip when
+      -- the previous segment is a line, because in exact arithmetic the tip
+      -- lies on that segment's offset line.  Ours does not: `normalOf` floors
+      -- each component, and the two normals of a symmetric corner floor in
+      -- opposite directions, so the tip can sit a couple of `Fx` units off the
+      -- line.  Replacing would tilt the whole offset edge and move coverage
+      -- along its entire length, which measurably costs `04_stroke`.  So keep
+      -- `pivot + o1` and append the tip — Skia's `prev_is_line = false` path.
+      let tip : Pt := ⟨Fx.clamp (pivot.x + Int.ediv (sx * 2 * hw * hw) l2),
+                       Fx.clamp (pivot.y + Int.ediv (sy * 2 * hw * hw) l2)⟩
+      (outer.push tip).push (pivot.add o2)
+    else outer.push (pivot.add o2)
+
+/-- Skia's `handle_inner_join`: the inside of a turn goes through the pivot and
+on to its own offset for the next segment.  This over-covers the corner
+slightly, which nonzero winding absorbs, and needs no ray intersection.  `o2` is
+the next segment's normal signed onto the *outer* side. -/
+def innerJoin (inner : Array Pt) (pivot o2 : Pt) : Array Pt :=
+  (inner.push pivot).push (pivot.sub o2)
 
 /-- Remove consecutive duplicate points (and a closing duplicate for closed polys). -/
 def dedupe (poly : Poly) : Array Pt := Id.run do
@@ -399,7 +489,21 @@ def dedupe (poly : Poly) : Array Pt := Id.run do
     if out.getD 0 default == out.getD (out.size - 1) default then out := out.pop
   return out
 
-/-- Stroke one polyline into polygons appended to `out`. -/
+/-- Drop a contour's last point when it repeats the first, so the ring has no
+zero-length closing edge. -/
+def dropClosingDup (a : Array Pt) : Array Pt :=
+  if a.size ≥ 2 && a.getD 0 default == a.getD (a.size - 1) default then a.pop else a
+
+/-- Stroke one polyline into **one closed outline per subpath**, appended to
+`out`: a single polygon for an open subpath, and for a closed one the two rings
+`lp` and `reverse lm`, whose opposite orientations leave the hole at winding 0.
+
+`lp` collects `p + n` and `lm` collects `p - n`, where `n` is the segment
+normal, pointing to the traveller's right.  Neither list is "the outer one":
+each join decides which side is outside from the sign of `n₁ × n₂`, gives that
+side the join geometry and the other side the pivot treatment.  That is
+tiny-skia's `PathStroker` (Skia's `SkStroke`), and it is why there is no
+internal seam for the scan converter to render a level differently. -/
 def strokePoly (st : StrokeStyle) (poly : Poly) (out : Array (Array Pt)) : Array (Array Pt) :=
   Id.run do
     let hw := Int.ediv st.width 2
@@ -416,21 +520,66 @@ def strokePoly (st : StrokeStyle) (poly : Poly) (out : Array (Array Pt)) : Array
                                           ⟨p.x + hw, p.y + hw⟩, ⟨p.x - hw, p.y + hw⟩]
       | .butt => return out
     let segs := if poly.closed then n else n - 1
+    -- one normal per segment
+    let mut nrm : Array Pt := Array.emptyWithCapacity segs
     for i in [0:segs] do
-      let p := pts.getD i default
+      nrm := nrm.push (normalOf (pts.getD i default) (pts.getD ((i + 1) % n) default) hw)
+    let p0 := pts.getD 0 default
+    let n0 := nrm.getD 0 default
+    let mut lp : Array Pt := #[p0.add n0]
+    let mut lm : Array Pt := #[p0.sub n0]
+    for i in [0:segs] do
+      let ni := nrm.getD i default
       let q := pts.getD ((i + 1) % n) default
-      let nn := normalOf p q hw
-      out := emitPoly out #[p.add nn, q.add nn, q.sub nn, p.sub nn]
-    let jStart := if poly.closed then 0 else 1
-    let jEnd := if poly.closed then n else n - 1
-    for i in [jStart:jEnd] do
-      let prev := pts.getD ((i + n - 1) % n) default
-      let cur := pts.getD i default
-      let next := pts.getD ((i + 1) % n) default
-      out := emitJoin st hw out prev cur next
-    if !poly.closed then
-      out := emitCap st hw out (pts.getD 1 default) (pts.getD 0 default)
-      out := emitCap st hw out (pts.getD (n - 2) default) (pts.getD (n - 1) default)
-    return out
+      lp := lp.push (q.add ni)
+      lm := lm.push (q.sub ni)
+      -- join at `q`, for a closed subpath at the wrap-around too
+      if i + 1 < segs || poly.closed then
+        let nj := nrm.getD ((i + 1) % segs) default
+        let cross := ni.x * nj.y - ni.y * nj.x
+        if cross > 0 then
+          -- turning right on screen: the outside is the `-n` side
+          lm := outerJoin st hw lm q ni.neg nj.neg 1
+          lp := innerJoin lp q nj.neg
+        else if cross < 0 then
+          lp := outerJoin st hw lp q ni nj (-1)
+          lm := innerJoin lm q nj
+        else if ni.x * nj.x + ni.y * nj.y < 0 then
+          -- 180° fold: Skia bevels on the `+n` side whichever way it folds
+          lp := lp.push (q.add nj)
+          lm := innerJoin lm q nj
+        -- else collinear: `AngleType::NearlyLine`, no join at all
+    if poly.closed then
+      out := pushRing out (dropClosingDup lp)
+      out := pushRing out (dropClosingDup lm).reverse
+      return out
+    -- open: one loop — `lp`, the end cap, `lm` reversed, the start cap
+    let pe := pts.getD (n - 1) default
+    let nL := nrm.getD (segs - 1) default
+    match st.cap with
+    | .butt => pure ()
+    | .round => lp := capArcPts pe nL hw lp
+    | .square =>
+      -- `dirOf` floors too, so the extended corner is not exactly on the
+      -- offset line either: append rather than replace, as for the miter tip.
+      let par := dirOf (pts.getD (n - 2) default) pe hw
+      lp := lp.push ((pe.add nL).add par)
+      lp := lp.push ((pe.sub nL).add par)
+    lp := lp ++ lm.reverse
+    match st.cap with
+    | .butt => pure ()
+    | .round => lp := capArcPts p0 n0.neg hw lp
+    | .square =>
+      -- The start cap belongs to the segment travelled *backwards*, so take
+      -- both its direction and its normal from the reversed segment.  Mixing
+      -- a backwards `dirOf` with the forward `n0` would not be consistent:
+      -- `normalOf p q` and `normalOf q p` are not exact negatives, since each
+      -- component is floored, and the resulting corner is the one the end cap
+      -- (which is genuinely forward) would not have produced.
+      let par := dirOf (pts.getD 1 default) p0 hw
+      let nS := normalOf (pts.getD 1 default) p0 hw
+      lp := lp.push ((p0.add nS).add par)
+      lp := lp.push ((p0.sub nS).add par)
+    return pushRing out lp
 
 end MicroSvg
