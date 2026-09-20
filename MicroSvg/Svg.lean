@@ -248,6 +248,166 @@ def parseTransform (bs : ByteArray) : Mat := Id.run do
     i := close + 1
   return m
 
+/-! ## Elliptical arcs
+
+`A`/`a` path commands, converted to at most four cubic Béziers by the
+endpoint-to-centre parameterisation of SVG 1.1 §F.6.5.  Everything is integer
+fixed point: `Fx` coordinates in 1/256 px, direction vectors in 16.16, and
+`Nat.sqrt` for every square root.  No `atan2` appears anywhere.  The sweep is
+walked one quarter turn at a time and the decision to stop comes from the sign
+of a cross product; the Bézier constant for a segment spanning θ ≤ 90° comes
+from the half- and quarter-angle tangent identities
+
+    tan (θ/2) = s / (1 + c),    tan (θ/4) = tan (θ/2) / (1 + √(1 + tan² (θ/2)))
+
+evaluated on `c = a · b` and `s = |a × b|` for the segment's unit endpoints,
+and `k = 4/3 · tan (θ/4)`.  At θ = 90° that evaluates to exactly `kappa16`
+(36195), so a quarter drawn as an arc and the same quarter drawn by
+`ellipsePath` produce identical control points, and a circle written as four
+`A` commands rasterises to the same pixels as a `<circle>`.  That is also what
+usvg does: it splits a sweep at quarter-turn boundaries with κ controls rather
+than choosing a segment count from a flatness tolerance.
+-/
+
+/-- Round-to-nearest division by a positive `d`, halves away from zero.  Plain
+`Int.ediv` floors, which would bias every negative coordinate down by up to one
+unit and make an arc quarter disagree with the same quarter from `ellipsePath`. -/
+def divRound (n d : Int) : Int :=
+  if d ≤ 0 then 0
+  else if n ≥ 0 then Int.ediv (2 * n + d) (2 * d)
+  else -(Int.ediv (2 * (-n) + d) (2 * d))
+
+/-- A direction in the ellipse's own parameter space, 16.16 per component. -/
+abbrev ArcDir := Int × Int
+
+/-- A quarter turn in the sweep direction (`pos` is `sweep-flag = 1`, i.e. the
+direction of increasing parameter angle).  A coordinate swap and one sign flip. -/
+def rot90 (pos : Bool) (v : ArcDir) : ArcDir := if pos then (-v.2, v.1) else (v.2, -v.1)
+
+/-- Rescale a 16.16 vector back to unit length, so that accumulated rounding
+cannot present the quarter-turn test with a vector that is not a unit vector. -/
+def unit16 (v : ArcDir) : ArcDir :=
+  let h := Fx.hypot v.1 v.2
+  if h ≤ 0 then (65536, 0)
+  else (divRound (v.1 * 65536) h, divRound (v.2 * 65536) h)
+
+/-- Largest magnitude of a centre coordinate on the refined grid. -/
+def arcHiMax : Int := Fx.maxVal * 65536
+
+def clampHi (a : Int) : Int :=
+  if a > arcHiMax then arcHiMax else if a < -arcHiMax then -arcHiMax else a
+
+/-- One arc segment as a cubic in user space: from unit direction `a` to unit
+direction `b`, no more than a quarter turn apart.  `cx`, `cy` are the centre on
+the refined 16-extra-bit grid (`Fx · 2^16`), and `rx`, `ry` with the 16.16
+`(sn, cs)` of φ map parameter space to user space as
+`c + R(φ)·(rx·v.x, ry·v.y)`; keeping the centre unrounded means a control point
+is quantised once, at the end, exactly like a control point read from a file.
+`fin`, when given, replaces the mapped endpoint: the last segment of an arc
+must land *exactly* on the command's endpoint, otherwise a closed path stops
+being closed. -/
+def arcSegment (cx cy : Int) (rx ry sn cs : Int) (pos : Bool) (a b : ArcDir)
+    (fin : Option Pt) : PathCmd :=
+  let dotv := divRound (a.1 * b.1 + a.2 * b.2) 65536
+  let crs := a.1 * b.2 - a.2 * b.1
+  let sinv := divRound (if crs < 0 then -crs else crs) 65536
+  let den := 65536 + dotv
+  let t2 := if den ≤ 0 then 65536 else divRound (sinv * 65536) den
+  let q := 65536 + divRound (t2 * t2) 65536
+  let r := Int.ofNat (Nat.sqrt (q * 65536).toNat)
+  let t4 := divRound (t2 * 65536) (65536 + r)
+  let k := divRound (4 * t4) 3
+  let ap := rot90 pos a
+  let bp := rot90 pos b
+  let c1v : ArcDir := (a.1 + divRound (k * ap.1) 65536, a.2 + divRound (k * ap.2) 65536)
+  let c2v : ArcDir := (b.1 - divRound (k * bp.1) 65536, b.2 - divRound (k * bp.2) 65536)
+  let toUser := fun (v : ArcDir) =>
+    (⟨Fx.clamp (divRound (cx * 65536 + cs * rx * v.1 - sn * ry * v.2) 4294967296),
+      Fx.clamp (divRound (cy * 65536 + sn * rx * v.1 + cs * ry * v.2) 4294967296)⟩ : Pt)
+  .cubicTo (toUser c1v) (toUser c2v) (fin.getD (toUser b))
+
+/-- Expand one `A`/`a` command into path commands.  `p1` is the current point,
+`p2` the command's (already resolved) endpoint, `phi` the x-axis rotation in
+degrees, `fA`/`fS` the large-arc and sweep flags. -/
+def arcPath (p1 : Pt) (rxIn ryIn phi : Fx) (fA fS : Bool) (p2 : Pt) : Array PathCmd := Id.run do
+  -- §F.6.2 out-of-range handling: a zero-length arc is dropped entirely, a
+  -- zero radius degenerates to a straight line, and the radii are taken as
+  -- absolute values.
+  if p1.x == p2.x && p1.y == p2.y then return #[]
+  let rx0 := rxIn.natAbs
+  let ry0 := ryIn.natAbs
+  if rx0 == 0 || ry0 == 0 then return #[.lineTo p2]
+  let (sn, cs) := sinCos16 (degToRad16 phi)
+  -- §F.6.5.1: half of `p1 − p2`, rotated by −φ.  The halving is folded into
+  -- the 16.16 divisor so no bit is lost before the rounding.
+  let dx := p1.x - p2.x
+  let dy := p1.y - p2.y
+  let x1 : Fx := divRound (cs * dx + sn * dy) 131072
+  let y1 : Fx := divRound (cs * dy - sn * dx) 131072
+  let xa := x1.natAbs
+  let ya := y1.natAbs
+  -- §F.6.6: if the endpoints do not fit on the ellipse, scale both radii by
+  -- `√Λ`, i.e. `rx := √(x1'²ry² + y1'²rx²)/ry` and `ry := √(…)/rx` with the
+  -- *original* radii on the right.
+  --
+  -- Both square root and division round *down*, deliberately.  A corrected
+  -- ellipse is one the endpoints lie on, so `num` below is zero and the centre
+  -- is the midpoint of the chord.  Rounding a radius up by even one 1/256 px
+  -- makes `num` positive instead, and the centre then moves by
+  -- `√(r'² − (chord/2)²)` — a square root of a tiny number, so a quarter of a
+  -- pixel of slop in the radius throws the centre a third of a unit off the
+  -- chord.  Rounding down keeps `num` at zero (`Nat` subtraction truncates)
+  -- and lands on exactly the degenerate half-turn the geometry asks for.
+  let fit := xa * xa * (ry0 * ry0) + ya * ya * (rx0 * rx0)
+  let cap := rx0 * rx0 * (ry0 * ry0)
+  let (rxN, ryN) :=
+    if fit ≤ cap then (rx0, ry0)
+    else
+      let s := Nat.sqrt fit
+      (Nat.max 1 (s / ry0), Nat.max 1 (s / rx0))
+  let rx2 := rxN * rxN
+  let ry2 := ryN * ryN
+  let den := rx2 * (ya * ya) + ry2 * (xa * xa)
+  if den == 0 then return #[.lineTo p2]
+  -- §F.6.5.2: the centre in the rotated frame.  `Nat` subtraction truncates at
+  -- zero, which is exactly the clamp the spec asks for when rounding has made
+  -- the numerator slightly negative.  `coef` is `√(num/den)` in 16.16.
+  let coef := Int.ofNat (Nat.sqrt ((rx2 * ry2 - den) * 4294967296 / den))
+  let rx : Int := Int.ofNat rxN
+  let ry : Int := Int.ofNat ryN
+  let sgn : Int := if fA != fS then 1 else -1
+  -- The centre stays on the refined `Fx · 2^16` grid all the way to the
+  -- control points, so the only quantisation to 1/256 px is the final one.
+  let cxp := clampHi (divRound (sgn * coef * rx * y1) ry)
+  let cyp := clampHi (divRound (-(sgn * coef * ry * x1)) rx)
+  -- §F.6.5.3: back to user space, `c = R(φ)·(cx', cy') + (p1 + p2)/2`.
+  let cx := clampHi (divRound (2 * (cs * cxp - sn * cyp) + 4294967296 * (p1.x + p2.x)) 131072)
+  let cy := clampHi (divRound (2 * (sn * cxp + cs * cyp) + 4294967296 * (p1.y + p2.y)) 131072)
+  -- §F.6.5.5, without the angles: the two endpoints as unit directions.
+  let u1 := unit16 (divRound (x1 * 65536 - cxp) rx, divRound (y1 * 65536 - cyp) ry)
+  let u2 := unit16 (divRound (-(x1 * 65536) - cxp) rx, divRound (-(y1 * 65536) - cyp) ry)
+  -- Walk the sweep.  A sweep is under a full turn, so at most four segments.
+  let mut out : Array PathCmd := #[]
+  let mut u := u1
+  let mut done := false
+  for step in [0:4] do
+    let crs := u.1 * u2.2 - u.2 * u2.1
+    let dotv := u.1 * u2.1 + u.2 * u2.2
+    -- `u2` is inside the next quarter turn when the cross product carries the
+    -- sweep's sign (or is zero) and the angle is at most 90°.  The exception
+    -- is a full turn: rounding has collapsed `u2` onto `u1` while `fA` says
+    -- the sweep is more than half a turn, which needs all four quarters.
+    let full := step == 0 && fA && u.1 == u2.1 && u.2 == u2.2
+    if (if fS then crs ≥ 0 else crs ≤ 0) && dotv ≥ 0 && !full then
+      out := out.push (arcSegment cx cy rx ry sn cs fS u u2 (some p2))
+      done := true
+      break
+    let v := rot90 fS u
+    out := out.push (arcSegment cx cy rx ry sn cs fS u v none)
+    u := v
+  if !done then out := out.push (.lineTo p2)
+  return out
+
 /-! ## Path data -/
 
 /-- Parse `d` path data.  On a syntax error the commands parsed so far are
@@ -280,26 +440,43 @@ def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
     let rel := 97 ≤ cmd && cmd ≤ 122
     let base := if rel then cur else ⟨0, 0⟩
     let up := toLower cmd
-    -- read up to six numbers as needed
+    -- read up to seven numbers as needed
     let need : Nat :=
       if up == 109 || up == 108 || up == 116 then 2
       else if up == 104 || up == 118 then 1
       else if up == 99 then 6
       else if up == 115 || up == 113 then 4
+      else if up == 97 then 7
       else 0
     if need == 0 then break
     let mut nums : Array Fx := #[]
     let mut j := i
     let mut okNums := true
-    for _ in [0:need] do
+    for t in [0:need] do
       j := skipWsComma bs j
-      match parseNumber bs j with
-      | some (v, k) =>
-        nums := nums.push v
-        j := k
-      | none =>
-        okNums := false
-        break
+      if up == 97 && (t == 3 || t == 4) then
+        -- The two arc flags are single characters, and the grammar lets them
+        -- run together with no separator and with the endpoint that follows
+        -- (`a1 1 0 0110 5`), so exactly one byte is consumed for each.  They
+        -- ride along in `nums` as `0` or `1` on the `Fx` grid.
+        let fc := at' bs j
+        if fc == 48 then
+          nums := nums.push 0
+          j := j + 1
+        else if fc == 49 then
+          nums := nums.push Fx.one
+          j := j + 1
+        else
+          okNums := false
+          break
+      else
+        match parseNumber bs j with
+        | some (v, k) =>
+          nums := nums.push v
+          j := k
+        | none =>
+          okNums := false
+          break
     if !okNums then break
     if !haveMove && up != 109 then break
     i := j
@@ -355,6 +532,11 @@ def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
       out := out.push (.cubicTo c1 c2 q)
       lastQ := qc
       prevWasQ := true
+      cur := q
+    else if up == 97 then
+      -- rx ry φ are never relative; only the endpoint is.
+      let q := p 5
+      out := out.append (arcPath cur (g 0) (g 1) (g 2) (g 3 != 0) (g 4 != 0) q)
       cur := q
   return out
 
