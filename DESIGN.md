@@ -116,26 +116,46 @@ integer Bernstein form divided by `n³`. Circles are four cubics with
 
 ### 3.5 Rasterizer
 
-Signed-area accumulation (font-rs / stb_truetype). For an edge piece inside
-one pixel row with vertical extent `dy` and horizontal extent `[xl, xr]`
-(all in 1/256 px), the coverage of column `c` is
+A port of tiny-skia's (Skia's) supersampling scan converter, because resvg
+rasterizes with tiny-skia and matching its coverage is what makes the pixels
+agree. Coordinates are scaled by `SCALE = 4` in both axes, so a pixel row is
+four *sub-scanlines* and a pixel column four *sub-columns*; `Fx` (1/256 px) is
+exactly Skia's `FDot6` in that space, so no conversion is needed.
 
-    cov_c = dy · (R(c+1) − R(c)) / 256,   R(k) = ∫₀¹ max(0, k − x(t)) dt
+Each segment becomes a `LineEdge` exactly as `edge.rs` builds one:
+`top = (y0+32) >> 6`, `bottom = (y1+32) >> 6` (dropped when equal),
+`slope = ((x1−x0) << 16) / (y1−y0)` truncating toward zero, `dy = (top << 6) +
+32 − y0`, `x = (x0 + ((slope·dy) >> 16)) << 10` in 16.16, then `x += slope`
+per sub-scanline. Sub-scanline `t` therefore samples at supersampled `y = t`
+exactly, i.e. at device `y = t/4`.
 
-with `x(t)` linear from `xl` to `xr`. `R` has the closed form 0 / quadratic /
-linear on the three ranges of `k`, and `512·R` is an exact integer, so
-`cov_c = dy · ΔR2 / 512` in `Nat`. The accumulator stores `cov_c − cov_{c−1}`
-so a prefix sum along the row gives each pixel's coverage, in units where
-65536 = full. Nonzero: `min(|sum|, 65536)`. Even-odd: fold `|sum| mod 131072`
-as a triangle wave.
+Per sub-scanline the winding number over sub-columns is what decides coverage.
+`walk_edges` gets it by keeping the active edges x-sorted; we instead bin each
+active edge's rounded sub-column `(x + 0x8000) >> 16` (clamped to the mask)
+into a delta array and prefix-sum it, which yields the identical set of covered
+sub-columns without an insertion sort that would degrade on paths with
+hundreds of thousands of edges. Nonzero is `w ≠ 0`, even-odd is `w` odd.
 
-Edges are clipped: vertically to the mask (discard outside), horizontally by
-splitting at `x = 0` and `x = bw` and clamping the outside pieces onto the
-boundary, which preserves winding for every visible pixel. After clipping
-every coordinate is a non-negative `Nat` below 2^22, so all products fit in
-63 bits.
+Each covered run is then blitted like `SuperBlitter::blit_h` + `AlphaRuns::add`:
+`16` per covered quarter of a partly covered pixel, and `maxValue` = 64, 64,
+64, 63 by sub-scanline index for a fully covered interior pixel, accumulated
+per destination row and saturated at 255. Four sub-scanlines add to exactly
+255. The only deviation from tiny-skia: two spans that abut at one sub-column
+are blitted as one run, so a pixel that is "interior" in the merged run gets
+63 instead of 64 on the fourth sub-scanline — at most one level out of 255.
 
-Masks cover only the shape's bounding box ∩ canvas.
+The 0..255 alpha becomes the `Mask` convention `cov ∈ [0, 65536]` via
+`cov = ⌈alpha·65536/255⌉`, the exact inverse of `Canvas.fillMask`'s
+`alpha = a·cov·opacity/2^24` for an opaque paint, so 255 stays 255.
+
+Clipping: vertically to the mask (scanlines outside are discarded), and
+horizontally by clamping each edge's sub-column to `[0, 4·bw]`, which keeps the
+winding contribution of everything left of the mask. An edge whose sub-column
+is pinned to a boundary for its whole life is stored with `dx = 0`, so a shape
+reaching far outside the canvas cannot put huge numbers in the hot loop.
+
+Masks cover only the shape's bounding box ∩ canvas. The walk costs
+O(Σ edges × sub-scanlines crossed) plus O(16·bw·bh) for the row scans.
 
 ### 3.6 Stroking
 
