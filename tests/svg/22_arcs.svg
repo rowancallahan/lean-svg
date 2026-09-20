@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="420" viewBox="0 0 400 300">
+  <rect width="400" height="300" fill="#fbfbf7"/>
+
+  <!-- all four large-arc/sweep combinations, same endpoints and same radii -->
+  <g fill="none" stroke-width="5">
+    <path d="M20,70 A26,26 0 0,0 72,70" stroke="#1f77b4"/>
+    <path d="M110,70 A26,26 0 0,1 162,70" stroke="#ff7f0e"/>
+    <path d="M200,70 A26,26 0 1,0 252,70" stroke="#2ca02c"/>
+    <path d="M290,70 A26,26 0 1,1 342,70" stroke="#d62728"/>
+  </g>
+
+  <!-- the same elliptical arc at three x-axis-rotations, including a
+       negative one and a fractional one -->
+  <g fill="none" stroke-width="4">
+    <path d="M30,150 A44,20 0 0,1 96,170" stroke="#7b3fa0"/>
+    <path d="M110,150 A44,20 -30 0,1 176,170" stroke="#8c564b"/>
+    <path d="M190,150 A44,20 62.5 0,1 256,170" stroke="#17becf"/>
+  </g>
+
+  <!-- radii far too small for the endpoints: §F.6.6 scales both up.  The two
+       arcs span 90 px with radii of 10, a correction factor of 4.5. -->
+  <path d="M280,150 A10,10 0 0,1 370,150 A10,10 0 0,1 280,150"
+        fill="#e7c9a9" stroke="#444" stroke-width="2"/>
+
+  <!-- a full circle as two half-turn arcs in relative form -->
+  <path d="M40,240 a28,28 0 1,0 56,0 a28,28 0 1,0 -56,0" fill="#4c72b0"/>
+
+  <!-- the same, twice, with every flag pair written with no separator at all
+       (`1156,0` is fA=1 fS=1 x=56 y=0); even-odd makes it a ring -->
+  <path d="M120,240a28,28 0 1156,0a28,28 0 11-56,0M134,240a14,14 0 1128,0a14,14 0 11-28,0"
+        fill="#dd8452" fill-rule="evenodd"/>
+
+  <!-- out-of-range forms from §F.6.2: a zero radius degenerates to a line and
+       an arc whose endpoint is already the current point vanishes, so this
+       draws a plain square -->
+  <path d="M190,215 A0,20 0 1,1 240,215 A18,18 0 0,1 240,215 L240,265 A0,0 0 0,0 190,265 Z"
+        fill="none" stroke="#555" stroke-width="3"/>
+
+  <!-- an icon-like rounded shape: an arc at every corner, relative and
+       absolute mixed, closed so the last arc must land exactly on the start -->
+  <path d="M270,212 h44 a16,16 0 0 1 16,16 v24 a16,16 0 0 1 -16,16 h-44
+           a16,16 0 0 1 -16,-16 v-24 A16,16 0 0 1 270,212 Z"
+        fill="#55a868"/>
+  <path d="M292,226 a14,14 0 1,1 -0.01,0 Z" fill="#fbfbf7"/>
+</svg>
