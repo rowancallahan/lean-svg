@@ -125,16 +125,72 @@ structure Poly where
   closed : Bool
 deriving Repr, Inhabited
 
-/-- Number of line segments used for a cubic, from its control-polygon length in
-device space.  Bounded in `[1, 100]`, so flattening cost is linear in the path. -/
+/-- How far the two off-curve control points sit from the curve itself, along
+one axis: `f(1/3) - b` and `f(2/3) - c` for the cubic `a b c d`, with `19/512`
+standing in for `1/27`.  Skia's `SkCubicDeltaFromLine`, which tiny-skia keeps
+verbatim in `edge.rs`.
+
+The centre of the curve is not a usable probe (it can coincide with the centre
+of the chord on an S-shape), which is why both thirds are taken.  The shifts
+are floor divisions and the absolute value is taken *after* them, exactly as
+Rust's arithmetic `>>` on a negative `i32` does. -/
+def cubicDeltaFromLine (a b c d : Fx) : Fx :=
+  let oneThird := Fx.abs (Int.ediv ((a * 8 - b * 15 + c * 6 + d) * 19) 512)
+  let twoThird := Fx.abs (Int.ediv ((a + b * 6 - c * 15 + d * 8) * 19) 512)
+  Fx.max oneThird twoThird
+
+/-- `max + min/2`, Skia's octagonal stand-in for `√(dx² + dy²)`. -/
+def cheapDistance (dx dy : Fx) : Fx :=
+  let dx := Fx.abs dx
+  let dy := Fx.abs dy
+  if dx > dy then dx + Int.ediv dy 2 else dy + Int.ediv dx 2
+
+/-- Bit length of `n`, i.e. `32 - n.leading_zeros()` for a non-negative `i32`.
+The loop is a `for` over a constant range; 64 steps cover every `Nat` a
+coordinate bounded by `Fx.maxVal` can reach here. -/
+def bitLength (n : Nat) : Nat := Id.run do
+  let mut v := n
+  let mut bits : Nat := 0
+  for _ in [0:64] do
+    if v != 0 then
+      v := v / 2
+      bits := bits + 1
+  return bits
+
+/-- tiny-skia's `diff_to_shift(dx, dy, shift_aa)` with `shift_aa = 2`, the
+value `CubicEdge::new2` passes literally (it does *not* forward the builder's
+`clip_shift`, though for us the two coincide).
+
+`dist` starts in supersampled FDot6 — our `Fx` — and is rounded down to eighths
+of a supersampled pixel by `(dist + 16) >> 5`; each further subdivision cuts
+the chord error by 4, so half the bit length is the number of subdivisions
+needed. -/
+def diffToShift (dx dy : Fx) : Nat :=
+  let dist := (Int.ediv (cheapDistance dx dy + 16) 32).toNat
+  bitLength dist / 2
+
+/-- Largest `shift` tiny-skia will use: `MAX_COEFF_SHIFT`, which exists because
+Skia stores `curve_count` in an `i8`. -/
+def maxCoeffShift : Nat := 6
+
+/-- Number of line segments used for a cubic: tiny-skia's
+`CubicEdge::new2`, which takes `2 ^ (diff_to_shift(dx, dy, 2) + 1)` steps with
+the exponent clamped to `MAX_COEFF_SHIFT`.  `dx`/`dy` are measured on the
+*device-space* control points, which in our units are already the FDot6 values
+tiny-skia computes (`Fx` is FDot6 in the 4× supersampled space).
+
+The result is a power of two in `[2, 64]`, so flattening cost stays linear in
+the path with a constant a little over twice the old `√(2·L_px) + 1` rule — the
+rule that inscribed an 83-gon in an `r = 80` circle where tiny-skia inscribes a
+128-gon. -/
 def segCount (ctm : Mat) (p0 p1 p2 p3 : Pt) : Nat :=
   let q0 := ctm.apply p0
   let q1 := ctm.apply p1
   let q2 := ctm.apply p2
   let q3 := ctm.apply p3
-  let l := q0.dist q1 + q1.dist q2 + q2.dist q3
-  let lpx := (Int.ediv l 256).toNat
-  Nat.min 100 (Nat.max 1 (Nat.sqrt (2 * lpx) + 1))
+  let dx := cubicDeltaFromLine q0.x q1.x q2.x q3.x
+  let dy := cubicDeltaFromLine q0.y q1.y q2.y q3.y
+  2 ^ Nat.min maxCoeffShift (diffToShift dx dy + 1)
 
 /-- Point `k/n` along a cubic Bézier, evaluated exactly in integers. -/
 def cubicAt (p0 p1 p2 p3 : Pt) (k n : Nat) : Pt :=
