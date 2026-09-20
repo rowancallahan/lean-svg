@@ -183,8 +183,15 @@ Design (decided):
    `16_stress_2000` at 1600 px for 1, 2, 4, 8 threads. Memory: each band
    canvas is `4·W·rows`, total unchanged.
 
-Not started. Do after T11/T12 land to avoid touching `Render.drawShape`
-concurrently.
+**Done (T14, 2026-09-20):** `--threads N`, byte-identical, 2.5–3× on 4
+threads. Finding for M6: four *processes* scale better (3.4×/4.4×) than
+four in-process tasks (2.6×/2.5×), most likely because `Task.spawn` marks
+the shared `Doc` multi-threaded and the hot culling/flatten loops then pay
+atomic reference counting. Candidate fixes: give each band its own copy of
+the shape list (cheap relative to rasterizing), or spawn coarser tasks.
+Also: equal-row bands load-imbalance on files like 12_badge; a work queue
+of smaller bands would help there. Theorem `renderPar = render` not written;
+tested by 1 920 identical renders and `run_tiles.py`.
 
 ## M7 — Verified DEFLATE via lean-zip  [Opus after checking the API]
 

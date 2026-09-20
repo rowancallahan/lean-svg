@@ -1,5 +1,35 @@
 # Session summary — 2026-09-19 → 2026-09-20
 
+## Update 2026-09-20 evening: T6, T11, T12, T13, T14 merged (main a7feb5e)
+
+- **T6 sorted edge walk** (1.5–1.8× rasterizer), merged on Rowan's call
+  despite −3/−7 within-8 px on two stroke files; **T11 seamless stroker**
+  then recovered them and lifted 10 files (spiral 97.15→97.28, stress
+  95.83→96.21, function plot →99.78); one pixel lost on 12_badge.
+- **T12 hairline strokes** (tiny-skia `hairline_aa` port for device width
+  ≤ 1 px): 17_koch 96.9→99.2 PASS, new `21_hairlines.svg` 99.6; other files
+  byte-identical. Corpus is now **17/21** at ≥99% within 8; failing:
+  12_badge 97.66, 14_flower 97.61, 15_spiral 97.28, 16_stress 96.21.
+- **T14 parallel bands** via pure `Task.spawn`/`Task.get`: `--threads N`,
+  byte-identical (1 920 renders), stress @1600 px 2.34 s → 0.79 s on 4
+  threads, `Effect.lean` untouched, `render` type unchanged, axioms
+  `propext`. Finding: 4 processes beat 4 tasks (atomic RC on the shared
+  `Doc`), noted in PLAN M6b.
+- **T13 playground**: re-render at displayed size on resize, thumbnail
+  strip, 1:1 draw canvas, timing strip. Server on port 8766 during the
+  session (`python3 playground/server.py --port 8766`).
+- Harnesses after every merge: tiles 21/21, adversarial 38/38; a 2000 px
+  spot render hashed against the pre-merge binary where output should be
+  unchanged.
+- **T15 external corpora** (resvg-test-suite, simple-icons, feather;
+  direct and via-usvg routes) is running; results go in its task file.
+- Conventions: `tasks/README.md` rules 8 (multiline shell) and 9 (short
+  verification loop). PLAN additions: M3b stronger effect theorems
+  (no-clobber, size bound, work bound, max input), M6b parallel bands.
+- Remaining fidelity gap, per reports: curve flattening (Skia-style cubic
+  subdivision; circles inscribe an ~83-gon), input rounding (truncate vs
+  round at 1/256 px), group opacity as a real layer.
+
 ## Update 2026-09-20 afternoon: T8 and T10 merged (main b0a298d)
 
 - **T10 tile culling** merged: byte-identical (80 CLI renders, 160 viewport
