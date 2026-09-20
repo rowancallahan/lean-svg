@@ -45,6 +45,7 @@
   @media (max-width: 900px) {
     main { grid-template-columns: 1fr; }
   }
+  .full { grid-column: 1 / -1; }
 
   .card {
     background: var(--panel);
@@ -75,6 +76,7 @@
     padding: 6px 8px;
   }
   select { width: 100%; }
+  #examples { width: auto; max-width: 280px; }
   textarea {
     width: 100%;
     font-family: var(--mono);
@@ -113,7 +115,65 @@
   .hint { color: var(--muted); font-size: 12px; }
   .spacer { flex: 1; }
 
-  /* tiles */
+  /* examples thumbnail strip */
+  .thumbs {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 4px 2px 8px;
+  }
+  .thumbs:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  .thumb {
+    flex: 0 0 auto;
+    width: 80px;
+    padding: 5px 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .thumb img {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    background: #fff;
+    border-radius: 4px;
+  }
+  .thumb .nm {
+    font-size: 10px;
+    line-height: 1.2;
+    color: var(--muted);
+    max-width: 70px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .thumb.on {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .thumb.on .nm { color: var(--ink); font-weight: 600; }
+
+  /* resizable tile area */
+  .tilesWrap {
+    resize: both;
+    overflow: auto;
+    scrollbar-gutter: stable;
+    width: 100%;
+    height: 620px;
+    min-width: 300px;
+    min-height: 260px;
+    padding: 8px 10px 10px 8px;
+    border: 1px dashed #c6ccd3;
+    border-radius: 10px;
+    /* a grip in the bottom-right corner; background-attachment: scroll keeps it
+       pinned to the border box instead of scrolling away with the tiles */
+    background-image:
+      linear-gradient(135deg, transparent 0 40%, #9aa3ab 40% 52%, transparent 52% 70%, #9aa3ab 70% 82%, transparent 82% 100%);
+    background-repeat: no-repeat;
+    background-position: right 4px bottom 4px;
+    background-size: 13px 13px;
+  }
   .tiles {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -151,16 +211,44 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: auto;
+    /* 1:1 mode: never scroll, so an inner scrollbar can never feed back into
+       the width the ResizeObserver reports */
+    overflow: hidden;
     padding: 6px;
   }
   .stage img, .stage canvas {
     display: block;
-    image-rendering: pixelated;
     max-width: 100%;
     height: auto;
   }
+  /* zoom mode: pixel-double and allow scrolling inside the stage */
+  .zoomed .stage { overflow: auto; }
+  .zoomed .stage img, .zoomed .stage canvas {
+    image-rendering: pixelated;
+    max-width: none;
+  }
   .stage .empty { color: var(--muted); font-size: 12px; padding: 24px 8px; text-align: center; }
+
+  /* timing strip */
+  .timing {
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .hist {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    max-height: 154px;
+    overflow: auto;
+  }
+  .hist li { white-space: nowrap; }
 
   /* metrics */
   .metrics {
@@ -243,13 +331,27 @@
 </header>
 
 <main>
+  <!-- ------------------------------------------------ examples -------- -->
+  <section class="full">
+    <div class="card">
+      <h2>Examples</h2>
+      <div class="thumbs" id="thumbs" tabindex="0" role="listbox" aria-label="Example SVGs"></div>
+      <div class="row">
+        <label for="examples">fallback</label>
+        <select id="examples" aria-label="Examples (fallback list)">
+          <option value="">Examples…</option>
+        </select>
+        <span class="hint">← / → step through the strip</span>
+        <span class="spacer"></span>
+        <span class="hint" id="exCount"></span>
+      </div>
+    </div>
+  </section>
+
   <!-- ------------------------------------------------ left ------------ -->
   <section>
     <div class="card">
       <h2>Source</h2>
-      <select id="examples" aria-label="Examples">
-        <option value="">Examples…</option>
-      </select>
       <textarea id="src" rows="20" spellcheck="false" aria-label="SVG source"></textarea>
       <div class="row" style="margin-top:8px">
         <button id="render" class="primary">Render</button>
@@ -266,6 +368,8 @@
         <button class="mini mode" data-mode="freehand">Freehand</button>
         <button class="mini mode" data-mode="circle">Circle</button>
         <button class="mini mode" data-mode="rect">Rect</button>
+        <span class="spacer"></span>
+        <span class="hint" id="canvasHint"></span>
       </div>
       <canvas id="drawCanvas" width="200" height="200"></canvas>
       <div class="row" style="margin-top:8px">
@@ -284,24 +388,35 @@
 
   <!-- ------------------------------------------------ right ----------- -->
   <section>
-    <div class="tiles">
-      <div class="tile">
-        <div class="cap">Browser <span class="sub" id="capBrowser"></span></div>
-        <div class="stage" id="stageBrowser"><div class="empty">—</div></div>
-      </div>
-      <div class="tile">
-        <div class="cap">resvg (reference) <span class="sub" id="capRef"></span></div>
-        <div class="stage" id="stageRef"><div class="empty">—</div></div>
-      </div>
-      <div class="tile">
-        <div class="cap">microsvg (ours) <span class="sub" id="capOurs"></span></div>
-        <div class="stage" id="stageOurs"><div class="empty">—</div></div>
-      </div>
-      <div class="tile">
-        <div class="cap">Diff (red = differs) <span class="sub" id="capDiff"></span></div>
-        <div class="stage" id="stageDiff"><div class="empty">—</div></div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="mini" id="zoom">Zoom 2×</button>
+      <button class="mini" id="resetSize">Reset size</button>
+      <span class="hint" id="sizeHint">—</span>
+    </div>
+
+    <div class="tilesWrap" id="tilesWrap">
+      <div class="tiles">
+        <div class="tile">
+          <div class="cap">Browser <span class="sub" id="capBrowser"></span></div>
+          <div class="stage" id="stageBrowser"><div class="empty">—</div></div>
+        </div>
+        <div class="tile">
+          <div class="cap">resvg (reference) <span class="sub" id="capRef"></span></div>
+          <div class="stage" id="stageRef"><div class="empty">—</div></div>
+        </div>
+        <div class="tile" id="tileOurs">
+          <div class="cap">microsvg (ours) <span class="sub" id="capOurs"></span></div>
+          <div class="stage" id="stageOurs"><div class="empty">—</div></div>
+        </div>
+        <div class="tile">
+          <div class="cap">Diff (red = differs) <span class="sub" id="capDiff"></span></div>
+          <div class="stage" id="stageDiff"><div class="empty">—</div></div>
+        </div>
       </div>
     </div>
+
+    <div class="timing" id="timing">—</div>
+    <ol class="hist" id="hist" aria-label="recent renders"></ol>
 
     <div class="metrics" id="metrics">
       <div class="metric"><div class="k">exact</div><div class="v" id="mExact">—</div></div>
@@ -321,12 +436,25 @@
   "use strict";
 
   var BLANK = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n</svg>\n';
-  var SCALE = 2; // display images at 2x natural size (capped by tile width via CSS)
+  var ZOOM = 2;             // "Zoom 2x" factor
+  var MIN_W = 32;           // smallest width we ask the renderers for
+  var MAX_W = 2048;         // largest, so a wild drag cannot start a huge render
+  var DEBOUNCE_MS = 150;    // resize settle time before re-rendering
+  var HIST_MAX = 10;
 
   var $ = function (id) { return document.getElementById(id); };
   var srcEl = $("src");
   var statusEl = $("status");
   var errbox = $("errbox");
+
+  var zoomOn = false;
+  var renderWidth = 0;      // px width the microsvg stage can show 1:1
+  var lastSentWidth = null; // width of the most recently issued request
+  var renderCount = 0;
+  var hist = [];
+
+  // Exposed so a test can read the render count without scraping the console.
+  window.__playground = { renders: 0, resizeRenders: 0, lastWidth: null, history: hist };
 
   /* ---------------------------------------------------------- helpers -- */
 
@@ -349,10 +477,22 @@
     setStage(stage, d);
   }
 
-  // Display at 2x natural size, but never wider than the tile (CSS max-width).
-  function sizeAt2x(img) {
-    var w = img.naturalWidth || 0;
-    if (w > 0) img.style.width = (w * SCALE) + "px";
+  // Images are shown 1:1 by default; "Zoom 2x" doubles every stage image and
+  // turns on pixelated scaling so anti-aliasing seams are visible.
+  function setBase(el, baseW) {
+    el.setAttribute("data-base-w", String(Math.max(0, Math.round(baseW || 0))));
+    applyScale(el);
+  }
+
+  function applyScale(el) {
+    var b = parseInt(el.getAttribute("data-base-w") || "0", 10);
+    if (!b) b = el.naturalWidth || el.width || 0;
+    if (b > 0) el.style.width = (zoomOn ? b * ZOOM : b) + "px";
+  }
+
+  function rescaleAll() {
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".stage img, .stage canvas"), applyScale);
   }
 
   function loadImage(src) {
@@ -365,9 +505,87 @@
   }
 
   function pct(x) { return (x * 100).toFixed(2) + "%"; }
+  function ms(x) { return (x != null ? x.toFixed(0) : "—") + " ms"; }
+
+  /* ------------------------------------------------- render size ------- */
+
+  function clampW(w) {
+    if (!isFinite(w)) return 0;
+    return Math.max(MIN_W, Math.min(MAX_W, Math.floor(w)));
+  }
+
+  // Usable width inside the microsvg tile's stage (content box).
+  function stageWidth() {
+    var stage = $("stageOurs");
+    var pad = 0;
+    try {
+      var cs = window.getComputedStyle(stage);
+      pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    } catch (e) { pad = 12; }
+    return clampW(stage.clientWidth - pad);
+  }
+
+  function updateSizeHint() {
+    $("sizeHint").textContent =
+      "render width " + (renderWidth || "?") + " px · " +
+      (zoomOn ? "displayed 2× (pixelated)" : "displayed 1:1") +
+      " · drag the dashed corner to resize";
+  }
+
+  // Returns true when the width moved enough to be worth a re-render.
+  function noteWidth(w) {
+    if (!w) return false;
+    if (Math.abs(w - renderWidth) < 2) return false;
+    renderWidth = w;
+    updateSizeHint();
+    return true;
+  }
+
+  var resizeTimer = null;
+  function scheduleResizeRender() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      resizeTimer = null;
+      if (renderWidth > 0 && renderWidth !== lastSentWidth) {
+        window.__playground.resizeRenders++;
+        render("resize");
+      }
+    }, DEBOUNCE_MS);
+  }
+
+  function watchSize() {
+    noteWidth(stageWidth());
+    if (typeof ResizeObserver === "function") {
+      var ro = new ResizeObserver(function () {
+        if (noteWidth(stageWidth())) scheduleResizeRender();
+      });
+      ro.observe($("stageOurs"));
+    }
+    // Window resizes reach the tile through the observer above, but a browser
+    // without ResizeObserver still gets re-renders from this listener.
+    window.addEventListener("resize", function () {
+      if (noteWidth(stageWidth())) scheduleResizeRender();
+    });
+    $("resetSize").addEventListener("click", function () {
+      var wrap = $("tilesWrap");
+      wrap.style.width = "";
+      wrap.style.height = "";
+      if (noteWidth(stageWidth())) scheduleResizeRender();
+    });
+    $("zoom").addEventListener("click", function () {
+      zoomOn = !zoomOn;
+      $("zoom").classList.toggle("on", zoomOn);
+      $("tilesWrap").classList.toggle("zoomed", zoomOn);
+      rescaleAll();
+      updateSizeHint();
+    });
+    updateSizeHint();
+  }
 
   /* ------------------------------------------------------ the 4 tiles -- */
 
+  // The browser tile is vector, so it is displayed at the same width the
+  // rasterizers were asked for rather than at the SVG's intrinsic size.
   function showBrowser(svgText) {
     var stage = $("stageBrowser");
     var cap = $("capBrowser");
@@ -377,8 +595,11 @@
     img.src = "data:image/svg+xml;base64," + b64utf8(svgText);
     img.alt = "browser rendering";
     img.onload = function () {
-      sizeAt2x(img);
-      cap.textContent = img.naturalWidth + "x" + img.naturalHeight;
+      var nw = img.naturalWidth || 0, nh = img.naturalHeight || 0;
+      var target = renderWidth || nw;
+      setBase(img, target);
+      var th = nw > 0 ? Math.round(nh * target / nw) : nh;
+      cap.textContent = target + "×" + th + (nw ? " · src " + nw + "×" + nh : "");
       setStage(stage, img);
     };
     img.onerror = function () {
@@ -391,8 +612,8 @@
     var stage = $(stageId), cap = $(capId);
     if (!b64) { cap.textContent = ""; emptyStage(stage, "no output"); return Promise.resolve(null); }
     return loadImage("data:image/png;base64," + b64).then(function (img) {
-      sizeAt2x(img);
-      cap.textContent = img.naturalWidth + "x" + img.naturalHeight;
+      setBase(img, img.naturalWidth);
+      cap.textContent = img.naturalWidth + "×" + img.naturalHeight;
       setStage(stage, img);
       return img;
     }).catch(function () {
@@ -449,7 +670,7 @@
       }
     }
     ctx.putImageData(img, 0, 0);
-    out.style.width = (w * SCALE) + "px";
+    setBase(out, w);
     cap.textContent = differing + " px differ";
     if (a.width !== b.width || a.height !== b.height) cap.textContent += " · size mismatch";
     setStage(stage, out);
@@ -477,8 +698,26 @@
     } else {
       $("mExact").textContent = $("mW8").textContent = $("mW32").textContent = $("mMean").textContent = "—";
     }
-    $("mOursMs").textContent = (data.ours_ms != null ? data.ours_ms.toFixed(0) : "—") + " ms";
-    $("mRefMs").textContent = (data.ref_ms != null ? data.ref_ms.toFixed(0) : "—") + " ms";
+    $("mOursMs").textContent = ms(data.ours_ms);
+    $("mRefMs").textContent = ms(data.ref_ms);
+  }
+
+  // "microsvg N ms · resvg M ms · size WxH" plus the last HIST_MAX renders.
+  function showTiming(data, w, h) {
+    var size = (w && h) ? (w + "×" + h) : "—";
+    $("timing").textContent =
+      "microsvg " + ms(data.ours_ms) + " · resvg " + ms(data.ref_ms) + " · size " + size;
+    $("capOurs").textContent = size + " · " + ms(data.ours_ms);
+
+    hist.unshift(size + "  microsvg " + ms(data.ours_ms) + "  resvg " + ms(data.ref_ms));
+    while (hist.length > HIST_MAX) hist.pop();
+    var list = $("hist");
+    list.textContent = "";
+    hist.forEach(function (line) {
+      var li = document.createElement("li");
+      li.textContent = line;
+      list.appendChild(li);
+    });
   }
 
   function showErrors(data) {
@@ -502,9 +741,11 @@
   var inFlight = false;
   var pending = false;
 
-  function render() {
+  function render(reason) {
     var svg = srcEl.value;
     if (!svg.trim()) return;
+    var width = renderWidth > 0 ? renderWidth : null;
+    lastSentWidth = width;
     showBrowser(svg);
 
     // Coalesce: while one render is in flight, remember that another was
@@ -515,10 +756,16 @@
     $("render").disabled = true;
     statusEl.textContent = "rendering…";
 
+    renderCount++;
+    window.__playground.renders = renderCount;
+    window.__playground.lastWidth = width;
+    console.log("[playground] render #" + renderCount +
+                " (" + (reason || "manual") + ") width=" + (width == null ? "natural" : width));
+
     fetch("/render", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ svg: svg })
+      body: JSON.stringify({ svg: svg, width: width })
     }).then(function (r) {
       return r.json().then(function (j) { return { ok: r.ok, body: j }; });
     }).then(function (res) {
@@ -537,7 +784,13 @@
       return Promise.all([
         showPng("stageOurs", "capOurs", data.ours),
         showPng("stageRef", "capRef", data.ref)
-      ]).then(function (imgs) { showDiff(imgs[0], imgs[1]); });
+      ]).then(function (imgs) {
+        showDiff(imgs[0], imgs[1]);
+        var shown = imgs[0] || imgs[1];
+        showTiming(data,
+          shown ? shown.naturalWidth : (width || 0),
+          shown ? shown.naturalHeight : 0);
+      });
     }).catch(function (err) {
       resetMetrics();
       errbox.textContent = "playground: " + err.message;
@@ -546,19 +799,68 @@
       inFlight = false;
       $("render").disabled = false;
       statusEl.textContent = "";
-      if (pending) { pending = false; render(); }
+      if (pending) { pending = false; render("queued"); }
     });
   }
 
-  $("render").addEventListener("click", render);
+  $("render").addEventListener("click", function () { render("button"); });
   srcEl.addEventListener("keydown", function (e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); render(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); render("shortcut"); }
   });
   srcEl.addEventListener("input", function () { drawPreview(); });
 
   /* -------------------------------------------------------- examples -- */
 
   var examples = [];
+  var currentEx = -1;
+
+  function buildThumbs() {
+    var strip = $("thumbs");
+    strip.textContent = "";
+    examples.forEach(function (ex, i) {
+      var b = document.createElement("button");
+      b.className = "thumb";
+      b.type = "button";
+      b.title = ex.name;
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", "false");
+      b.setAttribute("data-i", String(i));
+      var im = new Image();
+      im.alt = ex.name;
+      // Same inert <img> data-URL path as the browser tile.
+      im.src = "data:image/svg+xml;base64," + b64utf8(ex.source);
+      var nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = ex.name.replace(/\.svg$/i, "");
+      b.appendChild(im);
+      b.appendChild(nm);
+      b.addEventListener("click", function () { pickExample(i, true); });
+      strip.appendChild(b);
+    });
+    $("exCount").textContent = examples.length + " examples";
+  }
+
+  function pickExample(i, doRender) {
+    var n = examples.length;
+    if (!n) return;
+    i = ((i % n) + n) % n;                 // wrap around at both ends
+    currentEx = i;
+    srcEl.value = examples[i].source;
+    $("examples").value = String(i);
+    var strip = $("thumbs");
+    Array.prototype.forEach.call(strip.children, function (b, k) {
+      var on = (k === i);
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    var sel = strip.children[i];
+    if (sel && sel.scrollIntoView) {
+      try { sel.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+      catch (e) { /* older browsers: leave the strip where it is */ }
+    }
+    drawPreview();
+    if (doRender) render("example");
+  }
 
   function loadExamples() {
     return fetch("/examples").then(function (r) { return r.json(); }).then(function (list) {
@@ -572,19 +874,34 @@
       });
       sel.addEventListener("change", function () {
         var i = parseInt(sel.value, 10);
-        if (!isNaN(i) && examples[i]) {
-          srcEl.value = examples[i].source;
-          drawPreview();
-          render();
-        }
+        if (!isNaN(i) && examples[i]) pickExample(i, true);
       });
-      var tri = examples.findIndex(function (e) { return e.name === "01_triangle.svg"; });
-      if (tri >= 0) { srcEl.value = examples[tri].source; sel.value = String(tri); }
+      buildThumbs();
+      var tri = -1;
+      for (var k = 0; k < examples.length; k++) {
+        if (examples[k].name === "01_triangle.svg") { tri = k; break; }
+      }
+      if (tri >= 0) pickExample(tri, false);
+      else if (examples.length) pickExample(0, false);
       else srcEl.value = BLANK;
     }).catch(function () {
       srcEl.value = BLANK;
     });
   }
+
+  // Left / right step through the strip unless a text field has focus.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var t = e.target;
+    if (t) {
+      var tag = (t.tagName || "").toLowerCase();
+      if (tag === "textarea" || tag === "input" || tag === "select" || t.isContentEditable) return;
+    }
+    if (!examples.length) return;
+    e.preventDefault();
+    pickExample(currentEx < 0 ? 0 : currentEx + (e.key === "ArrowRight" ? 1 : -1), true);
+  });
 
   /* ------------------------------------------------------------ draw -- */
 
@@ -595,7 +912,6 @@
   var free = [];            // in-progress freehand points
   var dragStart = null;     // circle / rect drag origin
   var dragNow = null;
-  var bgImage = null;       // preview of the current SVG source
 
   var HINTS = {
     polygon: "Click to add points; double-click to close.",
@@ -618,6 +934,59 @@
   Array.prototype.forEach.call(document.querySelectorAll(".mode"), function (b) {
     b.addEventListener("click", function () { setMode(b.dataset.mode); });
   });
+
+  /* The canvas carries the current SVG's own coordinate system, so a point
+     clicked on it is written into the source unchanged. */
+
+  function lengthAttr(tag, name) {
+    var m = new RegExp("\\b" + name + "\\s*=\\s*(\"([^\"]*)\"|'([^']*)')", "i").exec(tag);
+    if (!m) return 0;
+    var v = (m[2] || m[3] || "").trim();
+    if (/%$/.test(v)) return 0;               // percentage: no fixed size
+    var n = parseFloat(v);
+    return (isFinite(n) && n > 0) ? n : 0;
+  }
+
+  function parseSvgSize(text) {
+    var w = 0, h = 0;
+    var m = /<svg\b[^>]*>/i.exec(text);
+    if (m) {
+      w = lengthAttr(m[0], "width");
+      h = lengthAttr(m[0], "height");
+      if (!(w > 0 && h > 0)) {
+        var vb = /\bviewBox\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[0]);
+        if (vb) {
+          var nums = (vb[2] || vb[3] || "").trim().split(/[\s,]+/);
+          if (nums.length === 4) {
+            var vw = parseFloat(nums[2]), vh = parseFloat(nums[3]);
+            if (vw > 0 && vh > 0) { w = w || vw; h = h || vh; }
+          }
+        }
+      }
+    }
+    if (!(w > 0)) w = 200;
+    if (!(h > 0)) h = 200;
+    return {
+      w: Math.max(1, Math.min(4000, Math.round(w))),
+      h: Math.max(1, Math.min(4000, Math.round(h)))
+    };
+  }
+
+  // Match the canvas to the SVG's width/height, and fit its on-screen box
+  // into the left column without changing the aspect.
+  function syncCanvasToSource() {
+    var s = parseSvgSize(srcEl.value);
+    if (canvas.width !== s.w || canvas.height !== s.h) {
+      canvas.width = s.w;
+      canvas.height = s.h;
+      poly = []; free = []; dragStart = null; dragNow = null;
+    }
+    var scale = Math.min(240 / s.w, 260 / s.h);
+    if (scale > 2) scale = 2;
+    canvas.style.width = Math.max(40, Math.round(s.w * scale)) + "px";
+    canvas.style.height = Math.max(40, Math.round(s.h * scale)) + "px";
+    $("canvasHint").textContent = "canvas " + s.w + "×" + s.h;
+  }
 
   function pos(e) {
     var r = canvas.getBoundingClientRect();
@@ -643,7 +1012,7 @@
     if (i < 0) { text = BLANK; i = text.lastIndexOf("</svg>"); }
     srcEl.value = text.slice(0, i) + "  " + el + "\n" + text.slice(i);
     drawPreview();
-    render();
+    render("draw");
   }
 
   function finishPolygon() {
@@ -719,23 +1088,22 @@
     poly = []; free = []; dragStart = null; dragNow = null;
     srcEl.value = BLANK;
     drawPreview();
-    render();
+    render("clear");
   });
 
   // Live preview: the current SVG source plus whatever is in progress.
   var previewToken = 0;
   function drawPreview(ghost) {
+    syncCanvasToSource();
     var token = ++previewToken;
     var svg = srcEl.value;
     var img = new Image();
     img.onload = function () {
       if (token !== previewToken) return;
-      bgImage = img;
       paint(img, ghost);
     };
     img.onerror = function () {
       if (token !== previewToken) return;
-      bgImage = null;
       paint(null, ghost);
     };
     try { img.src = "data:image/svg+xml;base64," + b64utf8(svg); }
@@ -789,9 +1157,10 @@
   /* ------------------------------------------------------------ boot -- */
 
   setMode("polygon");
+  watchSize();                       // measure before the first render
   loadExamples().then(function () {
     drawPreview();
-    render();
+    render("boot");
   });
 })();
 </script>
