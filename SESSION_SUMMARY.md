@@ -1,6 +1,22 @@
-# Session summary — 2026-09-19 → 2026-09-20 (paused 01:35)
+# Session summary — 2026-09-19 → 2026-09-20
 
-## State of `main` (commit 5db8f14, all local, nothing pushed)
+## Update 2026-09-20 afternoon: T8 and T10 merged (main b0a298d)
+
+- **T10 tile culling** merged: byte-identical (80 CLI renders, 160 viewport
+  renders, 1 960 stitched tiles, 2 184 synthetic edge cases). 64×64 tile of
+  16_stress at 1600 px: 145 → 40 ms; 1×1 tile 137 → 29 ms (the rest is parse).
+- **T8 output path** merged: byte-identical (40 renders). Empty 3200² canvas
+  fixed cost 600 → 135 ms (4.4×): Adler-32 tuple boxing was 369 ms of it.
+  01_triangle at 800 px: 100 → 67 ms.
+- After each merge: build clean, 15/20, tiles 20/20, adversarial 37/37, and a
+  2000 px spot render sha256-identical to the pre-merge binary.
+- **T6 still unmerged on `t6-raster-walk`** (worktree `.worktrees/T6`):
+  1.5–1.8× faster rasterizer, −3/−7 within-8 px on two stroke files. Decision
+  pending (merge as-is, or fix stroker seams first).
+- Conventions added to `tasks/README.md`: multiline shell commands (rule 8),
+  short verification loop (rule 9).
+
+## State of `main` at the overnight pause (commit 5db8f14, all local, nothing pushed)
 
 Builds clean. Harnesses on this binary:
 - `tests/run_tests.py`: **15/20** at the strict bar (≥ 99% of pixels within 8
