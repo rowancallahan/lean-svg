@@ -20,7 +20,11 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   is flattening (usvg route reaches 31.6%), not the conversion.
 - **T24a** 148 CSS colours (checked vs Pillow, `tests/check_colors.py`),
   `color`/`currentColor`, 100×100 default size. Corpus byte-identical.
-- Corpus now **18/22** at the strict bar. Failing: 12_badge, 14_flower,
+- **T23 dashes** (`Geom.dashPoly`, Skia semantics incl. closed-subpath
+  merge and zero-length dots): stroke-dasharray/offset slice 5/23 → 11/23,
+  the rest flattening-limited or `em`/percent units; new `23_dashes.svg`
+  PASS; all other files byte-identical.
+- Corpus now **19/23** at the strict bar. Failing: 12_badge, 14_flower,
   15_spiral, 16_stress (all < 1 pt short, curve/stroke antialiasing).
 
 Design decisions today: fonts ship embedded (OFL Noto Sans subsets) and the
@@ -35,7 +39,6 @@ agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 
 | task | model | branch | what | merge check |
 |---|---|---|---|---|
-| T23 dashes | Opus | `t23-dashes` (base c0d4fe4) | `Geom.dashPoly`, one call in `Render.drawShape` | painting/stroke-dasharray, dashoffset slices; run_tests no regression |
 | T25 fonts | Sonnet | `t25-fonts` | `MicroSvg/Font.lean` pure total TrueType parser, embedded Noto Sans subsets, `fontdump` exe, fontTools oracle + fuzz | 0 mismatches vs fontTools, fuzz clean, corpus byte-identical |
 | T27 switch | Sonnet | `t27-switch` | `<switch>`, `systemLanguage`, required* in `interpret` | structure/switch ≥10/13, systemLanguage ≥8/10 |
 | T29 CSS | Sonnet | `t29-css` | `MicroSvg/Css.lean` (simplecss subset), `<style>` integration in `interpret`, `tests/CssTests.lean` `#guard`s | structure/style ≥13/16 |
