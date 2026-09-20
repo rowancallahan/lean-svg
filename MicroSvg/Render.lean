@@ -96,6 +96,11 @@ def canvasSetup (root : RootInfo) (opts : Options) :
     | some w, none, some (_, _, vw, vh) => pure (w, if vw > 0 then Int.ediv (w * vh) vw else w)
     | none, some h, some (_, _, vw, vh) => pure (if vh > 0 then Int.ediv (h * vw) vh else h, h)
     | none, none, some (_, _, vw, vh) => pure (vw, vh)
+    -- No width/height and no viewBox at all: resvg falls back to its default
+    -- document size rather than failing (usvg `resolve_svg_size`, whose
+    -- `state.view_box` and `Options::default_size` both default to
+    -- `Size::from_wh(100.0, 100.0)`).  A negative/zero size still fails below.
+    | none, none, none => pure (Fx.ofNat 100, Fx.ofNat 100)
     | _, _, _ => throw "cannot determine image size: need width and height, or a viewBox"
   if wFx ≤ 0 || hFx ≤ 0 then throw "image size must be positive"
   let vbMat : Mat := match root.viewBox with
