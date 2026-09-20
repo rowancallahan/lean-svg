@@ -23,11 +23,24 @@ The scheme (`tiny-skia/src/scan/path_aa.rs`, `scan/path.rs`, `edge.rs`):
 * On each sub-scanline the active edges are taken in increasing `x`, the
   winding number is accumulated and a span `[left, x)` of sub-columns is
   emitted whenever the winding returns to "outside" (`w = 0` for nonzero,
-  `w` even for even-odd).  Instead of keeping the active list x-sorted (an
-  insertion sort that degrades badly on paths with hundreds of thousands of
-  edges) we bin each edge's rounded sub-column `(x + 0x8000) >> 16` into a
-  winding-delta array and prefix-sum it, which yields exactly the same set of
-  covered sub-columns.  See `blitRow` for the one-level consequence.
+  `w` even for even-odd).  Two converters do this, chosen per sub-scanline by
+  the number of active edges (`walkLimit`):
+  - **sorted walk** (`≤ walkLimit` active edges): the active array is
+    insertion-sorted by rounded sub-column `(x + 0x8000) >> 16` and walked
+    edge by edge, exactly as `walk_edges` does.  Cost `O(active + inversions)`
+    per sub-scanline; the array is kept in sub-column order from one
+    sub-scanline to the next, so the sort is usually a single linear scan.
+  - **binned prefix sum** (more than `walkLimit`): each edge's rounded
+    sub-column is binned into a winding-delta array, which is prefix-summed
+    over `[min sub-column, max sub-column]`.  Cost `O(active + columns)`, but
+    with no sort — `huge_path.svg` keeps ~2·10^6 edges simultaneously active
+    and an insertion sort there costs billions of shifts.
+  The two agree on the set of covered sub-columns.  They differ only when two
+  spans abut *inside* a pixel: the sorted walk emits them separately (as
+  tiny-skia does), the binned one emits a single merged run, and the shared
+  pixel then reads `4·16 = 64` instead of `maxValue`.  That is a one-level
+  difference, and only on the fourth sub-scanline of a row, where
+  `maxValue = 63`.
 * A span contributes, per sub-scanline, `16` per covered quarter of a partly
   covered pixel and `maxValue = 64, 64, 64, 63` (by sub-scanline index) for a
   fully covered interior pixel, accumulated per destination row and saturated
@@ -54,6 +67,20 @@ structure Mask where
   /-- `w * h` entries, each in `[0, 65536]`. -/
   cov : Array Nat
 deriving Inhabited
+
+/-- Active-edge count up to which a sub-scanline is converted by the x-sorted
+walk rather than by the binned prefix sum (see the module comment).
+
+Tuned by paired A/B runs over the corpus at natural size and at width 1600:
+0 (always binned) is 1.5-1.8× slower; 128 beats 64 by 2-4% in every paired
+round; 256 shows no further gain and doubles the worst case of the insertion
+sort, which is `walkLimit²` shifts per sub-scanline. -/
+@[inline] def walkLimit : Nat := 128
+
+/-- Is the accumulated winding "inside"?  `w ≠ 0` for the nonzero rule, `w` odd
+for even-odd (Skia's `w & windingMask`). -/
+@[inline] def insideW (evenOdd : Bool) (w : Int) : Bool :=
+  if evenOdd then Int.emod w 2 != 0 else w != 0
 
 /-- `AlphaRuns::add`: accumulate into one pixel of the current destination row,
 saturating at 255 (Skia's `alpha - (alpha >> 8)` for the 256 case). -/
@@ -187,49 +214,95 @@ def rasterize (W H : Nat) (polys : Array (Array Pt)) (evenOdd : Bool) : Option M
     fill := fill.setIfInBounds y (k + 1)
   -- walk the sub-scanlines
   let mut act : Array Nat := Array.emptyWithCapacity 64
+  -- sort keys for the walk; `act.size ≤ m`, so `min walkLimit m` always fits
+  -- (a path of four edges must not pay for a `walkLimit`-sized allocation)
+  let mut kc : Array Nat := Array.replicate (Nat.min walkLimit m) 0
   let mut wacc : Array Int := Array.replicate (nSuper + 1) 0
   let mut alpha : Array Nat := Array.replicate bw 0
   let mut cov : Array Nat := Array.replicate (bw * bh) 0
   for y in [0:nScan] do
     for k in [bstart.getD y 0 : bstart.getD (y + 1) 0] do
       act := act.push (order.getD k 0)
-    -- bin the winding deltas, advance x, drop finished edges
-    let mut lo : Nat := nSuper
-    let mut hi : Nat := 0
-    let mut live : Nat := 0
-    for i in [0:act.size] do
-      let ei := act.getD i 0
-      let xf := ex.getD ei 0
-      let xr := Int.ediv (xf + 32768) 65536
-      let c : Nat := if xr ≤ 0 then 0 else if xr ≥ (nSuper : Int) then nSuper else xr.toNat
-      wacc := wacc.setIfInBounds c (wacc.getD c 0 + ewd.getD ei 0)
-      if c < lo then lo := c
-      if c > hi then hi := c
-      if ely.getD ei 0 > y then
-        ex := ex.setIfInBounds ei (xf + edx.getD ei 0)
-        act := act.setIfInBounds live ei
-        live := live + 1
-    act := act.shrink live
-    -- prefix-sum the deltas into spans and blit them
-    if lo ≤ hi then
+    let n := act.size
+    if n ≤ walkLimit then
+      -- sorted walk: rounded sub-column of every active edge ...
+      for i in [0:n] do
+        let xr := Int.ediv (ex.getD (act.getD i 0) 0 + 32768) 65536
+        kc := kc.setIfInBounds i
+          (if xr ≤ 0 then 0 else if xr ≥ (nSuper : Int) then nSuper else xr.toNat)
+      -- ... insertion-sorted (stable, at most `n` shifts per element) ...
+      for i in [1:n] do
+        let ki := kc.getD i 0
+        let ei := act.getD i 0
+        let mut j := i
+        for _ in [0:i] do
+          let kp := kc.getD (j - 1) 0
+          if kp ≤ ki then break
+          kc := kc.setIfInBounds j kp
+          act := act.setIfInBounds j (act.getD (j - 1) 0)
+          j := j - 1
+        kc := kc.setIfInBounds j ki
+        act := act.setIfInBounds j ei
+      -- ... and walked in edge order, emitting `[left, c)` on each return to
+      -- "outside", exactly as `walk_edges` does.
       let maxV : Nat := if y &&& 3 == 3 then 63 else 64
       let mut w : Int := 0
-      let mut runStart : Nat := 0
-      let mut inRun := false
-      for c in [lo:hi + 1] do
-        w := w + wacc.getD c 0
-        wacc := wacc.setIfInBounds c 0
-        if c < nSuper then
-          let ins := if evenOdd then Int.emod w 2 != 0 else w != 0
-          if ins then
-            if !inRun then
-              runStart := c
-              inRun := true
-          else if inRun then
-            alpha := blitSpan alpha runStart c maxV
-            inRun := false
-      if inRun then
-        alpha := blitSpan alpha runStart nSuper maxV
+      let mut left : Nat := 0
+      for i in [0:n] do
+        let c := kc.getD i 0
+        if !insideW evenOdd w then left := c
+        w := w + ewd.getD (act.getD i 0) 0
+        if !insideW evenOdd w then
+          alpha := blitSpan alpha left c maxV
+      if insideW evenOdd w then
+        alpha := blitSpan alpha left nSuper maxV
+      -- advance x, drop finished edges (sub-column order is preserved)
+      let mut live : Nat := 0
+      for i in [0:n] do
+        let ei := act.getD i 0
+        if ely.getD ei 0 > y then
+          ex := ex.setIfInBounds ei (ex.getD ei 0 + edx.getD ei 0)
+          act := act.setIfInBounds live ei
+          live := live + 1
+      act := act.shrink live
+    else
+      -- bin the winding deltas, advance x, drop finished edges
+      let mut lo : Nat := nSuper
+      let mut hi : Nat := 0
+      let mut live : Nat := 0
+      for i in [0:act.size] do
+        let ei := act.getD i 0
+        let xf := ex.getD ei 0
+        let xr := Int.ediv (xf + 32768) 65536
+        let c : Nat := if xr ≤ 0 then 0 else if xr ≥ (nSuper : Int) then nSuper else xr.toNat
+        wacc := wacc.setIfInBounds c (wacc.getD c 0 + ewd.getD ei 0)
+        if c < lo then lo := c
+        if c > hi then hi := c
+        if ely.getD ei 0 > y then
+          ex := ex.setIfInBounds ei (xf + edx.getD ei 0)
+          act := act.setIfInBounds live ei
+          live := live + 1
+      act := act.shrink live
+      -- prefix-sum the deltas into spans and blit them
+      if lo ≤ hi then
+        let maxV : Nat := if y &&& 3 == 3 then 63 else 64
+        let mut w : Int := 0
+        let mut runStart : Nat := 0
+        let mut inRun := false
+        for c in [lo:hi + 1] do
+          w := w + wacc.getD c 0
+          wacc := wacc.setIfInBounds c 0
+          if c < nSuper then
+            let ins := if evenOdd then Int.emod w 2 != 0 else w != 0
+            if ins then
+              if !inRun then
+                runStart := c
+                inRun := true
+            else if inRun then
+              alpha := blitSpan alpha runStart c maxV
+              inRun := false
+        if inRun then
+          alpha := blitSpan alpha runStart nSuper maxV
     -- end of a destination row: flush the alphas
     if y &&& 3 == 3 then
       let row := (y >>> 2) * bw
