@@ -52,6 +52,11 @@ structure Style where
   miterLimit : Fx := 1024
   opacity : Nat := opacityOne
   visible : Bool := true
+  /-- The CSS `color` property: inherited, defaults to black, and is what
+  `fill`/`stroke: currentColor` resolve to (`applyAttrs` applies `color`
+  before any other property so the resolution sees the element's own
+  value). -/
+  color : Rgba := ⟨0, 0, 0, 255⟩
   ctm : Mat := Mat.identity
 deriving Repr, Inhabited
 
@@ -73,27 +78,56 @@ deriving Inhabited
 
 /-! ## Colours -/
 
+/-- The 148 CSS Color Level 4 named colours (extended colour keywords plus
+`rebeccapurple`), lower-cased.  `transparent` is not in this list; it stays a
+special case in `parsePaint` since it is not itself an RGB colour name. -/
 def namedColors : List (String × Nat) :=
-  [("black", 0x000000), ("white", 0xffffff), ("red", 0xff0000), ("green", 0x008000),
-   ("blue", 0x0000ff), ("yellow", 0xffff00), ("cyan", 0x00ffff), ("aqua", 0x00ffff),
-   ("magenta", 0xff00ff), ("fuchsia", 0xff00ff), ("gray", 0x808080), ("grey", 0x808080),
-   ("silver", 0xc0c0c0), ("maroon", 0x800000), ("olive", 0x808000), ("lime", 0x00ff00),
-   ("navy", 0x000080), ("teal", 0x008080), ("purple", 0x800080), ("orange", 0xffa500),
-   ("pink", 0xffc0cb), ("brown", 0xa52a2a), ("gold", 0xffd700), ("darkgray", 0xa9a9a9),
-   ("darkgrey", 0xa9a9a9), ("lightgray", 0xd3d3d3), ("lightgrey", 0xd3d3d3),
-   ("darkgreen", 0x006400), ("darkblue", 0x00008b), ("darkred", 0x8b0000),
-   ("orangered", 0xff4500), ("tomato", 0xff6347), ("coral", 0xff7f50), ("salmon", 0xfa8072),
-   ("crimson", 0xdc143c), ("indigo", 0x4b0082), ("violet", 0xee82ee), ("khaki", 0xf0e68c),
-   ("tan", 0xd2b48c), ("beige", 0xf5f5dc), ("ivory", 0xfffff0), ("skyblue", 0x87ceeb),
-   ("steelblue", 0x4682b4), ("royalblue", 0x4169e1), ("dodgerblue", 0x1e90ff),
-   ("deepskyblue", 0x00bfff), ("turquoise", 0x40e0d0), ("seagreen", 0x2e8b57),
-   ("forestgreen", 0x228b22), ("limegreen", 0x32cd32), ("yellowgreen", 0x9acd32),
-   ("chocolate", 0xd2691e), ("sienna", 0xa0522d), ("slategray", 0x708090),
-   ("slategrey", 0x708090), ("dimgray", 0x696969), ("dimgrey", 0x696969),
-   ("whitesmoke", 0xf5f5f5), ("lightblue", 0xadd8e6), ("lightgreen", 0x90ee90),
-   ("darkorange", 0xff8c00), ("hotpink", 0xff69b4), ("deeppink", 0xff1493),
-   ("lavender", 0xe6e6fa), ("plum", 0xdda0dd), ("orchid", 0xda70d6), ("peru", 0xcd853f),
-   ("wheat", 0xf5deb3), ("linen", 0xfaf0e6), ("snow", 0xfffafa), ("mintcream", 0xf5fffa)]
+  [("aliceblue", 0xf0f8ff), ("antiquewhite", 0xfaebd7), ("aqua", 0x00ffff),
+   ("aquamarine", 0x7fffd4), ("azure", 0xf0ffff), ("beige", 0xf5f5dc), ("bisque", 0xffe4c4),
+   ("black", 0x000000), ("blanchedalmond", 0xffebcd), ("blue", 0x0000ff),
+   ("blueviolet", 0x8a2be2), ("brown", 0xa52a2a), ("burlywood", 0xdeb887),
+   ("cadetblue", 0x5f9ea0), ("chartreuse", 0x7fff00), ("chocolate", 0xd2691e),
+   ("coral", 0xff7f50), ("cornflowerblue", 0x6495ed), ("cornsilk", 0xfff8dc),
+   ("crimson", 0xdc143c), ("cyan", 0x00ffff), ("darkblue", 0x00008b), ("darkcyan", 0x008b8b),
+   ("darkgoldenrod", 0xb8860b), ("darkgray", 0xa9a9a9), ("darkgreen", 0x006400),
+   ("darkgrey", 0xa9a9a9), ("darkkhaki", 0xbdb76b), ("darkmagenta", 0x8b008b),
+   ("darkolivegreen", 0x556b2f), ("darkorange", 0xff8c00), ("darkorchid", 0x9932cc),
+   ("darkred", 0x8b0000), ("darksalmon", 0xe9967a), ("darkseagreen", 0x8fbc8f),
+   ("darkslateblue", 0x483d8b), ("darkslategray", 0x2f4f4f), ("darkslategrey", 0x2f4f4f),
+   ("darkturquoise", 0x00ced1), ("darkviolet", 0x9400d3), ("deeppink", 0xff1493),
+   ("deepskyblue", 0x00bfff), ("dimgray", 0x696969), ("dimgrey", 0x696969),
+   ("dodgerblue", 0x1e90ff), ("firebrick", 0xb22222), ("floralwhite", 0xfffaf0),
+   ("forestgreen", 0x228b22), ("fuchsia", 0xff00ff), ("gainsboro", 0xdcdcdc),
+   ("ghostwhite", 0xf8f8ff), ("gold", 0xffd700), ("goldenrod", 0xdaa520), ("gray", 0x808080),
+   ("green", 0x008000), ("greenyellow", 0xadff2f), ("grey", 0x808080), ("honeydew", 0xf0fff0),
+   ("hotpink", 0xff69b4), ("indianred", 0xcd5c5c), ("indigo", 0x4b0082), ("ivory", 0xfffff0),
+   ("khaki", 0xf0e68c), ("lavender", 0xe6e6fa), ("lavenderblush", 0xfff0f5),
+   ("lawngreen", 0x7cfc00), ("lemonchiffon", 0xfffacd), ("lightblue", 0xadd8e6),
+   ("lightcoral", 0xf08080), ("lightcyan", 0xe0ffff), ("lightgoldenrodyellow", 0xfafad2),
+   ("lightgray", 0xd3d3d3), ("lightgreen", 0x90ee90), ("lightgrey", 0xd3d3d3),
+   ("lightpink", 0xffb6c1), ("lightsalmon", 0xffa07a), ("lightseagreen", 0x20b2aa),
+   ("lightskyblue", 0x87cefa), ("lightslategray", 0x778899), ("lightslategrey", 0x778899),
+   ("lightsteelblue", 0xb0c4de), ("lightyellow", 0xffffe0), ("lime", 0x00ff00),
+   ("limegreen", 0x32cd32), ("linen", 0xfaf0e6), ("magenta", 0xff00ff), ("maroon", 0x800000),
+   ("mediumaquamarine", 0x66cdaa), ("mediumblue", 0x0000cd), ("mediumorchid", 0xba55d3),
+   ("mediumpurple", 0x9370db), ("mediumseagreen", 0x3cb371), ("mediumslateblue", 0x7b68ee),
+   ("mediumspringgreen", 0x00fa9a), ("mediumturquoise", 0x48d1cc),
+   ("mediumvioletred", 0xc71585), ("midnightblue", 0x191970), ("mintcream", 0xf5fffa),
+   ("mistyrose", 0xffe4e1), ("moccasin", 0xffe4b5), ("navajowhite", 0xffdead),
+   ("navy", 0x000080), ("oldlace", 0xfdf5e6), ("olive", 0x808000), ("olivedrab", 0x6b8e23),
+   ("orange", 0xffa500), ("orangered", 0xff4500), ("orchid", 0xda70d6),
+   ("palegoldenrod", 0xeee8aa), ("palegreen", 0x98fb98), ("paleturquoise", 0xafeeee),
+   ("palevioletred", 0xdb7093), ("papayawhip", 0xffefd5), ("peachpuff", 0xffdab9),
+   ("peru", 0xcd853f), ("pink", 0xffc0cb), ("plum", 0xdda0dd), ("powderblue", 0xb0e0e6),
+   ("purple", 0x800080), ("rebeccapurple", 0x663399), ("red", 0xff0000),
+   ("rosybrown", 0xbc8f8f), ("royalblue", 0x4169e1), ("saddlebrown", 0x8b4513),
+   ("salmon", 0xfa8072), ("sandybrown", 0xf4a460), ("seagreen", 0x2e8b57),
+   ("seashell", 0xfff5ee), ("sienna", 0xa0522d), ("silver", 0xc0c0c0), ("skyblue", 0x87ceeb),
+   ("slateblue", 0x6a5acd), ("slategray", 0x708090), ("slategrey", 0x708090),
+   ("snow", 0xfffafa), ("springgreen", 0x00ff7f), ("steelblue", 0x4682b4), ("tan", 0xd2b48c),
+   ("teal", 0x008080), ("thistle", 0xd8bfd8), ("tomato", 0xff6347), ("turquoise", 0x40e0d0),
+   ("violet", 0xee82ee), ("wheat", 0xf5deb3), ("white", 0xffffff), ("whitesmoke", 0xf5f5f5),
+   ("yellow", 0xffff00), ("yellowgreen", 0x9acd32)]
 
 def hexVal (c : UInt8) : Option Nat :=
   if isDigit c then some (c.toNat - 48)
@@ -158,12 +192,21 @@ def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
       | _, _, _ => none
     else none
 
+/-- The result of parsing a paint value: a resolved paint, or a marker for
+`currentcolor` that the caller (`applyProp` on `fill`/`stroke`) resolves
+against the element's own `color` at apply time. -/
+inductive PaintSpec where
+  | none
+  | solid (c : Rgba)
+  | currentColor
+deriving Repr, Inhabited
+
 /-- Parse a paint value.  Unsupported paint servers (`url(...)`) render as none. -/
-def parsePaint (bs : ByteArray) : Option Paint :=
+def parsePaint (bs : ByteArray) : Option PaintSpec :=
   let t := lower (trim bs)
   if eqAscii t "none" then some .none
   else if eqAscii t "transparent" then some (.solid ⟨0, 0, 0, 0⟩)
-  else if eqAscii t "currentcolor" then some (.solid ⟨0, 0, 0, 255⟩)
+  else if eqAscii t "currentcolor" then some .currentColor
   else if at' t 0 == 35 then (parseHexColor t).map .solid
   else if startsWith t 0 "rgba(" then (parseRgbFunc t 5).map .solid
   else if startsWith t 0 "rgb(" then (parseRgbFunc t 4).map .solid
@@ -411,10 +454,27 @@ def lengthAttr (attrs : Array Xml.Attr) (name : String) (dflt : Fx) : Fx :=
   | some v => (parseLengthAll v).getD dflt
   | none => dflt
 
+/-- Resolve a parsed paint against the style's own `color` (for
+`currentcolor`). -/
+def resolvePaint (st : Style) : PaintSpec → Paint
+  | .none => .none
+  | .solid c => .solid c
+  | .currentColor => .solid st.color
+
+/-- Parse the `color` property.  It is an ordinary colour, never `none` or
+`url(...)`; reusing `parsePaint` and rejecting anything but `.solid` gets that
+for free (`none`/`url()` parse to `PaintSpec.none`, and `currentcolor` to
+`PaintSpec.currentColor`, both filtered out here). -/
+def parseColor (bs : ByteArray) : Option Rgba :=
+  match parsePaint bs with
+  | some (.solid c) => some c
+  | _ => none
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
-  | "fill" => match parsePaint v with | some p => { st with fill := p } | none => st
-  | "stroke" => match parsePaint v with | some p => { st with stroke := p } | none => st
+  | "color" => match parseColor v with | some c => { st with color := c } | none => st
+  | "fill" => match parsePaint v with | some p => { st with fill := resolvePaint st p } | none => st
+  | "stroke" => match parsePaint v with | some p => { st with stroke := resolvePaint st p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
   | "stroke-opacity" => match parseOpacity v with | some o => { st with strokeOpacity := o } | none => st
   | "opacity" => match parseOpacity v with | some o => { st with opacity := mulOpacity st.opacity o } | none => st
@@ -448,12 +508,27 @@ def parseStyleDecls (v : ByteArray) : Array (String × ByteArray) :=
     if k ≥ decl.size then none
     else some (toStr (lower (trim (decl.extract 0 k))), trim (decl.extract (k + 1) decl.size))
 
-/-- Presentation attributes first, then the `style` attribute (CSS wins). -/
+/-- Presentation attributes first, then the `style` attribute (CSS wins);
+`color` is resolved before anything else, from whichever of the two sources
+would normally win, so `fill`/`stroke: currentcolor` on the same element
+always sees the element's own final `color` and never a stale inherited one
+(usvg: "resolves currentColor with the element's own color, inherited if
+absent" — the SVG-wide rule that `color` applies before paints even if it is
+written after `fill`/`stroke` in the markup). -/
 def applyAttrs (parent : Style) (attrs : Array Xml.Attr) : Style :=
-  let st := attrs.foldl (fun st a => if a.name == "style" then st else applyProp st a.name a.value) parent
-  match attr attrs "style" with
-  | some v => (parseStyleDecls v).foldl (fun st (n, val) => applyProp st n val) st
-  | none => st
+  let styleDecls := match attr attrs "style" with
+    | some v => parseStyleDecls v
+    | none => #[]
+  let colorVal : Option ByteArray :=
+    match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
+    | some v => some v
+    | none => attr attrs "color"
+  let base := match colorVal with
+    | some v => applyProp parent "color" v
+    | none => parent
+  let skip (n : String) := n == "style" || n == "color"
+  let st := attrs.foldl (fun st a => if skip a.name then st else applyProp st a.name a.value) base
+  styleDecls.foldl (fun st (n, val) => if n == "color" then st else applyProp st n val) st
 
 /-- `display="none"` (attribute or style) hides the element and its subtree. -/
 def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
