@@ -20,7 +20,7 @@ Two render routes are measured:
 The reference for BOTH routes is `resvg -w W` on the *original* file, so the
 two routes are directly comparable.
 
-Outputs land in tests/out/corpora/:
+Outputs land in tests/out/corpora/ (or --out DIR):
 
     <corpus>_<route>.csv   every file, with metrics and error text
     summary.md             per-corpus/route, per-feature-directory and
@@ -29,10 +29,25 @@ Outputs land in tests/out/corpora/:
 
 Metric and composite helpers are imported from tests/run_tests.py so the
 numbers mean exactly what they mean there.
+
+The fast iteration loop, for a feature task that wants to see only what it
+changed and prove it broke nothing else:
+
+    # baseline for the directories you are about to touch
+    python3 tests/run_corpora.py --fast --corpus resvg --route direct \\
+        --dir shapes/path --out /tmp/base --no-worst
+    # after the change: same files, delta table against the baseline
+    python3 tests/run_corpora.py --fast --corpus resvg --route direct \\
+        --dir shapes/path --out /tmp/after --no-worst \\
+        --compare /tmp/base/resvg_direct.csv
+    # or re-run just what did not pass, at small sizes
+    python3 tests/run_corpora.py --fast --limit 50 --no-worst \\
+        --failing-from /tmp/base/resvg_direct.csv --out /tmp/after
 """
 
 import argparse
 import csv
+import os
 import random
 import re
 import shutil
@@ -77,6 +92,27 @@ CORPORA = {
     "feather": ("feather/icons", "*.svg", 96, None),
 }
 ROUTES = ("direct", "usvg")
+
+# `--fast`: smaller renders for the iterate-on-failures loop. Small enough to
+# be quick, large enough that the metric still sees antialiasing detail.
+FAST_WIDTHS = {"resvg": 100, "simple-icons": 64, "feather": 64}
+
+# Effective render width per corpus; main() fills this in (defaults, or
+# FAST_WIDTHS under --fast). Everything that renders goes through width_for.
+WIDTHS = {}
+
+# A file "passed" only with this status; every other status (fail, unsupported,
+# timeout, size_mismatch, usvg_failed, ref_failed, unreadable_png) is a
+# non-pass and is what --failing-from re-selects.
+PASS_STATUS = "pass"
+
+# --compare reports a file as changed when within-8 moved by more than this
+# many percentage points.
+DELTA_EPS = 0.1
+
+
+def width_for(corpus):
+    return WIDTHS.get(corpus, CORPORA[corpus][2])
 
 
 # --------------------------------------------------------------------------
@@ -235,16 +271,67 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
 # --------------------------------------------------------------------------
 
 
-def collect_files(corpus, limit):
+def dir_match(rel, prefixes):
+    """True if the file's directory is, or is under, one of the prefixes.
+
+    `rel` is the path relative to the corpus root; a prefix like
+    `shapes/path` matches `shapes/path/*.svg`, `shapes` matches every
+    `shapes/**` file.
+    """
+    parent = Path(rel).parent.as_posix()
+    for prefix in prefixes:
+        if parent == prefix or parent.startswith(prefix + "/"):
+            return True
+    return False
+
+
+def collect_files(corpus, limit, dir_prefixes=None, failing=None, has_arcs=None):
+    """Select the files to run for one corpus.
+
+    Filters compose in this order: feature directory (`--dir`, resvg suite
+    only), earlier non-passes (`--failing-from`), arc content (`--has-arcs`),
+    then the random `--limit` sample, so the sample is drawn from what the
+    filters left. Returns (files, base, counts) with counts recording each
+    stage for the console line and the summary's sampling note.
+    """
     root, pattern, _, default_limit = CORPORA[corpus]
     base = CORPORA_DIR / root
     if not base.is_dir():
-        return None, base
+        return None, base, {}
     files = sorted(p for p in base.glob(pattern) if p.is_file())
+    counts = {"total": len(files)}
+    if dir_prefixes and corpus == "resvg":
+        files = [p for p in files if dir_match(p.relative_to(base).as_posix(), dir_prefixes)]
+        counts["dir"] = len(files)
+    if failing is not None:
+        files = [p for p in files if p.relative_to(base).as_posix() in failing]
+        counts["failing"] = len(files)
+    if has_arcs is not None:
+        want = has_arcs == "yes"
+        files = [p for p in files if uses_arcs(p) is want]
+        counts["has_arcs"] = len(files)
     effective = default_limit if limit is None else (None if limit == 0 else limit)
     if effective is not None and len(files) > effective:
         files = sorted(random.Random(SAMPLE_SEED).sample(files, effective))
-    return files, base
+        counts["sampled"] = len(files)
+    counts["selected"] = len(files)
+    return files, base, counts
+
+
+def selection_note(corpus, counts):
+    """One line describing how this corpus/route's file list was narrowed."""
+    bits = []
+    if "dir" in counts:
+        bits.append("`--dir` %d/%d" % (counts["dir"], counts["total"]))
+    if "failing" in counts:
+        bits.append("non-passing in the given CSVs: %d" % counts["failing"])
+    if "has_arcs" in counts:
+        bits.append("`--has-arcs` %d" % counts["has_arcs"])
+    if "sampled" in counts:
+        bits.append("random sample of %d (seed %d)" % (counts["sampled"], SAMPLE_SEED))
+    if not bits:
+        bits.append("all %d files" % counts["total"])
+    return "%s, rendered at `--width %d`" % (", ".join(bits), width_for(corpus))
 
 
 CSV_FIELDS = [
@@ -256,13 +343,18 @@ CSV_FIELDS = [
 
 
 def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs):
-    width = CORPORA[corpus][2]
+    width = width_for(corpus)
     tmpdir = Path(tempfile.mkdtemp(prefix="corpora_%s_%s_" % (corpus, route)))
     try:
         def task(pair):
             i, svg = pair
+            # The slot must be unique per file, not recycled modulo the pool
+            # size: one slow file (feMorphology with a huge radius, say) lets
+            # later indices catch up and clobber its scratch PNGs, which showed
+            # up as spurious "unreadable_png" rows.  render_one deletes its own
+            # scratch files, so unique slots cost nothing.
             return render_one(
-                svg, corpus, route, width, binary, tmpdir, i % (jobs * 4),
+                svg, corpus, route, width, binary, tmpdir, i,
                 tol, threshold, keep=False,
             )
 
@@ -289,7 +381,7 @@ def write_worst_composites(corpus, route, rows, binary, tol, threshold, jobs):
     worst = sorted(scored, key=lambda r: r["_within"])[:N_WORST]
     if not worst:
         return []
-    width = CORPORA[corpus][2]
+    width = width_for(corpus)
     root = CORPORA_DIR / CORPORA[corpus][0]
     WORST_DIR.mkdir(parents=True, exist_ok=True)
     tmpdir = Path(tempfile.mkdtemp(prefix="worst_%s_%s_" % (corpus, route)))
@@ -314,6 +406,153 @@ def write_worst_composites(corpus, route, rows, binary, tol, threshold, jobs):
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     return worst
+
+
+# --------------------------------------------------------------------------
+# reading earlier CSVs (--failing-from, --compare)
+# --------------------------------------------------------------------------
+
+
+def infer_corpus_route(path):
+    """(corpus, route) encoded in a CSV's name, e.g. `simple-icons_usvg.csv`.
+
+    Corpus names contain hyphens, never underscores, so the last underscore
+    splits the two. Returns (None, None) when the name does not parse.
+    """
+    corpus, _, route = Path(path).stem.rpartition("_")
+    if corpus in CORPORA and route in ROUTES:
+        return corpus, route
+    return None, None
+
+
+def read_csv_rows(path):
+    with Path(path).open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def keyed_rows(paths):
+    """{(corpus, route): {file: row}} for one or more earlier CSVs.
+
+    A row's own `corpus`/`route` columns win when they are valid; the file
+    name is the fallback, so hand-trimmed CSVs still work.
+    """
+    out = defaultdict(dict)
+    for path in paths:
+        name_corpus, name_route = infer_corpus_route(path)
+        for row in read_csv_rows(path):
+            corpus = row.get("corpus") if row.get("corpus") in CORPORA else name_corpus
+            route = row.get("route") if row.get("route") in ROUTES else name_route
+            if corpus is None or route is None or not row.get("file"):
+                continue
+            out[(corpus, route)][row["file"]] = row
+    return dict(out)
+
+
+def failing_sets(paths):
+    """{(corpus, route): {file, ...}} for every row that did not pass."""
+    out = {}
+    for key, rows in keyed_rows(paths).items():
+        out[key] = {f for f, r in rows.items() if r.get("status") != PASS_STATUS}
+    return out
+
+
+def row_within(row):
+    """within-8 as a percentage, or None when the file produced no metric."""
+    try:
+        return float(row["within"]) * 100.0
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def compare_to_base(all_runs, base_paths):
+    """Per-file within-8 delta against one or more baseline CSVs.
+
+    Returns (lines, totals): `lines` is the rendered Markdown block, `totals`
+    the counters, so the caller can print the same text it writes to the
+    summary.
+    """
+    base = keyed_rows(base_paths)
+    changed = []
+    totals = Counter()
+    for corpus, route, rows, _, _ in all_runs:
+        before_rows = base.get((corpus, route))
+        if before_rows is None:
+            continue
+        totals["compared_runs"] += 1
+        seen = set()
+        for row in rows:
+            before = before_rows.get(row["file"])
+            if before is None:
+                totals["only_new"] += 1
+                continue
+            seen.add(row["file"])
+            b_pass = before.get("status") == PASS_STATUS
+            a_pass = row["status"] == PASS_STATUS
+            if a_pass and not b_pass:
+                totals["newly_passing"] += 1
+            elif b_pass and not a_pass:
+                totals["newly_failing"] += 1
+            b_w, a_w = row_within(before), row_within(row)
+            if b_w is None or a_w is None:
+                if before.get("status") != row["status"]:
+                    changed.append(
+                        (corpus, route, row["file"], b_w, a_w, None,
+                         "%s -> %s" % (before.get("status"), row["status"]))
+                    )
+                    totals["changed"] += 1
+                else:
+                    totals["unchanged"] += 1
+                continue
+            delta = a_w - b_w
+            if abs(delta) > DELTA_EPS:
+                changed.append(
+                    (corpus, route, row["file"], b_w, a_w, delta,
+                     "%s -> %s" % (before.get("status"), row["status"]))
+                )
+                totals["changed"] += 1
+            else:
+                totals["unchanged"] += 1
+        totals["only_base"] += len(set(before_rows) - seen)
+
+    parts = []
+    if not totals["compared_runs"]:
+        parts.append(
+            "\nNo run in this invocation matched a corpus/route in the "
+            "baseline CSV(s); nothing to compare.\n"
+        )
+        return "".join(parts), totals
+
+    changed.sort(key=lambda t: (t[5] if t[5] is not None else 0.0, t[2]))
+    parts.append(
+        "\n%d file(s) moved by more than %.1f points of within-8.\n"
+        % (len(changed), DELTA_EPS)
+    )
+    if changed:
+        parts.append(
+            "\n"
+            + md_table(
+                ["corpus", "route", "file", "within-8 before", "within-8 after",
+                 "delta (points)", "status"],
+                [
+                    [c, r, f,
+                     "-" if b is None else "%.3f%%" % b,
+                     "-" if a is None else "%.3f%%" % a,
+                     "-" if d is None else "%+.3f" % d,
+                     st]
+                    for c, r, f, b, a, d, st in changed
+                ],
+            )
+            + "\n"
+        )
+    parts.append(
+        "\nnewly passing %d &middot; newly failing %d &middot; unchanged %d"
+        " &middot; only in this run %d &middot; only in baseline %d\n"
+        % (
+            totals["newly_passing"], totals["newly_failing"], totals["unchanged"],
+            totals["only_new"], totals["only_base"],
+        )
+    )
+    return "".join(parts), totals
 
 
 # --------------------------------------------------------------------------
@@ -437,6 +676,15 @@ def build_summary(all_runs, config):
         % (
             time.strftime("%Y-%m-%d %H:%M:%S"), config["bin"], config["commit"],
             config["tool_version"], config["tol"], config["threshold"], config["jobs"],
+        )
+    )
+    parts.append(
+        "\nrender widths: %s%s\n"
+        % (
+            ", ".join(
+                "`%s` %d px" % (c, width_for(c)) for c in config["widths_for"]
+            ),
+            " (`--fast`)" if config["fast"] else "",
         )
     )
     parts.append(
@@ -567,8 +815,13 @@ def build_summary(all_runs, config):
         )
     parts.append(
         "\nComposites (`reference | ours | diff`) for the files above are in "
-        "`tests/out/corpora/worst/`.\n"
+        "`%s`.\n" % WORST_DIR
     )
+
+    # ---- comparison against a baseline run
+    if config.get("compare_block"):
+        parts.append("\n## Change vs baseline `%s`\n" % config["compare_base"])
+        parts.append(config["compare_block"])
     return "".join(parts)
 
 
@@ -578,17 +831,58 @@ def build_summary(all_runs, config):
 
 
 def main():
+    global OUT_DIR, WORST_DIR
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "--corpus", default="all",
+        "--corpus", default=None,
         choices=["resvg", "simple-icons", "feather", "all"],
-        help="which corpus to measure (default all)",
+        help="which corpus to measure (default all, or the corpora named by "
+             "--failing-from's CSVs)",
     )
     parser.add_argument(
-        "--route", default="both", choices=["direct", "usvg", "both"],
-        help="direct = original file into microsvg; usvg = usvg-simplified first",
+        "--route", default=None, choices=["direct", "usvg", "both"],
+        help="direct = original file into microsvg; usvg = usvg-simplified "
+             "first (default both, or the routes named by --failing-from's CSVs)",
+    )
+    parser.add_argument(
+        "--failing-from", nargs="+", metavar="CSV", default=None,
+        help="re-run only the files that did not pass in these earlier CSVs "
+             "(anything but status=pass: fail, unsupported, timeout, size "
+             "mismatch, usvg/ref error). Corpus and route come from each "
+             "CSV's rows, falling back to its <corpus>_<route>.csv name, so "
+             "--corpus/--route can be omitted; give them explicitly to run "
+             "the same file set through another route",
+    )
+    parser.add_argument(
+        "--dir", dest="dirs", action="append", metavar="PREFIX", default=None,
+        help="restrict the resvg suite to a feature directory, repeatable: "
+             "--dir shapes/path --dir painting/stroke-dasharray (a prefix "
+             "also matches subdirectories; ignored for the flat icon sets)",
+    )
+    parser.add_argument(
+        "--has-arcs", choices=["yes", "no"], default=None,
+        help="only files whose source `d` attributes do (yes) or do not (no) "
+             "contain an elliptical-arc command",
+    )
+    parser.add_argument(
+        "--fast", action="store_true",
+        help="small-render iteration loop: widths %s instead of the defaults, "
+             "and --jobs defaults to hw.ncpu"
+             % ", ".join("%s %d" % (c, w) for c, w in FAST_WIDTHS.items()),
+    )
+    parser.add_argument(
+        "--out", metavar="DIR", default=None,
+        help="write the CSVs, summary.md and worst/ here instead of %s "
+             "(use this from a worktree so the main results are not clobbered)"
+             % OUT_DIR,
+    )
+    parser.add_argument(
+        "--compare", nargs="+", metavar="CSV", default=None,
+        help="after the run, print a per-file within-8 delta table against "
+             "these baseline CSVs, plus newly passing / newly failing / "
+             "unchanged totals",
     )
     parser.add_argument(
         "--limit", type=int, default=None,
@@ -601,12 +895,23 @@ def main():
         "--threshold", type=float, default=0.99,
         help="minimum within-tol fraction to pass (default 0.99)",
     )
-    parser.add_argument("--jobs", type=int, default=4, help="parallel subprocesses (default 4)")
+    parser.add_argument(
+        "--jobs", type=int, default=None,
+        help="parallel subprocesses (default 4; hw.ncpu with --fast)",
+    )
     parser.add_argument("--bin", default=str(DEFAULT_BIN), help="path to the microsvg binary")
     parser.add_argument(
         "--no-worst", action="store_true", help="skip the worst-file composites"
     )
     args = parser.parse_args()
+
+    if args.out:
+        OUT_DIR = Path(args.out).expanduser().resolve()
+        WORST_DIR = OUT_DIR / "worst"
+
+    WIDTHS.update(FAST_WIDTHS if args.fast else {c: CORPORA[c][2] for c in CORPORA})
+    if args.jobs is None:
+        args.jobs = (os.cpu_count() or 4) if args.fast else 4
 
     binary = Path(args.bin).resolve()
     if not binary.is_file():
@@ -615,38 +920,110 @@ def main():
     if shutil.which("resvg") is None:
         print("resvg not found on PATH (needed as the oracle)", file=sys.stderr)
         return 2
-    routes = list(ROUTES) if args.route == "both" else [args.route]
+    for flag, paths in (("--failing-from", args.failing_from), ("--compare", args.compare)):
+        for path in paths or []:
+            if not Path(path).is_file():
+                print("%s: no such CSV: %s" % (flag, path), file=sys.stderr)
+                return 2
+
+    corpus_explicit = args.corpus is not None
+    route_explicit = args.route is not None
+    routes = list(ROUTES) if (args.route or "both") == "both" else [args.route]
+    corpora = list(CORPORA) if (args.corpus or "all") == "all" else [args.corpus]
+
+    # ---- --failing-from: which files did not pass last time
+    fail_sets = None
+    if args.failing_from:
+        fail_sets = failing_sets(args.failing_from)
+        if not fail_sets:
+            print(
+                "--failing-from: no rows in %s name a known corpus and route"
+                % ", ".join(args.failing_from),
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "== --failing-from %s: %d non-passing files (%s)"
+            % (
+                " ".join(args.failing_from),
+                sum(len(s) for s in fail_sets.values()),
+                ", ".join(
+                    "%s/%s %d" % (c, r, len(s))
+                    for (c, r), s in sorted(fail_sets.items())
+                ),
+            ),
+            flush=True,
+        )
+        if not corpus_explicit:
+            corpora = [c for c in CORPORA if any(k[0] == c for k in fail_sets)]
+        if not route_explicit:
+            routes = [r for r in ROUTES if any(k[1] == r for k in fail_sets)]
+        if corpus_explicit and not any(k[0] in corpora for k in fail_sets):
+            print(
+                "--failing-from: the given CSVs hold no rows for corpus %s"
+                % args.corpus,
+                file=sys.stderr,
+            )
+            return 2
+
     if "usvg" in routes and shutil.which("usvg") is None:
         print("usvg not found on PATH; run with --route direct", file=sys.stderr)
         return 2
 
-    corpora = list(CORPORA) if args.corpus == "all" else [args.corpus]
-
     sampling_notes = []
     selected = {}
+    noted = set()
+    reported_missing = set()
     for corpus in corpora:
-        files, base = collect_files(corpus, args.limit)
-        if files is None:
-            print("corpus %s missing at %s, skipping" % (corpus, base), file=sys.stderr)
-            sampling_notes.append((corpus, "MISSING at `%s` — not measured" % base))
-            continue
-        if not files:
-            print("corpus %s has no SVGs under %s, skipping" % (corpus, base), file=sys.stderr)
-            continue
-        selected[corpus] = files
-        root, pattern, width, default_limit = CORPORA[corpus]
-        total = len(sorted(p for p in base.glob(pattern) if p.is_file()))
-        if len(files) < total:
-            sampling_notes.append(
-                (corpus, "random sample of %d/%d files (seed %d), rendered at "
-                         "`--width %d`" % (len(files), total, SAMPLE_SEED, width))
+        for route in routes:
+            failing = None
+            if fail_sets is not None:
+                failing = fail_sets.get((corpus, route))
+                if failing is None and route_explicit:
+                    # the user asked for a route the CSVs do not cover: take
+                    # the union of that corpus's non-passing files instead.
+                    union = set()
+                    for (c, _), s in fail_sets.items():
+                        if c == corpus:
+                            union |= s
+                    failing = union or None
+                if failing is None:
+                    continue
+            files, base, counts = collect_files(
+                corpus, args.limit, args.dirs, failing, args.has_arcs
             )
-        else:
-            sampling_notes.append(
-                (corpus, "all %d files, rendered at `--width %d`" % (total, width))
+            if files is None:
+                if corpus not in reported_missing:
+                    reported_missing.add(corpus)
+                    print(
+                        "corpus %s missing at %s, skipping" % (corpus, base),
+                        file=sys.stderr,
+                    )
+                    sampling_notes.append((corpus, "MISSING at `%s` — not measured" % base))
+                continue
+            if not files:
+                print(
+                    "%s / %s: no files left after the filters, skipping" % (corpus, route),
+                    file=sys.stderr,
+                )
+                continue
+            selected[(corpus, route)] = files
+            note = selection_note(corpus, counts)
+            label = corpus if fail_sets is None else "%s / %s" % (corpus, route)
+            if label not in noted:
+                noted.add(label)
+                sampling_notes.append((label, note))
+            print(
+                "-- selected %d file(s) for %s / %s: %s"
+                % (len(files), corpus, route, note.replace("`", "")),
+                flush=True,
             )
     if not selected:
-        print("no corpora available under %s" % CORPORA_DIR, file=sys.stderr)
+        if fail_sets is not None and not any(fail_sets.values()):
+            # the good end of the iterate-on-failures loop, not an error
+            print("--failing-from: every file in the given CSVs passed, nothing to re-run")
+            return 0
+        print("nothing selected to run (corpora under %s)" % CORPORA_DIR, file=sys.stderr)
         return 2
 
     commit = subprocess.run(
@@ -660,33 +1037,38 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     all_runs = []
     grand_start = time.perf_counter()
-    for corpus in selected:
-        for route in routes:
-            files = selected[corpus]
-            print(
-                "== %s / %s: %d files at width %d, %d jobs"
-                % (corpus, route, len(files), CORPORA[corpus][2], args.jobs),
-                flush=True,
+    for (corpus, route), files in selected.items():
+        print(
+            "== %s / %s: %d files at width %d, %d jobs"
+            % (corpus, route, len(files), width_for(corpus), args.jobs),
+            flush=True,
+        )
+        rows, elapsed, csv_path = run_corpus_route(
+            corpus, route, files, binary, args.tol, args.threshold, args.jobs
+        )
+        s = stats_for(rows)
+        print(
+            "   %.1fs  rendered %d/%d  unsupported %d  size-mism %d  "
+            "pass %d (%.1f%% of all, %.1f%% of rendered)"
+            % (
+                elapsed, s["rendered"], s["files"],
+                s["unsupported"] + s["timeout"], s["size_mismatch"],
+                s["pass"], s["pass_all"] * 100.0, s["pass_rendered"] * 100.0,
+            ),
+            flush=True,
+        )
+        if not args.no_worst:
+            write_worst_composites(
+                corpus, route, rows, binary, args.tol, args.threshold, args.jobs
             )
-            rows, elapsed, csv_path = run_corpus_route(
-                corpus, route, files, binary, args.tol, args.threshold, args.jobs
-            )
-            s = stats_for(rows)
-            print(
-                "   %.1fs  rendered %d/%d  unsupported %d  size-mism %d  "
-                "pass %d (%.1f%% of all, %.1f%% of rendered)"
-                % (
-                    elapsed, s["rendered"], s["files"],
-                    s["unsupported"] + s["timeout"], s["size_mismatch"],
-                    s["pass"], s["pass_all"] * 100.0, s["pass_rendered"] * 100.0,
-                ),
-                flush=True,
-            )
-            if not args.no_worst:
-                write_worst_composites(
-                    corpus, route, rows, binary, args.tol, args.threshold, args.jobs
-                )
-            all_runs.append((corpus, route, rows, elapsed, csv_path))
+        all_runs.append((corpus, route, rows, elapsed, csv_path))
+
+    # ---- --compare: what moved against a baseline run
+    compare_block = ""
+    if args.compare:
+        compare_block, _ = compare_to_base(all_runs, args.compare)
+        print("\n== change vs baseline %s" % " ".join(args.compare), flush=True)
+        print(compare_block.replace("&middot;", "-").rstrip(), flush=True)
 
     config = {
         "bin": str(binary),
@@ -696,6 +1078,10 @@ def main():
         "threshold": args.threshold,
         "jobs": args.jobs,
         "sampling_notes": sampling_notes,
+        "fast": args.fast,
+        "widths_for": sorted({c for c, _ in selected}, key=list(CORPORA).index),
+        "compare_block": compare_block,
+        "compare_base": " ".join(args.compare) if args.compare else "",
     }
     summary_path = OUT_DIR / "summary.md"
     summary_path.write_text(build_summary(all_runs, config), encoding="utf-8")
