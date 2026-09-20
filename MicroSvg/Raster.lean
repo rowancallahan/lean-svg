@@ -53,6 +53,9 @@ by `cov = ⌈alpha·65536/255⌉`, which is the exact inverse of `Canvas.fillMas
 Clipping: the mask is the shape's bounding box intersected with the canvas.
 Parts of an edge left of the mask still count for winding (their sub-column
 clamps to 0); parts above or below it are discarded.
+
+`hairline` below is the *other* converter: tiny-skia never sends a thin stroke
+here at all.  See its own comment.
 -/
 
 namespace MicroSvg
@@ -311,6 +314,232 @@ def rasterize (W H : Nat) (polys : Array (Array Pt)) (evenOdd : Bool) : Option M
         if a != 0 then
           cov := cov.setIfInBounds (row + p) ((a * 65536 + 254) / 255)
           alpha := alpha.setIfInBounds p 0
+  return some ⟨x0i, y0i, bw, bh, cov⟩
+
+/-! ## Hairline strokes
+
+`painter.rs::treat_as_hairline` keeps every stroke whose device-space width is
+`≤ 1` away from the supersampling converter above and draws it with
+`scan::hairline_aa` (Skia's `AntiHairLineRgn`) instead, with the paint alpha
+scaled by the width.  That converter is a Wu-style walker, not an area
+rasterizer: it lays down **one sample per major-axis pixel**, splitting a
+constant 255 units of alpha between two adjacent minor-axis pixels.  A 1 px
+diagonal of length 200 px therefore receives `max(|dx|, |dy|) = 160` px² of
+ink, not the geometric 200 px².
+
+The scheme (`scan/hairline_aa.rs::do_anti_hairline`, `scan/hairline.rs`):
+
+* Coordinates are `FDot6` (1/64 *device* px — note this is not the same unit as
+  the supersampled `Fx` above; `toFDot6` divides by 4, truncating toward zero
+  as `fdot6::from_f32` does).  The running minor-axis position `fy` and the
+  slope are 16.16.
+* The major axis is the one with the larger `|Δ|` (ties go to vertical), and
+  the segment is oriented along it.  `istart = ⌊u0⌋`, `istop = ⌈u1⌉`,
+  `fstart = v0 << 10` plus, when the segment is not axis-parallel,
+  `(slope·(32 - (u0 & 63)) + 32) >> 6`, which re-centres the first sample on
+  the centre of column `istart`.  `slope = ((v1-v0) << 16) / (u1-u0)`
+  truncating, so `|slope| ≤ 1`.
+* Each step emits `(a·mod64) >> 6` into the "lower" minor pixel `⌊fy⌋` and
+  `((255-a)·mod64) >> 6` into the one above it, where `a = (fy >> 8) & 0xFF`
+  and `fy` carries a persistent `+1/2` bias and is clamped at 0; then
+  `fy += slope`.
+* `mod64` is 64 for interior steps.  The first step uses
+  `64 - (u0 & 63)` and the last `u1 & 63` (dropped when that is 0); a segment
+  inside a single major pixel uses `u1 - u0` for its one step.
+* The four blitter flavours differ only in how they treat an index of `-1`:
+  the axis-parallel `HLine` skips that pixel, `VLine` clamps it to 0, and the
+  two oblique ones clamp with `max(i,1)-1` and then write the pair at that row
+  and the next — so a line grazing the top/left edge is nudged inward by one.
+* There are no joins: `stroke_path_impl` hands every flattened segment to the
+  converter *independently* and the blitter composites, so a pixel shared by
+  two segments is blended twice.  Caps are the only geometry: `extend_pts`
+  pushes the ends of a subpath out along the unit tangent by 1/2 (square) or
+  π/8 (round), and a closing segment is drawn back to the *extended* start.
+
+Two src-over blits of one colour at coverages `c₁`, `c₂` and paint alpha `a`
+are exactly one blit at `c₁ + c₂ - a·c₁·c₂`, so `hairPx` accumulates with that
+rule and `Canvas.fillMask` still sees a single mask.  For the same reason the
+width factor is folded into the coverage rather than into the paint alpha: the
+colour is premultiplied by the alpha before the coverage is applied, so the two
+are interchangeable, and the coverage has 16 bits to spend where the alpha has
+8.
+
+Deliberate deviations from tiny-skia, both at the edge of the canvas:
+`anti_hair_line_rgn` chops each segment against the clip *before* converting to
+`FDot6`, and `do_anti_hairline` halves any segment longer than 511 px.  Both
+are float-domain work that loses precision and, worse, is not invariant under
+the whole-pixel translation a `--viewport` tile applies, which would break the
+tile identity the renderer guarantees.  Here the segment is instead clipped
+integrally — exactly as `do_anti_hairline`'s own clip does, by skipping major
+columns and advancing `fstart` by `slope·n`, which provably never changes a
+pixel inside the clip — and never halved, since `Int` cannot overflow. -/
+
+/-- `fdot6::from_f32` on a device coordinate: `Fx` is 1/256 px and `FDot6` is
+1/64 px, and Rust's `as i32` truncates toward zero. -/
+@[inline] def toFDot6 (a : Fx) : Int := Int.tdiv a 4
+
+/-- Round-to-nearest division by a positive `d`, halves away from zero. -/
+@[inline] def divRound (n d : Int) : Int :=
+  if d ≤ 0 then 0
+  else if n ≥ 0 then Int.ediv (2 * n + d) (2 * d)
+  else -(Int.ediv (2 * (-n) + d) (2 * d))
+
+/-- Blend one hairline sample into the mask.  `al` is tiny-skia's 0..255 pixel
+alpha; it is scaled by the width factor `covScale` and mapped to the mask's
+`[0, 65536]` convention, then combined with what is already there by the
+src-over rule `c₁ + c₂ - a·c₁·c₂`.  A sample outside the mask is dropped, which
+is what `RectClipBlitter` does. -/
+@[inline] def hairPx (cov : Array Nat) (bw bh a8 covScale : Nat) (px py : Int)
+    (al : Nat) : Array Nat :=
+  if al == 0 then cov
+  else if px < 0 || py < 0 || px ≥ (bw : Int) || py ≥ (bh : Int) then cov
+  else
+    let c := (al * covScale * 65536 + 65024) / 65025
+    let p := py.toNat * bw + px.toNat
+    let c1 := cov.getD p 0
+    if c1 == 0 then cov.setIfInBounds p c
+    else
+      let s := c1 + c - (c1 * c * a8) / 16711680
+      cov.setIfInBounds p (if s > 65536 then 65536 else s)
+
+/-- `do_anti_hairline` for one device-space segment, with the integral clip set
+to the mask rectangle `(mx, my, bw, bh)`.
+
+The single loop runs over the segment's major axis after that clip, so it is
+bounded by `bw` or `bh`; everything else is straight-line arithmetic. -/
+def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (cov : Array Nat) (p q : Pt) :
+    Array Nat := Id.run do
+  let ax := toFDot6 p.x
+  let ay := toFDot6 p.y
+  let bx := toFDot6 q.x
+  let by_ := toFDot6 q.y
+  let horiz := (bx - ax).natAbs > (by_ - ay).natAbs
+  -- orient along the major axis `u`; `v` is the minor one
+  let (u0, v0, u1, v1) :=
+    if horiz then (if ax > bx then (bx, by_, ax, ay) else (ax, ay, bx, by_))
+    else (if ay > by_ then (by_, bx, ay, ax) else (ay, ax, by_, bx))
+  if u1 == u0 then return cov          -- zero length: nothing to draw
+  let flat := v0 == v1
+  let slope : Int := if flat then 0 else Int.tdiv ((v1 - v0) * 65536) (u1 - u0)
+  let mut fstart : Int := v0 * 1024
+  if !flat then
+    fstart := fstart + Int.ediv (slope * (32 - Int.emod u0 64) + 32) 64
+  let mut istart := Int.ediv u0 64
+  let istop0 := Int.ediv (u1 + 63) 64
+  let mut istop := istop0
+  let one := istop - istart == 1
+  let mut sStart : Int := if one then u1 - u0 else 64 - Int.emod u0 64
+  let mut sStop : Int := if one then 0 else Int.emod u1 64
+  -- integral clip to the mask's major-axis range
+  let cl : Int := if horiz then mx else my
+  let cr : Int := cl + (if horiz then bw else bh)
+  if istart ≥ cr || istop ≤ cl then return cov
+  if istart < cl then
+    fstart := fstart + slope * (cl - istart)
+    istart := cl
+    sStart := 64
+    if istop - istart == 1 then
+      sStart := Int.emod (u1 - 1) 64 + 1   -- `contribution_64`
+      sStop := 0
+  if istop > cr then
+    istop := cr
+    sStop := 0
+  if istart ≥ istop then return cov
+  let n := (istop - istart).toNat
+  let mut fy : Int := fstart + 32768
+  let mut cov := cov
+  for k in [0:n] do
+    let m64 : Int :=
+      if k == 0 then sStart
+      else if k + 1 == n && sStop > 0 then sStop
+      else 64
+    if fy < 0 then fy := 0
+    let ly := Int.ediv fy 65536
+    let a := Int.emod (Int.ediv fy 256) 256
+    let aLo := (Int.ediv (a * m64) 64).toNat
+    let aHi := (Int.ediv ((255 - a) * m64) 64).toNat
+    -- index of the "upper" minor pixel: `HLine` drops a -1, the others clamp
+    let hiI := if flat && horiz then ly - 1 else (if ly < 1 then 0 else ly - 1)
+    let loI := if flat then ly else hiI + 1
+    let i := istart + k
+    if horiz then
+      cov := hairPx cov bw bh a8 covScale (i - mx) (hiI - my) aHi
+      cov := hairPx cov bw bh a8 covScale (i - mx) (loI - my) aLo
+    else
+      cov := hairPx cov bw bh a8 covScale (hiI - mx) (i - my) aHi
+      cov := hairPx cov bw bh a8 covScale (loI - mx) (i - my) aLo
+    fy := fy + slope
+  return cov
+
+/-- `hairline.rs::extend_pts` for one end: push `p` away from `q` by the cap
+outset (1/2 for a square cap, π/8 for a round one) along the unit tangent.
+With `p = q` tiny-skia falls back to `(1, 0)` at the start of a subpath and
+`(-1, 0)` at its end. -/
+def capExtend (cap : Cap) (atStart : Bool) (p q : Pt) : Pt :=
+  match cap with
+  | .butt => p
+  | _ =>
+    let o : Int := if cap == Cap.square then 32768 else 25736   -- 16.16 px
+    let dx := p.x - q.x
+    let dy := p.y - q.y
+    let len := Fx.hypot dx dy
+    if len == 0 then
+      let e := divRound o 256
+      ⟨Fx.clamp (if atStart then p.x + e else p.x - e), p.y⟩
+    else
+      ⟨Fx.clamp (p.x + divRound (dx * o) (len * 256)),
+       Fx.clamp (p.y + divRound (dy * o) (len * 256))⟩
+
+/-- Rasterize device-space polylines as anti-aliased hairlines into a coverage
+mask clipped to a `W × H` canvas.  `a8` is the final paint alpha the mask will
+be filled with (it is what makes the src-over accumulation exact) and
+`covScale ∈ [0, 255]` is `treat_as_hairline`'s width factor.  Returns `none` if
+nothing is visible. -/
+def hairline (W H : Nat) (polys : Array Poly) (cap : Cap) (a8 covScale : Nat) :
+    Option Mask := Id.run do
+  if a8 == 0 || covScale == 0 then return none
+  -- flatten to segments, applying the cap extension where tiny-skia does
+  let mut segs : Array (Pt × Pt) := #[]
+  for poly in polys do
+    let n := poly.pts.size
+    if n < 2 then continue
+    let e0 := capExtend cap true (poly.pts.getD 0 default) (poly.pts.getD 1 default)
+    let eL := capExtend cap false (poly.pts.getD (n - 1) default) (poly.pts.getD (n - 2) default)
+    for i in [0:n - 1] do
+      let a := if i == 0 then e0 else poly.pts.getD i default
+      let b := if i + 2 == n then eL else poly.pts.getD (i + 1) default
+      segs := segs.push (a, b)
+    -- the closing segment is never extended, but it does close to the
+    -- extended start point (`first_pt = last_pt2`)
+    if poly.closed then segs := segs.push (poly.pts.getD (n - 1) default, e0)
+  if segs.isEmpty then return none
+  -- bounding box: a sample can land one whole pixel outside the geometry
+  let mut minx : Fx := 0
+  let mut miny : Fx := 0
+  let mut maxx : Fx := 0
+  let mut maxy : Fx := 0
+  let mut any := false
+  for s in segs do
+    for p in [s.1, s.2] do
+      if !any then
+        any := true
+        minx := p.x; maxx := p.x; miny := p.y; maxy := p.y
+      else
+        minx := Fx.min minx p.x
+        maxx := Fx.max maxx p.x
+        miny := Fx.min miny p.y
+        maxy := Fx.max maxy p.y
+  if !any then return none
+  let x0i := Int.toNat (Fx.floor minx - 1)
+  let y0i := Int.toNat (Fx.floor miny - 1)
+  let x1i := Nat.min W (Int.toNat (Fx.ceil maxx + 1))
+  let y1i := Nat.min H (Int.toNat (Fx.ceil maxy + 1))
+  if x1i ≤ x0i || y1i ≤ y0i then return none
+  let bw := x1i - x0i
+  let bh := y1i - y0i
+  let mut cov : Array Nat := Array.replicate (bw * bh) 0
+  for s in segs do
+    cov := hairSeg bw bh a8 covScale x0i y0i cov s.1 s.2
   return some ⟨x0i, y0i, bw, bh, cov⟩
 
 end Raster
