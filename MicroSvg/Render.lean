@@ -212,46 +212,48 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
       | .skip => cv
       | .solid c a8 => cv.fillMask m c a8
       | .grad sh => cv.fillMaskShader m sh
-  let cv :=
-    match st.fill with
+  let drawFill := fun (cv : Canvas) => match st.fill with
     | .none => cv
     | _ =>
       let dev := polys.map fun p => p.pts.map ctm.apply
       match (Raster.rasterize W H dev st.evenOdd).bind (clipMask clip) with
       | some m => paintMask cv st.fill m st.fillOpacity
       | none => cv
-  match st.stroke with
-  | .none => cv
-  | _ =>
-    if st.strokeWidth ≤ 0 then cv
-    else
-      -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
-      -- actually inked, before stroking, so every dash end gets a cap.  The
-      -- fill above uses the undashed polylines; dashes are a stroke property.
-      let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
-      match hairCoverage ctm st.strokeWidth with
-      | some cov16 =>
-        -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
-        -- the coverage rather than the paint alpha (see `Raster.hairline`).
-        -- The hairline blitter needs the paint's alpha up front, which a
-        -- gradient does not have one of; its stops' alphas are already in the
-        -- shader, so it passes 255 and lets the shader carry them.
-        let a8 := match st.stroke with
-          | .solid c => opacityToU8 c.a st.strokeOpacity st.opacity
-          | _ => 255
-        let scale := Int.ediv cov16 256
-        let covScale := (Int.ediv (255 * scale) 256).toNat
-        let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
-        match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
-        | some m => paintMask cv st.stroke m st.strokeOpacity
-        | none => cv
-      | none =>
-        let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
-        let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
-        let dev := outline.map fun p => p.map ctm.apply
-        match (Raster.rasterize W H dev false).bind (clipMask clip) with
-        | some m => paintMask cv st.stroke m st.strokeOpacity
-        | none => cv
+  let drawStroke := fun (cv : Canvas) => match st.stroke with
+    | .none => cv
+    | _ =>
+      if st.strokeWidth ≤ 0 then cv
+      else
+        -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
+        -- actually inked, before stroking, so every dash end gets a cap.  The
+        -- fill above uses the undashed polylines; dashes are a stroke property.
+        let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
+        match hairCoverage ctm st.strokeWidth with
+        | some cov16 =>
+          -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
+          -- the coverage rather than the paint alpha (see `Raster.hairline`).
+          -- The hairline blitter needs the paint's alpha up front, which a
+          -- gradient does not have one of; its stops' alphas are already in the
+          -- shader, so it passes 255 and lets the shader carry them.
+          let a8 := match st.stroke with
+            | .solid c => opacityToU8 c.a st.strokeOpacity st.opacity
+            | _ => 255
+          let scale := Int.ediv cov16 256
+          let covScale := (Int.ediv (255 * scale) 256).toNat
+          let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
+          match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
+          | some m => paintMask cv st.stroke m st.strokeOpacity
+          | none => cv
+        | none =>
+          let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+          let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
+          let dev := outline.map fun p => p.map ctm.apply
+          match (Raster.rasterize W H dev false).bind (clipMask clip) with
+          | some m => paintMask cv st.stroke m st.strokeOpacity
+          | none => cv
+  -- `paint-order`: normally fill then stroke; `st.strokeFirst` (set when
+  -- `stroke` precedes `fill` in the property's resolved order) swaps them.
+  if st.strokeFirst then drawFill (drawStroke cv) else drawStroke (drawFill cv)
 
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.

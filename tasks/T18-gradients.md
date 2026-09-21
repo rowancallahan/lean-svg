@@ -175,3 +175,53 @@ fixed nothing in the Lean, and ran every item under `## Verify`.
   closure rather than one added `match` arm each, so T34's `paint-order`
   edit will touch the same lines; the closure is self-contained and the
   order of the two blocks is unchanged.
+
+### Merge with main (T34, T37, T38)
+
+`origin/main` at `a932752` merged into the branch.  Two files conflicted:
+
+- `MicroSvg/Render.lean`, `drawShape`: T34's `drawFill`/`drawStroke`
+  closures and the `st.strokeFirst` swap are kept verbatim, with the bodies
+  of both routed through T18's `paintMask`.  Each arm now matches
+  `.none` / `_` instead of `.solid c` so a `.gradient` paint reaches
+  `Grad.build`; the hairline arm keeps T18's `a8` (a gradient carries its
+  stops' alphas in the shader and passes 255).
+- `MicroSvg/Svg.lean`: T34's `hueRound`/`hslFracOf`/`parseHueDeg`/
+  `hslToRgb`/`parseHslFunc` are kept unchanged, and the two `hsl(`/`hsla(`
+  branches moved into T18's `parseSolidColor`, which `parsePaint` and the
+  `url(#id)` fallback of `parseUrlPaint` both call.  `Style` keeps both
+  `strokeFirst` (T34) and `defs` (T18).  T38's `applyEffective` is the only
+  cascade entry point: the gradient table reaches the root `Style` as
+  `applyEffective { (default : Style) with defs := gradTable } …`, and
+  `applyAttrs` stays deleted.
+
+Verification after the merge, resvg 0.48.1:
+
+| check | result |
+|---|---|
+| `lake build` | clean, 41 jobs, no warnings |
+| `run_tests.py` | 24 files, 20 pass; `24_gradients` 99.993% within-8; the 4 fails (12, 14, 15, 16) are main's |
+| 23 pre-existing files vs main's binary, natural + `--width 800` | 46/46 byte-identical |
+| `run_tiles.py` | 24/24 stitch byte-identically |
+| `run_adversarial.py` | 50/50 clean |
+| `check_hsl.py 500` | 500/500 exact |
+| `git diff origin/main -- MicroSvg/Effect.lean` | empty |
+
+Corpora, `--fast` (width 100), direct route, main's binary → merge:
+
+| directory | main | merge |
+|---|---|---|
+| paint-servers/linearGradient | 5/40 | 40/40 |
+| paint-servers/radialGradient | 2/45 | 45/45 |
+| paint-servers/stop | 0/32 | 32/32 |
+| painting/fill | 51/60 | 59/60 |
+| painting/paint-order | 2/14 | 2/14 |
+| painting/color | 3/4 | 3/4 |
+| structure/transform-origin | 16/23 | 16/23 |
+
+118 files newly passing, 0 newly failing.  The three `hsla-color` files and
+the six `painting/fill/hsl*` files that T18 reported failing now pass, which
+is T34's parsing reaching the gradient stops; the one remaining `fill`
+failure is `pattern-on-shape` (`<pattern>`, out of scope).  `paint-order`
+stays at main's 2/14 for the reason T34 gives (12 of the 14 files use
+markers).

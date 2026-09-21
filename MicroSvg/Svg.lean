@@ -58,11 +58,16 @@ structure Style where
   dashes : Array Fx := #[]
   dashOffset : Fx := 0
   opacity : Nat := opacityOne
+  /-- `paint-order`, collapsed to the one bit that matters here: whether
+  `stroke` is painted before `fill` (we have no markers, so their position in
+  the property's value never changes what gets drawn).  Inherited, like every
+  other paint property. -/
+  strokeFirst : Bool := false
   visible : Bool := true
   /-- The CSS `color` property: inherited, defaults to black, and is what
-  `fill`/`stroke: currentColor` resolve to (`applyAttrs` applies `color`
-  before any other property so the resolution sees the element's own
-  value). -/
+  `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
+  applies `color` before any other property so the resolution sees the
+  element's own value). -/
   color : Rgba := ⟨0, 0, 0, 255⟩
   /-- Whether `pctRefW`/`pctRefH` have been established yet.  False only for
   the literal `default : Style` that `interpret` passes as the parent of the
@@ -73,7 +78,8 @@ structure Style where
   /-- The rect `transform-origin` percentages resolve against: usvg's
   per-element `state.view_box`, which is the same constant rect (the root's
   `viewBox`, or else its own resolved size) for every element in a document
-  with no nested `<svg>`. Set once in `applyAttrs`, from the root's own attrs. -/
+  with no nested `<svg>`. Set once in `applyEffective`, from the root's own
+  attrs. -/
   pctRefW : Fx := 0
   pctRefH : Fx := 0
   /-- `transform-origin`'s resolved offset, *not* inherited: every element
@@ -184,16 +190,62 @@ def parseHexColor (bs : ByteArray) : Option Rgba := Id.run do
     let a := if n == 8 then g 6 * 16 + g 7 else 255
     return some ⟨g 0 * 16 + g 1, g 2 * 16 + g 3, g 4 * 16 + g 5, a⟩
 
-/-- A colour component: integer 0..255 or percentage. -/
+/-- A colour component under `rgb()`'s "percent" mode (selected when the
+*red* component is itself a percentage; see `parseRgbFunc`): every
+component is svgtypes' `parse_number_or_percent`, then `* 255` -- a
+percentage divides by 100 first, but a *plain* number does not, so
+`rgb(50%, 2, 0)` has green = `round (2 * 255)` = 255 (saturated), not the raw
+integer `2`.  Confirmed against the compiled resvg 0.48.1 binary.  The whole
+token must be consumed (plus the `%` when there is one); a leftover byte
+invalidates the component rather than being silently ignored. -/
 def compOf (bs : ByteArray) : Option Nat :=
   let t := trim bs
   match parseNumber t 0 with
   | none => none
   | some (v, j) =>
-    if at' t j == 37 then some (Nat.min 255 ((Int.ediv (v * 255) 256).toNat / 100))
-    else some (Nat.min 255 (Fx.round v).toNat)
+    if at' t j == 37 then
+      -- `round (v/100 * 255) = round (v * 255 / 25600)`, halves up: adding
+      -- half the denominator (`12800`) before flooring, in one division
+      -- rather than the two-step floor-then-floor a naive `(v*255/256)/100`
+      -- would do (which silently under-rounds, e.g. `18.4%` -> 46 instead
+      -- of the correct 47 -- confirmed against the compiled resvg 0.48.1
+      -- binary, and against svgtypes' own `rgb_percentage_float` test case).
+      if j + 1 != t.size then none
+      else if v ≤ 0 then some 0
+      else some (Nat.min 255 ((v.toNat * 255 + 12800) / 25600))
+    else if j == t.size then some (Nat.min 255 (Int.toNat (Fx.round (v * 255))))
+    else none
 
-/-- Alpha component of `rgba()`: a number in 0..1, or a percentage.
+/-- A colour component that must be a plain number: like `compOf`, but a
+`%` is a hard error rather than a percentage.  svgtypes decides
+percent-vs-plain for `rgb()`/`rgba()` from the *red* component alone; if red
+is plain, green and blue must be plain too (`self.parse_list_number()`, not
+`_or_percent`) -- a percentage there is then invalid, not silently accepted,
+confirmed against the compiled resvg 0.48.1 binary (`rgb(0, 50%, 0)` falls
+back to black). -/
+def compNumOnly (bs : ByteArray) : Option Nat :=
+  let t := trim bs
+  match parseNumber t 0 with
+  | some (v, j) => if j == t.size then some (Nat.min 255 (Fx.round v).toNat) else none
+  | none => none
+
+/-- Whether a colour component was written as a percentage: whether `%`
+immediately follows its number, the same one-byte peek `rgb()`'s red
+component decides the whole call's mode with. -/
+def compIsPercent (bs : ByteArray) : Bool :=
+  let t := trim bs
+  match parseNumber t 0 with
+  | some (_, j) => at' t j == 37
+  | none => false
+
+/-- Alpha component of `rgb()`/`rgba()`/`hsl()`/`hsla()`: a plain number in
+0..1, *not* a percentage -- svgtypes 0.16.1 (the version resvg 0.48.1
+actually embeds; confirmed against the compiled binary, which falls back to
+black on `rgba(0, 127, 0, 50%)`) parses this argument with `parse_number`,
+not `parse_number_or_percent`, in every one of the four functions, unlike
+the R/G/B or S/L arguments that share this same call site's neighbours.  A
+trailing `%` is therefore not stripped, it invalidates the value, the same
+as any other leftover byte.
 
 svgtypes stores it as a `u8` with `round (a * 255)`, and usvg then unpacks it
 again as an opacity (`Color::split_alpha` → `a / 255`), so this has to land on
@@ -204,8 +256,8 @@ def alphaOf (bs : ByteArray) : Option Nat :=
   match parseDecimal t 0 with
   | none => none
   | some (neg, mant, exp10, j) =>
-    let exp10 := if at' t j == 37 then exp10 - 2 else exp10
-    some (if neg then 0 else scaleDecimal mant exp10 255 255)
+    if j != t.size then none
+    else some (if neg then 0 else scaleDecimal mant exp10 255 255)
 
 def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
   let close := findByte bs start 41
@@ -215,8 +267,106 @@ def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
     let parts := splitTrim inner 44
     let parts := if parts.size == 1 then splitTrim inner 32 else parts
     if parts.size == 3 || parts.size == 4 then
-      match compOf (parts.getD 0 default), compOf (parts.getD 1 default), compOf (parts.getD 2 default) with
+      let p0 := parts.getD 0 default
+      let comp := if compIsPercent p0 then compOf else compNumOnly
+      match comp p0, comp (parts.getD 1 default), comp (parts.getD 2 default) with
       | some r, some g, some b =>
+        if parts.size == 4 then
+          match alphaOf (parts.getD 3 default) with
+          | some a => some ⟨r, g, b, a⟩
+          | none => none
+        else some ⟨r, g, b, 255⟩
+      | _, _, _ => none
+    else none
+
+/-- Round `n/d` to the nearest integer, halves away from zero -- the same
+rule `divRound` (below, in the arc-flattening section) uses, restated here
+under a different name because colour parsing comes first in the file and
+`hslToRgb` needs it before that definition. -/
+def hueRound (n d : Int) : Int :=
+  if d ≤ 0 then 0
+  else if n ≥ 0 then Int.ediv (2 * n + d) (2 * d)
+  else -(Int.ediv (2 * (-n) + d) (2 * d))
+
+/-- The number or percentage that `hsl()`'s saturation and lightness are
+given as, clamped to `[0, 1]` (i.e. `[0, opacityOne]`) exactly like svgtypes'
+`f64_bound(0.0, x, 1.0)`.  Same grid and semantics as `parseOpacity` below,
+duplicated here because that definition comes after `parsePaint` in the file
+and this has to come before it. -/
+def hslFracOf (bs : ByteArray) : Option Nat :=
+  let t := trim bs
+  match parseDecimal t 0 with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    let exp10 := if at' t j == 37 then exp10 - 2 else exp10
+    some (if neg then 0 else scaleDecimal mant exp10 opacityOne opacityOne)
+
+/-- `hsl()`'s hue: a *plain* number -- svgtypes 0.16.1 (the version resvg
+0.48.1 actually embeds, confirmed against the compiled binary: `hsl(86deg,
+...)` falls back to black, even though the crate's later, unreleased source
+adds CSS `<angle>` units here) parses it with `parse_number`, so `deg` and
+friends are not a suffix to strip, they invalidate the value like any other
+leftover byte.  Left unclamped -- `hslToRgb` wraps it into `[0, 360)` with a
+true modulus, so `hsl(800, ...)` is meaningful, not an overflow.  Scaled by
+`opacityOne`, same grid as `hslFracOf`. -/
+def parseHueDeg (bs : ByteArray) : Option Int :=
+  let t := trim bs
+  match parseDecimal t 0 with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    if j != t.size then none
+    else
+      let mag : Int := Int.ofNat (scaleDecimal mant exp10 opacityOne (10 ^ 40))
+      some (if neg then -mag else mag)
+
+/-- HSL → RGB, following svgtypes' `hsl_to_rgb`/`hue_to_rgb`
+(`src/color.rs`) step for step in exact integer arithmetic instead of `f32`.
+`hueDeg` is the hue in degrees scaled by `opacityOne` (`parseHueDeg`, any
+sign/magnitude); `s`/`l` are already on the `opacityOne` grid, clamped to
+`[0, opacityOne]` (`hslFracOf`).  Every intermediate is kept as a numerator
+over the common denominator `bigG = 60 * opacityOne` -- `hueDeg`'s reduction
+mod `360 * opacityOne` (`= 6 * bigG`) doubles as `hue/60`'s numerator over
+`bigG` for free, and `s`/`l` become numerators over `bigG` by `* 60`.  The
+seven divisions `hue_to_rgb` does in `f32` become seven `hueRound`s on that
+grid: each is accurate to about one part in `6·10^19`, far finer than the
+`round (x * 255)` (svgtypes' `f32::round`, halves away from zero, matched
+here by `hueRound` again) that produces the final `u8`. -/
+def hslToRgb (hueDeg : Int) (s l : Nat) : Nat × Nat × Nat :=
+  let bigG : Int := 60 * (opacityOne : Int)
+  -- `hue/60`'s numerator over `bigG`, in `[0, 6 * bigG)`.
+  let hueX : Int := Int.emod hueDeg (360 * (opacityOne : Int))
+  let sX : Int := (s : Int) * 60
+  let lX : Int := (l : Int) * 60
+  let t2X : Int :=
+    if lX * 2 ≤ bigG then hueRound (lX * (sX + bigG)) bigG
+    else lX + sX - hueRound (lX * sX) bigG
+  let t1X : Int := 2 * lX - t2X
+  let hueToRgbX (hOff : Int) : Int :=
+    let h := if hOff < 0 then hOff + 6 * bigG else hOff
+    let h := if h ≥ 6 * bigG then h - 6 * bigG else h
+    if h < bigG then t1X + hueRound ((t2X - t1X) * h) bigG
+    else if h < 3 * bigG then t2X
+    else if h < 4 * bigG then t1X + hueRound ((t2X - t1X) * (4 * bigG - h)) bigG
+    else t1X
+  let toU8 (x : Int) : Nat :=
+    let v := hueRound (x * 255) bigG
+    if v ≤ 0 then 0 else if v ≥ 255 then 255 else v.toNat
+  (toU8 (hueToRgbX (hueX + 2 * bigG)), toU8 (hueToRgbX hueX), toU8 (hueToRgbX (hueX - 2 * bigG)))
+
+/-- Parse `hsl(...)`/`hsla(...)`'s contents (same comma-or-space splitting,
+and the same alpha-in-either-function leniency, as `parseRgbFunc`). -/
+def parseHslFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
+  let close := findByte bs start 41
+  if close ≥ bs.size then none
+  else
+    let inner := bs.extract start close
+    let parts := splitTrim inner 44
+    let parts := if parts.size == 1 then splitTrim inner 32 else parts
+    if parts.size == 3 || parts.size == 4 then
+      match parseHueDeg (parts.getD 0 default), hslFracOf (parts.getD 1 default),
+            hslFracOf (parts.getD 2 default) with
+      | some hueDeg, some s, some l =>
+        let (r, g, b) := hslToRgb hueDeg s l
         if parts.size == 4 then
           match alphaOf (parts.getD 3 default) with
           | some a => some ⟨r, g, b, a⟩
@@ -254,6 +404,8 @@ def parseSolidColor (t : ByteArray) : Option Rgba :=
   if at' t 0 == 35 then parseHexColor t
   else if startsWith t 0 "rgba(" then parseRgbFunc t 5
   else if startsWith t 0 "rgb(" then parseRgbFunc t 4
+  else if startsWith t 0 "hsla(" then parseHslFunc t 5
+  else if startsWith t 0 "hsl(" then parseHslFunc t 4
   else
     let s := toStr t
     match namedColors.find? (fun (n, _) => n == s) with
@@ -925,6 +1077,54 @@ def parseColor (bs : ByteArray) : Option Rgba :=
   | some (.solid c) => some c
   | _ => none
 
+/-- `fill` / `stroke` / `markers`, by position (`0`/`1`/`2`), matching
+svgtypes' `PaintOrderKind`. -/
+def paintOrderKindOf (tok : ByteArray) : Option Nat :=
+  if eqAscii tok "fill" then some 0
+  else if eqAscii tok "stroke" then some 1
+  else if eqAscii tok "markers" then some 2
+  else none
+
+/-- Whether `paint-order`'s resolved order puts `stroke` before `fill` -- the
+only visible effect of the property here, since this renderer has no markers.
+
+Mirrors svgtypes' `PaintOrder::from_str` (`src/paint_order.rs`) exactly: up to
+three whitespace-separated idents; `normal` short-circuits to the default
+order; any unrecognised ident, or anything left over after (at most) three
+idents, falls back to the default order; missing kinds are then appended in
+`fill stroke markers` order; and a duplicate among the resolved three slots
+*also* falls back to the default.  In the default order `stroke` never comes
+before `fill`, so every one of those fallbacks is the same `false` this
+returns directly. -/
+def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
+  let t := trim bs
+  let mut order : Array Nat := #[]
+  let mut left : Array Nat := #[0, 1, 2]
+  let mut i := 0
+  let mut bad := false
+  for _ in [0:3] do
+    if !bad && order.size < 3 && i < t.size then
+      let e := skipWhile t i isAlpha
+      let tok := t.extract i e
+      i := skipWs t e
+      if eqAscii tok "normal" then bad := true
+      else
+        match paintOrderKindOf tok with
+        | some k => left := left.filter (· != k); order := order.push k
+        | none => bad := true
+  if bad || order.isEmpty || i < t.size then false
+  else
+    for k in left do
+      if order.size < 3 then order := order.push k
+    let o0 := order.getD 0 9
+    let o1 := order.getD 1 9
+    let o2 := order.getD 2 9
+    if o0 == o1 || o0 == o2 || o1 == o2 then false
+    else
+      let strokePos := if o0 == 1 then 0 else if o1 == 1 then 1 else 2
+      let fillPos := if o0 == 0 then 0 else if o1 == 0 then 1 else 2
+      decide (strokePos < fillPos)
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
@@ -956,10 +1156,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
   | "transform" =>
     -- `translate(originDx, originDy) · transform · translate(-originDx, -originDy)`
-    -- (`applyAttrs` sets `originDx`/`originDy` from this element's own
+    -- (`applyEffective` sets `originDx`/`originDy` from this element's own
     -- `transform-origin`, before any `transform` value is folded in, so this
-    -- sees it regardless of attribute order); a no-op, exactly the plain
-    -- `parseTransform v` from before this task, whenever there is none.
+    -- sees it regardless of attribute order or which cascade layer supplies
+    -- either property); a no-op, exactly the plain `parseTransform v`,
+    -- whenever there is none.
     let localM := parseTransform v
     let wrapped :=
       if st.originDx == 0 && st.originDy == 0 then localM
@@ -969,6 +1170,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  | "paint-order" => { st with strokeFirst := strokeBeforeFill v }
   | _ => st
 
 /-- Parse a `style="a:b; c:d"` attribute into (name, value) pairs. -/
@@ -977,58 +1179,6 @@ def parseStyleDecls (v : ByteArray) : Array (String × ByteArray) :=
     let k := findByte decl 0 58
     if k ≥ decl.size then none
     else some (toStr (lower (trim (decl.extract 0 k))), trim (decl.extract (k + 1) decl.size))
-
-/-- Presentation attributes first, then the `style` attribute (CSS wins);
-`color` is resolved before anything else, from whichever of the two sources
-would normally win, so `fill`/`stroke: currentcolor` on the same element
-always sees the element's own final `color` and never a stale inherited one
-(usvg: "resolves currentColor with the element's own color, inherited if
-absent" — the SVG-wide rule that `color` applies before paints even if it is
-written after `fill`/`stroke` in the markup). -/
-def applyAttrs (parent : Style) (attrs : Array Xml.Attr) : Style :=
-  -- `transform-origin` percentages resolve against the same rect for every
-  -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it, so
-  -- usvg's per-element `state.view_box` is one constant for the whole
-  -- document): the root's `viewBox` if it has one, else the root's own
-  -- resolved size (`resolveRootSize`).  Established once, from the root
-  -- `<svg>`'s own attrs, and inherited unchanged from then on.
-  -- `parent.pctRefSet` is false only for the literal `default : Style` that
-  -- `interpret` passes as the parent of the root element itself -- the one
-  -- call where `attrs` below *are* the root's own `width`/`height`/`viewBox`.
-  let parent :=
-    if parent.pctRefSet then parent
-    else
-      let r := parseRoot attrs
-      let (rw, rh) := match r.viewBox with
-        | some (_, _, vw, vh) => (vw, vh)
-        | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
-      { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
-  let styleDecls := match attr attrs "style" with
-    | some v => parseStyleDecls v
-    | none => #[]
-  let colorVal : Option ByteArray :=
-    match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
-    | some v => some v
-    | none => attr attrs "color"
-  let base := match colorVal with
-    | some v => applyProp parent "color" v
-    | none => parent
-  -- `transform-origin` is *not* inherited (unlike `color`): every element
-  -- gets its own, freshly reset to "no adjustment" here rather than carrying
-  -- the parent's, so an ancestor's `transform-origin` never leaks onto a
-  -- descendant that has no `transform` (or none) of its own.
-  let originVal : Option ByteArray :=
-    match styleDecls.findSome? (fun (n, val) => if n == "transform-origin" then some val else none) with
-    | some v => some v
-    | none => attr attrs "transform-origin"
-  let (odx, ody) := match originVal with
-    | some v => parseTransformOrigin v base.pctRefW base.pctRefH
-    | none => (0, 0)
-  let base := { base with originDx := odx, originDy := ody }
-  let skip (n : String) := n == "style" || n == "color" || n == "transform-origin"
-  let st := attrs.foldl (fun st a => if skip a.name then st else applyProp st a.name a.value) base
-  styleDecls.foldl (fun st (n, val) =>
-    if n == "color" || n == "transform-origin" then st else applyProp st n val) st
 
 /-- `display="none"` (attribute or style) hides the element and its subtree. -/
 def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
@@ -1303,7 +1453,7 @@ def gradRawDefs (events : Array Xml.Event) : Array Grad.RawDef := Id.run do
 /-- The rect a `userSpaceOnUse` percentage resolves against: usvg's
 `state.view_box`, which — with no nested `<svg>` in this renderer — is the
 root's `viewBox` if it has one and its own resolved size otherwise.  The same
-rect `applyAttrs` uses for `transform-origin`. -/
+rect `applyEffective` uses for `transform-origin`. -/
 def gradPctRef (events : Array Xml.Event) : Grad.PctRef := Id.run do
   for ev in events do
     match ev with
@@ -1324,10 +1474,11 @@ T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
 `childCounts`, is kept in exact lockstep with the existing `Style` stack
 (pushed/popped in the same three places: root, `g`, shape; left alone while
 `skip > 0`) to build each element's ancestor `Css.ElemInfo` chain and its
-`:first-child` flag.  `applyEffective` replaces the old `applyAttrs` call at
-all three sites with the four-layer cascade: presentation attributes, then
-non-important CSS, then the `style=""` attribute, then `!important` CSS,
-with `color` still resolved first from whichever layer wins.
+`:first-child` flag.  `applyEffective` is the four-layer cascade at all
+three sites: presentation attributes, then non-important CSS, then the
+`style=""` attribute, then `!important` CSS, with `color` and
+`transform-origin` resolved first from whichever layer wins (and the root's
+percentage reference seeded on the root push).
 
 T27 adds a third stack, `switchSel`, kept the same size as `stack` and
 pushed/popped together, tracking what a `<switch>` ancestor demands of its
@@ -1367,30 +1518,66 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- `Style`, from which every descendant inherits it by copying.
   let gradTable := Grad.Defs.build (gradRawDefs events) (gradPctRef events)
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
+    -- `transform-origin` percentages resolve against the same rect for every
+    -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it,
+    -- so usvg's per-element `state.view_box` is one constant for the whole
+    -- document): the root's `viewBox` if it has one, else the root's own
+    -- resolved size (`resolveRootSize`).  Established once, from the root
+    -- `<svg>`'s own attrs, and inherited unchanged from then on.
+    -- `parent.pctRefSet` is false only for the literal `default : Style`
+    -- passed as the parent of the root element itself -- the one call where
+    -- `attrs` *are* the root's own `width`/`height`/`viewBox`.
+    let parent :=
+      if parent.pctRefSet then parent
+      else
+        let r := parseRoot attrs
+        let (rw, rh) := match r.viewBox with
+          | some (_, _, vw, vh) => (vw, vh)
+          | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+        { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
     let styleDecls := match attr attrs "style" with
       | some v => parseStyleDecls v
       | none => #[]
     let (normalCss, importantCss) := Css.matchingDeclsSplit rules chain
     let lastNamed := fun (decls : Array (String × ByteArray)) (n : String) =>
       (decls.filter (fun d => d.1 == n)).back?.map (·.2)
-    let colorVal : Option ByteArray :=
-      match lastNamed importantCss "color" with
+    -- The winning value of a single-valued property across the four layers,
+    -- highest precedence first: `!important` CSS, `style=""`, normal CSS,
+    -- presentation attribute.  Used for the two properties that must be
+    -- resolved *before* the generic folds run, regardless of markup order:
+    -- `color` (so `fill`/`stroke: currentcolor` on the same element sees the
+    -- element's own final `color`) and `transform-origin` (so `applyProp`'s
+    -- `"transform"` case sees `originDx`/`originDy`, whichever layer the
+    -- `transform` itself comes from).  usvg lists both `transform` and
+    -- `transform-origin` as presentation attributes (`svgtree/mod.rs`,
+    -- `is_presentation`), so CSS sets them exactly like any other property.
+    let winning := fun (n : String) =>
+      match lastNamed importantCss n with
       | some v => some v
       | none =>
-        match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
+        match styleDecls.findSome? (fun (m, val) => if m == n then some val else none) with
         | some v => some v
         | none =>
-          match lastNamed normalCss "color" with
+          match lastNamed normalCss n with
           | some v => some v
-          | none => attr attrs "color"
-    let base := match colorVal with
+          | none => attr attrs n
+    let base := match winning "color" with
       | some v => applyProp parent "color" v
       | none => parent
-    let skipName (n : String) := n == "style" || n == "color"
+    -- `transform-origin` is *not* inherited (unlike `color`): every element
+    -- gets its own, freshly reset to "no adjustment" here rather than carrying
+    -- the parent's, so an ancestor's `transform-origin` never leaks onto a
+    -- descendant that has no `transform-origin` of its own.
+    let (odx, ody) := match winning "transform-origin" with
+      | some v => parseTransformOrigin v base.pctRefW base.pctRefH
+      | none => (0, 0)
+    let base := { base with originDx := odx, originDy := ody }
+    let early (n : String) := n == "color" || n == "transform-origin"
+    let skipName (n : String) := n == "style" || early n
     let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
-    let afterNormalCss := normalCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterAttrs
-    let afterStyle := styleDecls.foldl (fun st (n, val) => if n == "color" then st else applyProp st n val) afterNormalCss
-    importantCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterStyle
+    let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
+    let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
+    importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
   let mut stack : Array Style := #[]
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
