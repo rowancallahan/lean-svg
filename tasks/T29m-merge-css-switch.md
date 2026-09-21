@@ -44,3 +44,36 @@ helpers except to fix a compile error the merge itself causes. Invariants in
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append a short `## Report` to this file (in the worktree, in the commit):
   how each hunk was resolved in one line each, and the four counts.
+
+## Report
+
+- Hunk 1 (doc comment + `passesConditions`): kept T27's `passesConditions` in
+  full, merged both `interpret` doc comments into one describing the CSS
+  pre-pass/ancestor stack and the switch/condition stack together.
+- Hunk 2 (loop setup): kept `elemStack`/`childCounts` (T29) and `switchSel`
+  (T27) side by side; loop switched to T27's index-based
+  `for idx in [0:events.size]` (needed for the switch lookahead), `.text`
+  arm kept.
+- Hunk 3 (`.close` branch): pop `elemStack`, `childCounts`, and `switchSel`
+  together.
+- Hunk 4 (root push, `g`/`switch` dispatch): root and `g` both gate on
+  `isDisplayNone attrs || !passesConditions attrs` and push through
+  `applyEffective ... chain`; added T27's `allowed` check (from `switchSel`)
+  before dispatch; added a `switch` branch doing both the conditional
+  lookahead (T27) and the CSS/ancestor-stack push (T29); the lookahead's
+  inner match got a `.text` arm for exhaustiveness.
+- Hunk 5 (shape push): push `elemStack`, `childCounts`, and `switchSel`
+  together after a shape renders.
+
+Counts (`run_corpora.py --fast --no-worst --corpus resvg --route direct`):
+`structure/switch` **13/13**, `structure/systemLanguage` **6/10**,
+`structure/style` **16/16**, `structure/style-attribute` **3/4** — all match
+spec targets exactly.
+
+`lake build` clean (39 jobs); `lake env lean tests/CssTests.lean` prints
+nothing. `run_adversarial.py`: 42/42 clean. `git diff main --
+MicroSvg/Effect.lean`: empty. No conflict markers remain
+(`grep -n '^<<<<<<<\|^=======\|^>>>>>>>' MicroSvg/Svg.lean` empty).
+`run_tests.py` byte-identity across all 23 files was not run in this pass
+(skipped on explicit instruction to shorten the verification loop);
+recommend running it before treating this merge as fully verified.

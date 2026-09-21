@@ -1,4 +1,5 @@
 import MicroSvg.Xml
+import MicroSvg.Css
 import MicroSvg.Canvas
 
 /-!
@@ -1045,46 +1046,112 @@ def passesConditions (attrs : Array Xml.Attr) : Bool := Id.run do
 
 /-- Walk the event stream with a style stack.
 
-Each currently-open frame also carries, in `switchSel` (kept the same size as
-`stack`, pushed and popped together), what a `<switch>` ancestor demands of
-its direct children: `none` when the nearest open frame is not a `switch`
-(children are unfiltered), `some none` when it is a `switch` with no passing
-child (every child is skipped), and `some (some j)` when only the direct
-child whose `.open_` event is at index `j` may render — every other direct
-child, whether it would itself pass or not, is skipped along with its
-subtree, matching usvg's `switch::convert`, which commits to the first
-`is_condition_passed` child and never backtracks even if that child then
-turns out to be unrenderable (`display:none`, or a tag we don't support). -/
+T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
+(`combinedCss`) before the main walk.  A second stack, `elemStack`/
+`childCounts`, is kept in exact lockstep with the existing `Style` stack
+(pushed/popped in the same three places: root, `g`, shape; left alone while
+`skip > 0`) to build each element's ancestor `Css.ElemInfo` chain and its
+`:first-child` flag.  `applyEffective` replaces the old `applyAttrs` call at
+all three sites with the four-layer cascade: presentation attributes, then
+non-important CSS, then the `style=""` attribute, then `!important` CSS,
+with `color` still resolved first from whichever layer wins.
+
+T27 adds a third stack, `switchSel`, kept the same size as `stack` and
+pushed/popped together, tracking what a `<switch>` ancestor demands of its
+direct children: `none` (unfiltered), `some none` (switch with no passing
+child, all children skipped), or `some (some j)` (only the direct child
+whose `.open_` event is at index `j` may render).  `g`, `switch`, shape
+elements and the root `<svg>` all also check `passesConditions attrs`
+alongside `isDisplayNone`.  A `<switch>` that passes its own checks runs a
+bounded forward lookahead to find the first direct child whose tag usvg
+recognises and whose own `passesConditions` holds; that index becomes its
+`switchSel` target.  All three stacks move together at every push/pop site
+so CSS resolution and switch selection never drift out of sync. -/
 def interpret (events : Array Xml.Event) : Except String Doc := do
+  let combinedCss : ByteArray := Id.run do
+    let mut out := ByteArray.empty
+    let mut curDepth : Nat := 0
+    let mut styleDepth : Option Nat := none
+    let mut styleOk := false
+    for ev in events do
+      match ev with
+      | .open_ name attrs =>
+        if styleDepth.isNone && name == "style" then
+          styleOk := match attr attrs "type" with
+            | none => true
+            | some v => let t := trim v; t.size == 0 || eqAsciiCI t "text/css"
+          styleDepth := some curDepth
+        curDepth := curDepth + 1
+      | .close =>
+        curDepth := curDepth - 1
+        if styleDepth == some curDepth then styleDepth := none
+      | .text bytes =>
+        if styleDepth.isSome && styleOk then out := (out ++ bytes).push 32
+    return out
+  let rules := Css.parseStylesheet combinedCss
+  let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
+    let styleDecls := match attr attrs "style" with
+      | some v => parseStyleDecls v
+      | none => #[]
+    let (normalCss, importantCss) := Css.matchingDeclsSplit rules chain
+    let lastNamed := fun (decls : Array (String × ByteArray)) (n : String) =>
+      (decls.filter (fun d => d.1 == n)).back?.map (·.2)
+    let colorVal : Option ByteArray :=
+      match lastNamed importantCss "color" with
+      | some v => some v
+      | none =>
+        match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
+        | some v => some v
+        | none =>
+          match lastNamed normalCss "color" with
+          | some v => some v
+          | none => attr attrs "color"
+    let base := match colorVal with
+      | some v => applyProp parent "color" v
+      | none => parent
+    let skipName (n : String) := n == "style" || n == "color"
+    let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
+    let afterNormalCss := normalCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterAttrs
+    let afterStyle := styleDecls.foldl (fun st (n, val) => if n == "color" then st else applyProp st n val) afterNormalCss
+    importantCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterStyle
   let mut stack : Array Style := #[]
+  let mut elemStack : Array Css.ElemInfo := #[]
+  let mut childCounts : Array Nat := #[]
   let mut switchSel : Array (Option (Option Nat)) := #[]
   let mut skip : Nat := 0
   let mut shapes : Array Shape := #[]
   let mut root : Option RootInfo := none
   for idx in [0:events.size] do
     match events.getD idx default with
+    | .text _ => pure ()
     | .close =>
       if skip > 0 then skip := skip - 1
       else
         stack := stack.pop
+        elemStack := elemStack.pop
+        childCounts := childCounts.pop
         switchSel := switchSel.pop
     | .open_ name attrs =>
       if skip > 0 then
         skip := skip + 1
       else
+        let isFirst := childCounts.back?.getD 0 == 0
+        childCounts := match childCounts.back? with
+          | some c => childCounts.pop.push (c + 1)
+          | none => childCounts
+        let elemInfo := Css.buildElemInfo name (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let chain := elemStack.push elemInfo
         let parent := stack.back?.getD default
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
           root := some (parseRoot attrs)
-          -- usvg checks `is_visible_element` (display, transform, conditional
-          -- processing) on the root `<svg>` too (`converter::convert_doc`):
-          -- if it fails, the whole document renders as an empty (but
-          -- correctly sized) tree, not an error.
           if isDisplayNone attrs || !passesConditions attrs then
             skip := 1
           else
-            stack := stack.push (applyAttrs default attrs)
+            stack := stack.push (applyEffective default attrs chain)
+            elemStack := chain
+            childCounts := childCounts.push 0
             switchSel := switchSel.push none
         | some _ =>
           let allowed := match switchSel.back?.getD none with
@@ -1095,7 +1162,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           else if name == "g" then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
-              stack := stack.push (applyAttrs parent attrs)
+              stack := stack.push (applyEffective parent attrs chain)
+              elemStack := chain
+              childCounts := childCounts.push 0
               switchSel := switchSel.push none
           else if name == "switch" then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
@@ -1134,17 +1203,22 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                     if depth == 0 && svgTagNames.contains cname && passesConditions cattrs then
                       return some j
                     else depth := depth + 1
+                  | .text _ => pure ()
                 return none
-              stack := stack.push (applyAttrs parent attrs)
+              stack := stack.push (applyEffective parent attrs chain)
+              elemStack := chain
+              childCounts := childCounts.push 0
               switchSel := switchSel.push (some target)
           else if isShape name then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
-              let st := applyAttrs parent attrs
+              let st := applyEffective parent attrs chain
               match shapeCmds name attrs with
               | some cmds => if st.visible && cmds.size > 0 then shapes := shapes.push ⟨cmds, st⟩
               | none => pure ()
               stack := stack.push st
+              elemStack := chain
+              childCounts := childCounts.push 0
               switchSel := switchSel.push none
           else
             skip := 1

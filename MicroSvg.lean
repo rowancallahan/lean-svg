@@ -7,5 +7,6 @@ import MicroSvg.Raster
 import MicroSvg.Canvas
 import MicroSvg.Png
 import MicroSvg.Xml
+import MicroSvg.Css
 import MicroSvg.Svg
 import MicroSvg.Render
