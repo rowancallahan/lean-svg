@@ -241,38 +241,57 @@ theorem encode_size_le' (w h : Nat) (rgba : ByteArray) (C : Nat)
 /-- `zlibStoredRows` appends at most `11 + 6 * raw` bytes, where
 `raw = h * (rowBytes + 1)` is the filtered-scanline size.
 
-**Not proved yet.** The invariant to feed `forIn_invariant` is
+**Not proved yet, and the reason is sharper than "loops are awkward".**
 
-  `P (o, pos) := o.size ≤ base + 2 + pos + 5 * (pos / 65535 + 1) ∧ pos ≤ raw`
+The obvious invariant does not work, and it is worth knowing why before
+anyone tries again. Write `base` for the starting size and `k = pos / 65535`.
+The natural guess is
 
-for the outer loop, and the same with the inner loop's three-component state
-`(o, pos, off)`. The `5 * (pos / 65535 + 1)` term is what keeps the bound
-tight, and it is preserved because the slack arrives exactly when it is
-needed:
+  `P (o, pos) := o.size ≤ base + 2 + pos + 5 * (k + 1)`
 
-  - A data byte grows `o.size` by 1 and `pos` by 1, and the bound grows by 1.
-  - A header is emitted only when `pos % 65535 = 0`. Just before it, `k`
-    headers have been written and `pos / 65535 = k`, so the bound allows
-    `5 * (k + 1)` against an actual `5 * k` — exactly 5 bytes of slack, which
-    the header consumes.
-  - Between headers `pos / 65535` is constant, so the slack is not
-    replenished until `pos` reaches the next multiple, which is precisely
-    when the next header is due.
-  - A `copySlice` of `n` bytes advances `pos` by the same `n`
-    (`size_copySlice_append_le`), so it is the data-byte case `n` times.
+and it survives every data byte: one byte written, `pos` up by one, allowance
+up by one. It fails on the block header. A header adds 5 bytes to `o.size`
+*without advancing `pos`*, so from the invariant's point of view nothing
+stops that branch firing again and again at the same position. No amount of
+constant slack fixes this — the bound has to rule out repetition, not absorb
+it.
 
-**The obstacle is not the mathematics, it is the term.** Unfolding
-`zlibStoredRows` shows that do-notation destructuring duplicates the entire
-inner `forIn` expression — once to project `.fst` and once for `.snd` — so
-the outer loop's body contains two copies of a large term that have to be
-kept in sync through the proof.
+In the code it cannot repeat: a header is only emitted when
+`pos % 65535 = 0`, and it is always immediately followed by a write that
+advances `pos` (in the inner loop the copy length is
+`min (65535 - pos % 65535) (stop - off)`, which is non-zero exactly when a
+header was just written). But that argument has to appear in the invariant,
+which therefore has to be conditional on the residue:
 
-`PLAN.md` already recommends rewriting `zlibStoredRows` as explicit recursion
-with `termination_by` before proving anything about it. Having now seen the
-goal, that recommendation is right and this is the concrete reason for it.
-That rewrite is behaviour-preserving but must be checked byte-identical
-against the corpus, so it is a task in its own right rather than something to
-fold into this file. -/
+  `P (o, pos) := (pos % 65535 = 0 → o.size ≤ base + 2 + pos + 5 * k)`
+  `           ∧ (pos % 65535 ≠ 0 → o.size ≤ base + 2 + pos + 5 * (k + 1))`
+
+The first conjunct is the "header not yet written for this block" state and
+carries exactly the 5 bytes of slack the header will consume. Checked at the
+inner-loop body boundary where `n = 65535` the two conjuncts hand off
+correctly, with equality.
+
+That is provable. It is not a few lines. Estimate 150–250 lines across the
+two nested loops, most of it residue arithmetic rather than anything deep.
+
+**The second obstacle is still there too.** Unfolding shows do-notation
+duplicates the entire inner `forIn` term, once per tuple projection, so the
+outer body carries two copies that must stay in step. `generalize` should
+abstract both at once since they are syntactically identical, but that is
+untested.
+
+**lean-zip does not help here.** It has no output-size theorems at all — its
+specifications are about round-tripping, CRC properties and Huffman prefix-
+freeness. Its level 0 does emit stored blocks like ours, but adopting its
+encoder would change our output bytes, break corpus byte-identity, and make
+it a runtime dependency with C primitives. It would cost the README's "no
+dependencies, no FFI" line and still not supply the theorem.
+
+`PLAN.md` recommends rewriting this function as explicit recursion with
+`termination_by` before proving anything about it. That remains the cheaper
+route: it removes the term duplication entirely and turns the loop induction
+into ordinary structural recursion on `Nat`. It is a change to real encoding
+code, so it needs the byte-identity harness afterwards. -/
 theorem zlibStoredRows_size_le (out rgba : ByteArray) (rowBytes h : Nat) :
     (zlibStoredRows out rgba rowBytes h).size
       ≤ out.size + 16 + h * (rowBytes + 1)
