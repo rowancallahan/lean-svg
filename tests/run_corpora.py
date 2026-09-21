@@ -890,6 +890,11 @@ def main():
              % ", ".join("%s %d" % (c, w) for c, w in FAST_WIDTHS.items()),
     )
     parser.add_argument(
+        "--width", type=int, default=None,
+        help="override the render width for every selected corpus (beats "
+             "both the per-corpus default and --fast)",
+    )
+    parser.add_argument(
         "--out", metavar="DIR", default=None,
         help="write the CSVs, summary.md and worst/ here instead of %s "
              "(use this from a worktree so the main results are not clobbered)"
@@ -938,6 +943,8 @@ def main():
     )
 
     WIDTHS.update(FAST_WIDTHS if args.fast else {c: CORPORA[c][2] for c in CORPORA})
+    if args.width is not None:
+        WIDTHS.update({c: args.width for c in CORPORA})
     if args.jobs is None:
         args.jobs = (os.cpu_count() or 4) if args.fast else 4
 
