@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <!-- exercises the new 16.16-grid parser (parseNumber16/parseNumberList16,
+       T31) at the same saturating extremes tests/adversarial/huge_numbers.svg
+       already covers for the 1/256 one: scale()/matrix()'s linear
+       coefficients must clamp cheaply, not blow up scaleDecimal's Nat
+       arithmetic or Mat.mk''s clampLin. -->
+  <rect x="10" y="10" width="50" height="50" fill="#00f" transform="scale(1e30)"/>
+  <rect x="10" y="10" width="50" height="50" fill="#0f0" transform="scale(1e-30)"/>
+  <rect x="10" y="10" width="50" height="50" fill="#f00" transform="matrix(1e-30 0 0 1e-30 5 5)"/>
+  <rect x="10" y="10" width="50" height="50" fill="#f0f" transform="matrix(1e30 1e30 1e30 1e30 5 5)"/>
+  <rect x="10" y="10" width="50" height="50" fill="#0ff" transform="scale(-1e300 1e-300)"/>
+</svg>
