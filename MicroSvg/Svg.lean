@@ -1,6 +1,7 @@
 import MicroSvg.Xml
 import MicroSvg.Css
 import MicroSvg.Canvas
+import Std.Data.HashMap
 
 /-!
 # SVG interpretation
@@ -86,12 +87,88 @@ structure Style where
   originDx : Fx := 0
   originDy : Fx := 0
   ctm : Mat := Mat.identity
+  /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
+  clipEvenOdd : Bool := false
+  /-- This element's own `clip-path` reference (the id inside `url(#id)`), *not*
+  inherited: `applyEffective` resets it for every element.  `none` for an
+  absent `clip-path`, an explicit `none`, an unparseable value (a CSS basic
+  shape, say), all of which usvg treats alike: no clipping. -/
+  clipRef : Option String := none
+  /-- The clip uses in force on this element, outermost first, as indices into
+  `Doc.uses`.  Inherited; an element with its own `clip-path` appends one. -/
+  clips : Array Nat := #[]
+  /-- This element's own `transform` alone (wrapped with its origin), not
+  inherited: what `ctm` gained on this element.  `Box.transformed` by it takes
+  a child's object bounding box into the parent's user space (T20). -/
+  ownMat : Mat := Mat.identity
 deriving Repr, Inhabited
 
 structure Shape where
   cmds : Array PathCmd
   style : Style
 deriving Inhabited
+
+/-! ## `clipPath` (T20)
+
+A `clipPath` element is collected into `Doc.clips` wherever it appears (under
+`defs`, a `g`, or the root), keyed by `id`; elements that reference one through
+`clip-path="url(#id)"` record a *use* in `Doc.uses` and carry its index in
+`Style.clips`.  References are resolved by id after the whole document has been
+walked, so forward references work.  `MicroSvg/Clip.lean` turns an entry into a
+device-space mask at render time.  This is the defs table of T18 in miniature;
+gradients (T18) and masks (T21) add their own entry kinds beside it. -/
+
+/-- One child of a `clipPath`: a shape whose fill (with `clip-rule`) is unioned
+into the clip region.  Its `ctm` is relative to the `clipPath`'s own user space
+*after* the element's `transform` and the `clipPathUnits` scaling (both applied
+at render time), i.e. it is the product of the child's own transforms only. -/
+structure ClipChild where
+  cmds : Array PathCmd
+  evenOdd : Bool
+  ctm : Mat
+  /-- `visibility`: a hidden child contributes nothing but still makes the
+  `clipPath` valid (usvg converts it and the renderer skips it). -/
+  visible : Bool
+  /-- The child's own `clip-path` use, if any (an index into `Doc.uses`, whose
+  `ctm` is then relative to the same space as this `ctm`). -/
+  clips : Array Nat
+deriving Inhabited
+
+structure ClipEntry where
+  id : String
+  /-- The `clipPath` element's own `transform`. -/
+  transform : Mat
+  /-- usvg drops the whole clip when that transform has a zero scale on either
+  axis (`Transform::is_valid`), and every element using it with it. -/
+  transformValid : Bool
+  /-- `clipPathUnits="objectBoundingBox"`. -/
+  objectBBox : Bool
+  /-- The `clip-path` on the `clipPath` element itself: raw id, and its entry
+  index once `interpret` has resolved it (`none` when absent or unresolvable,
+  which usvg treats as no clip). -/
+  selfClipId : Option String
+  selfClip : Option Nat
+  children : Array ClipChild
+deriving Inhabited
+
+/-- One `clip-path="url(#id)"` on an element: which clip, the referencing
+element's `ctm` (relative to the space the referencing `Shape`/`ClipChild`
+lives in) and its object bounding box in its own user space, for
+`clipPathUnits="objectBoundingBox"`.  `entry` is filled in by id at the end of
+`interpret`. -/
+structure ClipUse where
+  id : String
+  entry : Option Nat
+  ctm : Mat
+  bbox : Option Box
+deriving Inhabited
+
+/-- The largest number of `clipPath` elements collected; later ones are skipped
+(and references to them are unresolvable, i.e. ignored). -/
+def maxClipPaths : Nat := 4096
+
+/-- Ids longer than this are not collected. -/
+def maxIdBytes : Nat := 256
 
 structure RootInfo where
   /-- The raw parsed number and whether it was a percentage (`resolveRootSize`
@@ -104,6 +181,9 @@ deriving Inhabited
 structure Doc where
   root : RootInfo
   shapes : Array Shape
+  /-- The `clipPath` table and the `clip-path` uses (T20). -/
+  clips : Array ClipEntry := #[]
+  uses : Array ClipUse := #[]
 deriving Inhabited
 
 /-! ## Colours -/
@@ -1041,9 +1121,78 @@ def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
       let fillPos := if o0 == 0 then 0 else if o1 == 0 then 1 else 2
       decide (strokePos < fillPos)
 
+/-- Parse a `clip-path` value into the referenced id: `url(#id)`, with optional
+whitespace and single or double quotes around the `#id` (svgtypes' `FuncIRI`).
+`none`, a CSS basic shape (`circle()`), or anything else yields `none`, which
+is exactly what usvg does with a value it cannot parse as a `FuncIRI`: it logs
+and treats the attribute as absent. -/
+def parseClipRef (bs : ByteArray) : Option String :=
+  let t := trim bs
+  if !(startsWith t 0 "url(") then none
+  else
+    let close := findByte t 4 41
+    if close ≥ t.size then none
+    else
+      let inner := trim (t.extract 4 close)
+      let q := at' inner 0
+      let inner := if (q == 34 || q == 39) && inner.size ≥ 2 && at' inner (inner.size - 1) == q
+        then trim (inner.extract 1 (inner.size - 1)) else inner
+      if at' inner 0 != 35 || inner.size < 2 || inner.size > maxIdBytes + 1 then none
+      else some (toStr (inner.extract 1 inner.size))
+
+/-- The `objectBoundingBox` unit square's map into user space:
+`Transform::from_bbox` = `matrix(w 0 0 h x y)`. -/
+def Box.unitMat (b : Box) : Mat :=
+  Mat.mk' ((b.x1 - b.x0) * 256) 0 0 ((b.y1 - b.y0) * 256) b.x0 b.y0
+
+/-- `NonZeroRect`: a box with positive width and height. -/
+def Box.nonZero (b : Box) : Bool := b.x1 > b.x0 && b.y1 > b.y0
+
+def Box.union (a b : Option Box) : Option Box :=
+  match a, b with
+  | none, b => b
+  | a, none => a
+  | some a, some b => some ⟨Fx.min a.x0 b.x0, Fx.min a.y0 b.y0, Fx.max a.x1 b.x1, Fx.max a.y1 b.y1⟩
+
+/-- The box of a box's four corners under `m` (`Rect::transform`): what usvg
+does to a child's bounding box on the way up through a group's transform. -/
+def Box.transformed (m : Mat) (b : Box) : Option Box :=
+  let c := Box.cover none (m.apply ⟨b.x0, b.y0⟩)
+  let c := Box.cover c (m.apply ⟨b.x1, b.y0⟩)
+  let c := Box.cover c (m.apply ⟨b.x0, b.y1⟩)
+  Box.cover c (m.apply ⟨b.x1, b.y1⟩)
+
+/-- A path's bounding box in its own user space, from the flattened polylines
+(with the identity as the flattening `ctm`): usvg's `compute_tight_bounds` up
+to the flattening error, which is what `objectBoundingBox` units scale by. -/
+def cmdsBox (cmds : Array PathCmd) : Option Box := Id.run do
+  let mut b : Option Box := none
+  for poly in flatten Mat.identity cmds do
+    for p in poly.pts do
+      b := Box.cover b p
+  return b
+
+/-- `Transform::is_valid`: neither axis scale is zero, i.e. neither column of
+the linear part vanishes. -/
+def Mat.hasScale (m : Mat) : Bool := !(m.a == 0 && m.c == 0) && !(m.b == 0 && m.d == 0)
+
+/-- Record this element's `clip-path` as a use, if it has one: the new use
+carries the element's `ctm`; its bounding box is filled in when the element
+closes.  Returns the style with the use appended to `clips`, the table, and the
+new use's index. -/
+def addClipUse (st : Style) (uses : Array ClipUse) : Style × Array ClipUse × Option Nat :=
+  match st.clipRef with
+  | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none⟩, some uses.size)
+  | none => (st, uses, none)
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
+  | "clip-path" => { st with clipRef := parseClipRef v }
+  | "clip-rule" =>
+    let t := trim v
+    if eqAscii t "evenodd" then { st with clipEvenOdd := true }
+    else if eqAscii t "nonzero" then { st with clipEvenOdd := false } else st
   | "fill" => match parsePaint v with | some p => { st with fill := resolvePaint st p } | none => st
   | "stroke" => match parsePaint v with | some p => { st with stroke := resolvePaint st p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
@@ -1081,7 +1230,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let wrapped :=
       if st.originDx == 0 && st.originDy == 0 then localM
       else ((Mat.translate st.originDx st.originDy).mul localM).mul (Mat.translate (-st.originDx) (-st.originDy))
-    { st with ctm := st.ctm.mul wrapped }
+    { st with ctm := st.ctm.mul wrapped, ownMat := st.ownMat.mul wrapped }
   | "visibility" =>
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
@@ -1204,6 +1353,35 @@ def passesConditions (attrs : Array Xml.Attr) : Bool := Id.run do
   | none => pure ()
   return true
 
+/-- What the shapes under an element become (T20): rendered, nothing (under
+`defs`), or children of the `clipPath` with this table index. -/
+inductive ClipMode where
+  | render
+  | defs
+  | clip (k : Nat)
+deriving Inhabited
+
+/-- The mode of a `g`/`switch` opened in this mode: a `g` inside a `clipPath`
+is not a valid child, so usvg skips it and its subtree (`convert_clip_path_
+elements`); it is descended here in `defs` mode so that a `clipPath` inside it
+is still collected, which keeps it referenceable by id as in usvg. -/
+def ClipMode.inner : ClipMode → ClipMode
+  | .clip _ => .defs
+  | m => m
+
+/-- Per-element state kept in lockstep with the style stack (T20). -/
+structure Frame where
+  mode : ClipMode := .render
+  /-- The object bounding box of this element's rendered content so far, in
+  its own user space (children's boxes come through their own transforms). -/
+  bbox : Option Box := none
+  /-- This element's `clip-path` use, if any: the box goes there on close. -/
+  useSlot : Option Nat := none
+  /-- Whether a box is wanted at all: this element or an ancestor has a
+  `clip-path`.  Everything else skips the flattening the box costs. -/
+  want : Bool := false
+deriving Inhabited
+
 /-- Walk the event stream with a style stack.
 
 T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
@@ -1305,6 +1483,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       | some v => parseTransformOrigin v base.pctRefW base.pctRefH
       | none => (0, 0)
     let base := { base with originDx := odx, originDy := ody }
+    -- `clip-path` and the element's own transform are per-element too, and for
+    -- the same reason (T20).
+    let base := { base with clipRef := none, ownMat := Mat.identity }
     let early (n : String) := n == "color" || n == "transform-origin"
     let skipName (n : String) := n == "style" || early n
     let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
@@ -1315,6 +1496,11 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
   let mut switchSel : Array (Option (Option Nat)) := #[]
+  -- T20: a fifth stack in lockstep with `stack`, for `clipPath` collection
+  -- and object bounding boxes (see `Frame`).
+  let mut frames : Array Frame := #[]
+  let mut clipTable : Array ClipEntry := #[]
+  let mut uses : Array ClipUse := #[]
   let mut skip : Nat := 0
   let mut shapes : Array Shape := #[]
   let mut root : Option RootInfo := none
@@ -1324,10 +1510,27 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     | .close =>
       if skip > 0 then skip := skip - 1
       else
+        let st := stack.back?.getD default
+        let fr := frames.back?.getD default
         stack := stack.pop
         elemStack := elemStack.pop
         childCounts := childCounts.pop
         switchSel := switchSel.pop
+        frames := frames.pop
+        -- T20: the element's object bounding box is complete now.  It goes to
+        -- the element's own use, and (through the element's own transform)
+        -- into the parent's box -- but only for rendered content: what is
+        -- under `defs` or inside a `clipPath` is not a child of the parent
+        -- group in usvg's tree and does not count towards its box.
+        match fr.useSlot with
+        | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox })
+        | none => pure ()
+        match fr.mode, frames.back? with
+        | .render, some pf =>
+          if pf.want then
+            frames := frames.pop.push
+              { pf with bbox := Box.union pf.bbox (fr.bbox.bind (Box.transformed st.ownMat)) }
+        | _, _ => pure ()
     | .open_ name attrs =>
       if skip > 0 then
         skip := skip + 1
@@ -1339,6 +1542,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let elemInfo := Css.buildElemInfo name (attrs.map (fun a => (a.name, toStr a.value))) isFirst
         let chain := elemStack.push elemInfo
         let parent := stack.back?.getD default
+        let pf := frames.back?.getD default
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
@@ -1346,23 +1550,64 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           if isDisplayNone attrs || !passesConditions attrs then
             skip := 1
           else
-            stack := stack.push (applyEffective default attrs chain)
+            -- usvg converts the root `svg` as a group, so its own `clip-path`
+            -- applies (`masking/clipPath/on-the-root-svg-with-size`).
+            let (st, uses', slot) := addClipUse (applyEffective default attrs chain) uses
+            uses := uses'
+            stack := stack.push st
             elemStack := chain
             childCounts := childCounts.push 0
             switchSel := switchSel.push none
+            frames := frames.push { mode := .render, useSlot := slot, want := slot.isSome }
         | some _ =>
           let allowed := match switchSel.back?.getD none with
             | none => true
             | some none => false
             | some (some target) => idx == target
           if !allowed then skip := 1
+          else if name == "clipPath" then
+            -- T20: collect the clip wherever it appears.  Its contents live in
+            -- the user space of the element that will reference it, so the
+            -- ancestors' transforms and clips are dropped here, while the
+            -- inherited properties (`clip-rule`, `visibility`) flow through
+            -- the style as usual.  The element's own `transform` is kept
+            -- aside so `clipPathUnits` can be slotted in after it.
+            let cid := (attr attrs "id").filter (·.size ≤ maxIdBytes) |>.map toStr
+            match cid with
+            | some cid =>
+              if clipTable.size ≥ maxClipPaths then skip := 1
+              else
+                let stC := applyEffective { parent with ctm := Mat.identity, clips := #[] } attrs chain
+                let obb := match attr attrs "clipPathUnits" with
+                  | some v => eqAscii (trim v) "objectBoundingBox"
+                  | none => false
+                clipTable := clipTable.push
+                  { id := cid, transform := stC.ctm, transformValid := Mat.hasScale stC.ctm,
+                    objectBBox := obb, selfClipId := stC.clipRef, selfClip := none, children := #[] }
+                stack := stack.push { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none }
+                elemStack := chain
+                childCounts := childCounts.push 0
+                switchSel := switchSel.push none
+                frames := frames.push { mode := .clip (clipTable.size - 1) }
+            | none => skip := 1
+          else if name == "defs" then
+            -- T20: descended, not rendered, so the `clipPath`s inside are
+            -- collected.
+            stack := stack.push (applyEffective parent attrs chain)
+            elemStack := chain
+            childCounts := childCounts.push 0
+            switchSel := switchSel.push none
+            frames := frames.push { mode := .defs }
           else if name == "g" then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
-              stack := stack.push (applyEffective parent attrs chain)
+              let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
+              uses := uses'
+              stack := stack.push st
               elemStack := chain
               childCounts := childCounts.push 0
               switchSel := switchSel.push none
+              frames := frames.push { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
           else if name == "switch" then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
@@ -1402,26 +1647,58 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                     else depth := depth + 1
                   | .text _ => pure ()
                 return none
-              stack := stack.push (applyEffective parent attrs chain)
+              let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
+              uses := uses'
+              stack := stack.push st
               elemStack := chain
               childCounts := childCounts.push 0
               switchSel := switchSel.push (some target)
+              frames := frames.push { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
           else if isShape name then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
-              let st := applyEffective parent attrs chain
-              match shapeCmds name attrs with
-              | some cmds => if st.visible && cmds.size > 0 then shapes := shapes.push ⟨cmds, st⟩
-              | none => pure ()
+              let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
+              uses := uses'
+              let cmds := shapeCmds name attrs
+              match pf.mode with
+              | .render =>
+                match cmds with
+                | some cmds => if st.visible && cmds.size > 0 then shapes := shapes.push ⟨cmds, st⟩
+                | none => pure ()
+              | .defs => pure ()
+              | .clip k =>
+                -- `convert_clip_path_elements_impl`: `line` is not a valid
+                -- child (a stroke-less line has no fill), nor is a shape
+                -- whose path has fewer than two verbs or whose own transform
+                -- has a zero scale (`is_visible_element`).
+                match cmds with
+                | some cmds =>
+                  if name != "line" && cmds.size ≥ 2 && Mat.hasScale st.ownMat then
+                    let child : ClipChild := ⟨cmds, st.clipEvenOdd, st.ctm, st.visible, st.clips⟩
+                    clipTable := clipTable.modify k fun e => { e with children := e.children.push child }
+                | none => pure ()
+              let want := slot.isSome || pf.want
               stack := stack.push st
               elemStack := chain
               childCounts := childCounts.push 0
               switchSel := switchSel.push none
+              frames := frames.push
+                { mode := pf.mode, useSlot := slot, want,
+                  bbox := if want then cmds.bind cmdsBox else none }
           else
             skip := 1
+  -- T20: resolve the ids.  Like usvg's `links` map, a duplicated id resolves
+  -- to the last element that carries it.
+  let idMap : Std.HashMap String Nat := Id.run do
+    let mut m : Std.HashMap String Nat := {}
+    for i in [0:clipTable.size] do
+      m := m.insert (clipTable.getD i default).id i
+    return m
+  let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
+  let usesResolved := uses.map fun u => { u with entry := idMap.get? u.id }
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, shapes⟩
+  | some r => return ⟨r, shapes, clipsResolved, usesResolved⟩
 
 end Svg
 end MicroSvg

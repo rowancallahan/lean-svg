@@ -9,4 +9,5 @@ import MicroSvg.Png
 import MicroSvg.Xml
 import MicroSvg.Css
 import MicroSvg.Svg
+import MicroSvg.Clip
 import MicroSvg.Render
