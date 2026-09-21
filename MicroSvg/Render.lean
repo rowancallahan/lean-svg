@@ -51,6 +51,12 @@ structure Clip where
   y0 : Nat
   x1 : Nat
   y1 : Nat
+  /-- The `--viewport` origin in output pixels, `(0, 0)` for a full render.
+  Adding it to a canvas pixel index gives the pixel's position in the whole
+  zoomed image, which is what a paint that varies per pixel has to be a
+  function of if a tile is to stay byte-identical (T18, `Grad.build`). -/
+  vx : Int := 0
+  vy : Int := 0
 deriving Inhabited
 
 /-- Restrict a coverage mask to the document window.  A no-op (the mask itself)
@@ -125,11 +131,12 @@ def canvasSetup (root : RootInfo) (opts : Options) :
     | none, none => (baseW, baseH, 65536)
   let mat := (Mat.scale16 zoom16 zoom16).mul vbMat
   match opts.viewport with
-  | none => return (W, H, mat, ⟨0, 0, W, H⟩)
+  | none => return (W, H, mat, ⟨0, 0, W, H, 0, 0⟩)
   | some (vx, vy, vw, vh) =>
     let clip : Clip :=
       ⟨Int.toNat (-vx), Int.toNat (-vy),
-       Nat.min vw (Int.toNat ((W : Int) - vx)), Nat.min vh (Int.toNat ((H : Int) - vy))⟩
+       Nat.min vw (Int.toNat ((W : Int) - vx)), Nat.min vh (Int.toNat ((H : Int) - vy)),
+       vx, vy⟩
     return (vw, vh, (Mat.translate (-(vx * 256)) (-(vy * 256))).mul mat, clip)
 
 /-- Can any pixel this shape paints land on the `W × H` canvas?
@@ -152,8 +159,8 @@ amounts, and it keeps the growing box the only thing the scan has to touch. -/
 def shapeOnCanvas (ctm : Mat) (s : Shape) (W H : Nat) : Bool :=
   let st := s.style
   let reach : Fx := match st.stroke with
-    | .solid _ => strokeReach ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
     | .none => 0
+    | _ => strokeReach ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
   let ax := Fx.abs ctm.a + Fx.abs ctm.c
   let ay := Fx.abs ctm.b + Fx.abs ctm.d
   let dx := Fx.clamp (Int.ediv ((reach + 4) * ax) 65536 + 258)
@@ -192,18 +199,32 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
   let H := cv.h
   if !(shapeOnCanvas ctm s W H) then cv else
   let polys := flatten ctm s.cmds
-  let cv := match st.fill with
-    | .solid c =>
+  -- T18: a `Paint` is a colour, a gradient, or nothing.  A gradient is turned
+  -- into a device-space shader here, against this shape's own bounding box and
+  -- its own `ctm`; `Grad.build` hands back a solid colour for the degenerate
+  -- cases usvg collapses, which then take the ordinary `fillMask` path.
+  let paintMask := fun (cv : Canvas) (p : Svg.Paint) (m : Raster.Mask) (op : Nat) =>
+    match p with
+    | .none => cv
+    | .solid c => cv.fillMask m c (opacityToU8 c.a op st.opacity)
+    | .gradient i =>
+      match Grad.build st.defs i s.cmds ctm clip.vx clip.vy op st.opacity with
+      | .skip => cv
+      | .solid c a8 => cv.fillMask m c a8
+      | .grad sh => cv.fillMaskShader m sh
+  let cv :=
+    match st.fill with
+    | .none => cv
+    | _ =>
       let dev := polys.map fun p => p.pts.map ctm.apply
       match (Raster.rasterize W H dev st.evenOdd).bind (clipMask clip) with
-      | some m => cv.fillMask m c (opacityToU8 c.a st.fillOpacity st.opacity)
+      | some m => paintMask cv st.fill m st.fillOpacity
       | none => cv
-    | .none => cv
   match st.stroke with
-  | .solid c =>
+  | .none => cv
+  | _ =>
     if st.strokeWidth ≤ 0 then cv
     else
-      let a8 := opacityToU8 c.a st.strokeOpacity st.opacity
       -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
       -- actually inked, before stroking, so every dash end gets a cap.  The
       -- fill above uses the undashed polylines; dashes are a stroke property.
@@ -212,20 +233,25 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
       | some cov16 =>
         -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
         -- the coverage rather than the paint alpha (see `Raster.hairline`).
+        -- The hairline blitter needs the paint's alpha up front, which a
+        -- gradient does not have one of; its stops' alphas are already in the
+        -- shader, so it passes 255 and lets the shader carry them.
+        let a8 := match st.stroke with
+          | .solid c => opacityToU8 c.a st.strokeOpacity st.opacity
+          | _ => 255
         let scale := Int.ediv cov16 256
         let covScale := (Int.ediv (255 * scale) 256).toNat
         let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
         match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
-        | some m => cv.fillMask m c a8
+        | some m => paintMask cv st.stroke m st.strokeOpacity
         | none => cv
       | none =>
         let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
         let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
         let dev := outline.map fun p => p.map ctm.apply
         match (Raster.rasterize W H dev false).bind (clipMask clip) with
-        | some m => cv.fillMask m c a8
+        | some m => paintMask cv st.stroke m st.strokeOpacity
         | none => cv
-  | .none => cv
 
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.

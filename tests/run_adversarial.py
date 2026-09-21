@@ -114,6 +114,89 @@ def generate_cases():
         '<rect x="0" y="0" width="10" height="10" fill="#000"/>\n</svg>\n',
     )
 
+    # ---- T18: gradient paint servers ------------------------------------
+    head200 = (
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink='
+        '"http://www.w3.org/1999/xlink" width="200" height="200" '
+        'viewBox="0 0 200 200">\n'
+    )
+    target = '<rect x="10" y="10" width="180" height="180" fill="url(#g)"/>\n'
+
+    # 100 000 stops in one gradient: the table keeps at most Grad.maxStops.
+    stops = "".join(
+        '<stop offset="%.6f" stop-color="#%02x%02x40"/>' % (i / 100_000, i % 256, i % 199)
+        for i in range(100_000)
+    )
+    write_text(
+        "grad_100k_stops.svg",
+        head200 + '<linearGradient id="g">' + stops + "</linearGradient>\n"
+        + target + "</svg>\n",
+    )
+
+    # 4097 gradients, one past Grad.maxDefs; the shape references the last one,
+    # which is therefore not in the table and falls back.
+    grads = "".join(
+        '<linearGradient id="g%d"><stop offset="0" stop-color="#f00"/>'
+        '<stop offset="1" stop-color="#00f"/></linearGradient>' % i
+        for i in range(4097)
+    )
+    write_text(
+        "grad_4097_defs.svg",
+        head200 + grads + '<rect x="10" y="10" width="180" height="180" '
+        'fill="url(#g4096) green"/>\n</svg>\n',
+    )
+
+    # `href` pointing at itself, and a pair pointing at each other.
+    write_text(
+        "grad_href_self_cycle.svg",
+        head200
+        + '<linearGradient id="g" xlink:href="#g"/>\n'
+        '<linearGradient id="h" xlink:href="#i"/>\n'
+        '<linearGradient id="i" xlink:href="#h"/>\n'
+        + target
+        + '<rect x="10" y="10" width="80" height="80" fill="url(#h)"/>\n</svg>\n',
+    )
+
+    # a nine-link `href` chain: one longer than Grad.hrefFuel, so the stops at
+    # the far end are out of reach.
+    chain = "".join(
+        '<linearGradient id="c%d" xlink:href="#c%d"/>' % (i, i + 1) for i in range(9)
+    )
+    write_text(
+        "grad_href_chain_9.svg",
+        head200 + chain
+        + '<linearGradient id="c9"><stop offset="0" stop-color="#f00"/>'
+        '<stop offset="1" stop-color="#00f"/></linearGradient>\n'
+        '<rect x="10" y="10" width="180" height="180" fill="url(#c0)"/>\n</svg>\n',
+    )
+
+    # radii and coordinates at the clamp, with every spread method.
+    write_text(
+        "grad_huge_radius.svg",
+        head200
+        + '<radialGradient id="g" gradientUnits="userSpaceOnUse" cx="1e9" cy="-1e9"'
+        ' r="1e9" fr="1e8" fx="5e8" spreadMethod="repeat">'
+        '<stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/>'
+        "</radialGradient>\n"
+        '<linearGradient id="t" gradientUnits="userSpaceOnUse" x1="0" x2="1e-6"'
+        ' spreadMethod="reflect"><stop offset="0" stop-color="#0f0"/>'
+        '<stop offset="1" stop-color="#000"/></linearGradient>\n'
+        + target
+        + '<rect x="20" y="20" width="60" height="60" fill="url(#t)"/>\n</svg>\n',
+    )
+
+    # objectBoundingBox gradients on shapes with no area at all.
+    write_text(
+        "grad_zero_area_shape.svg",
+        head200
+        + '<linearGradient id="g"><stop offset="0" stop-color="#f00"/>'
+        '<stop offset="1" stop-color="#00f"/></linearGradient>\n'
+        '<path d="M 20 20 L 180 20" fill="url(#g)" stroke="url(#g)" stroke-width="4"/>\n'
+        '<path d="M 20 40 L 20 180" fill="url(#g)"/>\n'
+        '<path d="M 60 60 Z" fill="url(#g)"/>\n'
+        '<rect x="30" y="30" width="0" height="80" fill="url(#g)"/>\n</svg>\n',
+    )
+
     # 64 KiB of deterministic noise that is not XML at all.
     write_bytes(
         "random_bytes.bin",

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="360" height="240" viewBox="0 0 360 240">
+  <title>T18: linear and radial gradients</title>
+  <defs>
+    <!-- objectBoundingBox linear, the default frame -->
+    <linearGradient id="lg-bbox">
+      <stop offset="0" stop-color="#e04020"/>
+      <stop offset="0.45" stop-color="#f0c020"/>
+      <stop offset="1" stop-color="#2050c0"/>
+    </linearGradient>
+    <!-- userSpaceOnUse linear with percentages and a gradientTransform -->
+    <linearGradient id="lg-user" gradientUnits="userSpaceOnUse"
+                    x1="10%" y1="0" x2="30%" y2="10%"
+                    gradientTransform="rotate(18 60 60)">
+      <stop offset="0" stop-color="teal"/>
+      <stop offset="1" stop-color="#ffe">
+      </stop>
+    </linearGradient>
+    <!-- three spreads over a short vector, sharing stops through href -->
+    <linearGradient id="spread-src" x1="0.35" x2="0.55">
+      <stop offset="0" stop-color="#103080"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#801030"/>
+    </linearGradient>
+    <linearGradient id="sp-pad" xlink:href="#spread-src" spreadMethod="pad"/>
+    <linearGradient id="sp-reflect" xlink:href="#spread-src" spreadMethod="reflect"/>
+    <linearGradient id="sp-repeat" href="#spread-src" spreadMethod="repeat"/>
+    <!-- plain radial, objectBoundingBox -->
+    <radialGradient id="rg-bbox">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#20a060"/>
+      <stop offset="1" stop-color="#062018"/>
+    </radialGradient>
+    <!-- focal radial: two-point conical -->
+    <radialGradient id="rg-focal" cx="0.5" cy="0.5" r="0.48" fx="0.26" fy="0.3">
+      <stop offset="0" stop-color="#fffbe0"/>
+      <stop offset="0.35" stop-color="#e08020"/>
+      <stop offset="1" stop-color="#301000"/>
+    </radialGradient>
+    <!-- userSpaceOnUse radial with a focal radius and translucent stops -->
+    <radialGradient id="rg-user" gradientUnits="userSpaceOnUse"
+                    cx="300" cy="180" r="52" fr="14">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#8040ff" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#101040" stop-opacity="0.2"/>
+    </radialGradient>
+    <!-- a hard stop (two stops at one offset) and a stroke gradient -->
+    <linearGradient id="lg-hard" x1="0" x2="1">
+      <stop offset="0" stop-color="#202020"/>
+      <stop offset="0.5" stop-color="#202020"/>
+      <stop offset="0.5" stop-color="#f04080"/>
+      <stop offset="1" stop-color="#f04080"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="360" height="240" fill="#f7f7f5"/>
+
+  <rect x="8" y="8" width="104" height="56" fill="url(#lg-bbox)"/>
+  <rect x="120" y="8" width="104" height="56" fill="url(#lg-user)"/>
+  <rect x="232" y="8" width="104" height="56" fill="url(#lg-hard)"/>
+
+  <rect x="8" y="72" width="104" height="36" fill="url(#sp-pad)"/>
+  <rect x="120" y="72" width="104" height="36" fill="url(#sp-reflect)"/>
+  <rect x="232" y="72" width="104" height="36" fill="url(#sp-repeat)"/>
+
+  <circle cx="60" cy="168" r="50" fill="url(#rg-bbox)"/>
+  <ellipse cx="180" cy="168" rx="54" ry="44" fill="url(#rg-focal)"/>
+  <rect x="248" y="120" width="104" height="104" fill="url(#rg-user)"/>
+
+  <!-- url() with a fallback that is used (missing id) and one that is not -->
+  <rect x="8" y="116" width="50" height="14" fill="url(#no-such-gradient) #c02060"/>
+  <rect x="62" y="116" width="50" height="14" fill="url(#lg-bbox) green"/>
+  <!-- an unresolved reference with no fallback paints nothing -->
+  <rect x="116" y="116" width="50" height="14" fill="url(#also-missing)"/>
+  <!-- a gradient on a stroke, with a transform on the shape -->
+  <rect x="120" y="120" width="104" height="18" fill="none" stroke="url(#lg-bbox)"
+        stroke-width="7" transform="translate(0 -2) skewX(-6)"/>
+</svg>

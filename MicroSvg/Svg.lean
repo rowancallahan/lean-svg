@@ -1,6 +1,6 @@
 import MicroSvg.Xml
 import MicroSvg.Css
-import MicroSvg.Canvas
+import MicroSvg.Shader
 
 /-!
 # SVG interpretation
@@ -22,6 +22,9 @@ open Bytes
 inductive Paint where
   | none
   | solid (c : Rgba)
+  /-- A `url(#id)` that named a usable gradient: the index of its entry in the
+  style's `Grad.Defs` table (T18). -/
+  | gradient (idx : Nat)
 deriving Repr, Inhabited
 
 /-- `1.0` on the opacity grid: opacities are `Nat` numerators over 10^18.
@@ -79,6 +82,12 @@ structure Style where
   `translate(originDx, originDy) · _ · translate(-originDx, -originDy)`. -/
   originDx : Fx := 0
   originDy : Fx := 0
+  /-- The document's gradient definitions (T18).  Not a style property at all:
+  it is one immutable table, built by `interpret`'s pre-pass and put on the
+  root element's `Style` so that it reaches `resolvePaint` — which is where a
+  `url(#id)` becomes a `Paint.gradient` — without changing `applyProp`'s
+  signature.  Every other `Style` inherits the same table by copying. -/
+  defs : Grad.Defs := {}
   ctm : Mat := Mat.identity
 deriving Repr, Inhabited
 
@@ -216,6 +225,18 @@ def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
       | _, _, _ => none
     else none
 
+/-- The optional second half of `url(#id) <fallback>` (svgtypes'
+`PaintFallback`): what to paint with when the reference resolves to nothing.
+`absent` — no fallback was written — also means "paint nothing", but it is
+kept distinct because it is the only case that matters for a future
+`context-fill`. -/
+inductive PaintFallback where
+  | absent
+  | none
+  | currentColor
+  | color (c : Rgba)
+deriving Repr, Inhabited
+
 /-- The result of parsing a paint value: a resolved paint, or a marker for
 `currentcolor` that the caller (`applyProp` on `fill`/`stroke`) resolves
 against the element's own `color` at apply time. -/
@@ -223,23 +244,66 @@ inductive PaintSpec where
   | none
   | solid (c : Rgba)
   | currentColor
+  /-- `url(#id)` with its fallback; `resolvePaint` looks `id` up in the
+  style's gradient table (T18). -/
+  | url (id : String) (fb : PaintFallback)
 deriving Repr, Inhabited
 
-/-- Parse a paint value.  Unsupported paint servers (`url(...)`) render as none. -/
-def parsePaint (bs : ByteArray) : Option PaintSpec :=
-  let t := lower (trim bs)
-  if eqAscii t "none" then some .none
-  else if eqAscii t "transparent" then some (.solid ⟨0, 0, 0, 0⟩)
-  else if eqAscii t "currentcolor" then some .currentColor
-  else if at' t 0 == 35 then (parseHexColor t).map .solid
-  else if startsWith t 0 "rgba(" then (parseRgbFunc t 5).map .solid
-  else if startsWith t 0 "rgb(" then (parseRgbFunc t 4).map .solid
-  else if startsWith t 0 "url(" then some .none
+/-- Parse a plain colour (no `none`, no `url()`, no `currentcolor`). -/
+def parseSolidColor (t : ByteArray) : Option Rgba :=
+  if at' t 0 == 35 then parseHexColor t
+  else if startsWith t 0 "rgba(" then parseRgbFunc t 5
+  else if startsWith t 0 "rgb(" then parseRgbFunc t 4
   else
     let s := toStr t
     match namedColors.find? (fun (n, _) => n == s) with
-    | some (_, v) => some (.solid ⟨(v >>> 16) &&& 255, (v >>> 8) &&& 255, v &&& 255, 255⟩)
+    | some (_, v) => some ⟨(v >>> 16) &&& 255, (v >>> 8) &&& 255, v &&& 255, 255⟩
     | none => none
+
+/-- Parse `url(#id)` plus an optional fallback, as svgtypes' `Paint::FuncIRI`.
+Only a *local* reference (`#id`) can ever resolve — this renderer has no code
+path that opens a second file — so anything else keeps its fallback and
+otherwise paints nothing, which is what usvg does with an id it cannot find.
+An id longer than `Grad.maxIdLen` is treated as absent.
+
+Text after the `url(…)` that is not a fallback at all — svgtypes' `Paint`
+grammar has no room for the `icc-color(…)` of SVG 1.1 — makes the *whole*
+value unparseable, and usvg then falls back to black for `fill` and to no
+stroke for `stroke`; `none` here leaves the property inherited, which is
+black at the root and so agrees on `fill`.
+
+`raw` and `low` are the same bytes with and without case folding, and `lower`
+preserves length, so the offsets are shared: ids are case-sensitive and come
+out of `raw`, keywords and colour names out of `low`. -/
+def parseUrlPaint (raw low : ByteArray) : Option PaintSpec :=
+  let close := findByte low 4 41
+  if close ≥ low.size then some .none
+  else
+    let inner := trim (raw.extract 4 close)
+    -- `url('#id')` / `url("#id")` are both legal CSS.
+    let q := at' inner 0
+    let inner :=
+      if (q == 34 || q == 39) && inner.size ≥ 2 then trim (inner.extract 1 (inner.size - 1))
+      else inner
+    let id := if at' inner 0 == 35 then toStr (inner.extract 1 inner.size) else ""
+    let rest := trim (low.extract (close + 1) low.size)
+    let fb : Option PaintFallback :=
+      if rest.size == 0 then some .absent
+      else if eqAscii rest "none" then some .none
+      else if eqAscii rest "currentcolor" then some .currentColor
+      else (parseSolidColor rest).map .color
+    fb.map fun fb =>
+      if id.isEmpty || id.length > Grad.maxIdLen then .url "" fb else .url id fb
+
+/-- Parse a paint value. -/
+def parsePaint (bs : ByteArray) : Option PaintSpec :=
+  let raw := trim bs
+  let t := lower raw
+  if eqAscii t "none" then some .none
+  else if eqAscii t "transparent" then some (.solid ⟨0, 0, 0, 0⟩)
+  else if eqAscii t "currentcolor" then some .currentColor
+  else if startsWith t 0 "url(" then parseUrlPaint raw t
+  else (parseSolidColor t).map .solid
 
 /-- Opacity in `[0, opacityOne]`, i.e. usvg's `Opacity::new_clamped`.
 
@@ -816,11 +880,31 @@ def parseTransformOrigin (bs : ByteArray) (refW refH : Fx) : Fx × Fx :=
           else (0, 0)
 
 /-- Resolve a parsed paint against the style's own `color` (for
-`currentcolor`). -/
+`currentcolor`) and its gradient table (for `url(#id)`).
+
+usvg's `convert_paint` on a `FuncIRI`: a reference that names nothing, or a
+paint server that resolves to nothing (no stops, an `href` that leaves the
+gradients), uses the fallback; one that resolves to a single colour becomes
+that colour, which happens here instead in `Grad.build`, where the stop's own
+opacity can still be folded in exactly.  The one case we do not reproduce is
+an id that exists but belongs to some *other* element: usvg paints nothing
+there, while we take the fallback, because only paint servers are indexed. -/
 def resolvePaint (st : Style) : PaintSpec → Paint
   | .none => .none
   | .solid c => .solid c
   | .currentColor => .solid st.color
+  | .url id fb =>
+    let fallback : Paint := match fb with
+      | .absent => .none
+      | .none => .none
+      | .currentColor => .solid st.color
+      | .color c => .solid c
+    match st.defs.lookup id with
+    | some i =>
+      match (st.defs.defs.getD i default).shape with
+      | .invalid => fallback
+      | _ => .gradient i
+    | none => fallback
 
 /-- Parse the `color` property.  It is an ordinary colour, never `none` or
 `url(...)`; reusing `parsePaint` and rejecting anything but `.solid` gets that
@@ -1044,6 +1128,185 @@ def passesConditions (attrs : Array Xml.Attr) : Bool := Id.run do
   | none => pure ()
   return true
 
+/-! ## Gradient definitions
+
+The pre-pass `interpret` runs before its main walk.  It only *parses*; the
+`href` inheritance, the defaults and the degenerate cases all live in
+`Grad.resolve`, which is where usvg's rules are written down. -/
+
+/-- A gradient coordinate on the 16.16 grid: a number, a percentage, or a
+length with a unit.
+
+`objectBoundingBox` coordinates are fractions of the bounding box, where
+`Fx`'s 1/256 would be several pixels on a large shape, so the plain-number and
+percentage cases keep all sixteen fractional bits; only the rarely used
+absolute units go through `parseLength` and its `Fx`. -/
+def parseCoord16 (bs : ByteArray) : Option Grad.LenPct :=
+  let t := trim bs
+  match parseDecimal t 0 with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    let mag := Int.ofNat (scaleDecimal mant exp10 65536 (Fx.maxVal * 256).toNat)
+    let v := if neg then -mag else mag
+    if j == t.size then some (v, false)
+    else if at' t j == 37 && j + 1 == t.size then some (v, true)
+    else match parseLengthAll t with
+      | some fx => some (fx * 256, false)
+      | none => none
+
+/-- A `<stop>`'s `offset`: a number or a percentage, clamped to `[0, 1]`
+(usvg's `f32_bound(0.0, offset, 1.0)`), as 16.16.  `offset` is a
+`<number-or-percentage>`, so *any* unit (`5mm`) keeps the previous stop's
+offset, as does an absent or malformed value — `convert_stops`'
+`_ => prev_offset.number`. -/
+def parseStopOffset (bs : ByteArray) (prev : Int) : Int :=
+  let t := trim bs
+  match parseDecimal t 0 with
+  | none => prev
+  | some (neg, mant, exp10, j) =>
+    let pct := at' t j == 37
+    if (if pct then j + 1 else j) != t.size then prev
+    else if neg then 0
+    else
+      let v := Int.ofNat (scaleDecimal mant (if pct then exp10 - 2 else exp10) 65536 65536)
+      if v > 65536 then 65536 else v
+
+/-- Presentation attribute or `style` declaration, whichever wins. -/
+def attrOrStyle (attrs : Array Xml.Attr) (n : String) : Option ByteArray :=
+  let decls := match attr attrs "style" with
+    | some v => parseStyleDecls v
+    | none => #[]
+  match decls.findSome? (fun (k, v) => if k == n then some v else none) with
+  | some v => some v
+  | none => attr attrs n
+
+/-- `<stop>` → `Grad.RawStop`.  Presentation attributes first, then `style`,
+as everywhere else.
+
+`inhColor` is the `color` in force on the stop's ancestors, which
+`gradRawDefs` tracks with its own small stack, because usvg reads
+`currentColor` with `find_attribute(AId::Color)` and that walks all of them.
+`inhStopColor` is instead the *gradient element's own* `stop-color`, and only
+that: `stop-color` is not an inherited property, so `inherit` takes the direct
+parent's computed value, which for a parent that does not declare it is the
+initial value, black — `stop-color-with-inherit-2` and `-3`, where an
+ancestor `<g>` declares it and the stop still comes out black.  Neither can
+see a value that only a CSS rule sets, since this pre-pass runs before the
+cascade. -/
+def parseStop (attrs : Array Xml.Attr) (prev : Int) (inhColor : Rgba)
+    (inhStopColor : Option ByteArray) : Grad.RawStop :=
+  let pick := attrOrStyle attrs
+  let black : Rgba := ⟨0, 0, 0, 255⟩
+  let ofValue := fun (v : ByteArray) =>
+    match parsePaint v with
+    | some (.solid c) => c
+    | some .currentColor => inhColor
+    -- usvg: an unparseable `stop-color` warns and falls back to black.
+    | _ => black
+  let col := match pick "stop-color" with
+    | none => black
+    | some v => if eqAsciiCI (trim v) "inherit" then (inhStopColor.map ofValue).getD black
+                else ofValue v
+  let op := match (pick "stop-opacity").bind parseOpacity with
+    | some o => o
+    | none => opacityOne
+  { off := parseStopOffset ((pick "offset").getD ByteArray.empty) prev, col := col, op := op }
+
+/-- One `linearGradient`/`radialGradient` element's own attributes. -/
+def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
+  let coord := fun (n : String) => (attr attrs n).bind parseCoord16
+  let href := match attr attrs "href" with
+    | some v => v
+    | none => (attr attrs "xlink:href").getD ByteArray.empty
+  let href := let t := trim href; if at' t 0 == 35 then toStr (t.extract 1 t.size) else ""
+  { id := match attr attrs "id" with | some v => toStr v | none => "",
+    kind := if name == "radialGradient" then .radial else .linear,
+    href := if href.length > Grad.maxIdLen then "" else href,
+    oBB := (attr attrs "gradientUnits").bind fun v =>
+      let t := trim v
+      if eqAscii t "userSpaceOnUse" then some false
+      else if eqAscii t "objectBoundingBox" then some true else none,
+    -- usvg's `svgtree` replaces *any* transform attribute whose value is not
+    -- `Transform::is_valid` with the identity: either column of the linear
+    -- part having zero length makes it invalid, so `matrix(0 0 0 0 0 0)`
+    -- renders as an untransformed gradient rather than as nothing.  (A
+    -- singular matrix with two non-zero columns stays singular and is
+    -- dropped later, by the inversion in `Grad.build`.)
+    transform := (attr attrs "gradientTransform").map fun v =>
+      let m := parseTransform v
+      if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m,
+    spread := (attr attrs "spreadMethod").bind fun v =>
+      let t := trim v
+      if eqAscii t "reflect" then some Grad.Spread.reflect
+      else if eqAscii t "repeat" then some Grad.Spread.rep
+      else if eqAscii t "pad" then some Grad.Spread.pad else none,
+    x1 := coord "x1", y1 := coord "y1", x2 := coord "x2", y2 := coord "y2",
+    cx := coord "cx", cy := coord "cy", r := coord "r",
+    fx := coord "fx", fy := coord "fy", fr := coord "fr" }
+
+/-- Collect every gradient element and its direct `<stop>` children in one
+bounded pass over the events, wherever they appear — a gradient does not have
+to be under `<defs>`, and usvg indeed indexes elements by id across the whole
+document.  At most `Grad.maxDefs` gradients and `Grad.maxStops` stops each. -/
+def gradRawDefs (events : Array Xml.Event) : Array Grad.RawDef := Id.run do
+  let mut out : Array Grad.RawDef := #[]
+  let mut depth : Nat := 0
+  let mut cur : Option Nat := none
+  let mut curDepth : Nat := 0
+  -- The `color` in force, one entry per open element, so a stop's
+  -- `currentColor` sees what usvg's ancestor walk sees.  `Xml`'s depth cap
+  -- keeps this bounded.  `curStopColor` is only ever the open gradient
+  -- element's own `stop-color`, which is all `inherit` may reach.
+  let mut colors : Array Rgba := #[]
+  let mut curStopColor : Option ByteArray := none
+  for ev in events do
+    match ev with
+    | .text _ => pure ()
+    | .close =>
+      depth := depth - 1
+      colors := colors.pop
+      if cur.isSome && depth == curDepth then
+        cur := none
+        curStopColor := none
+    | .open_ name attrs =>
+      let inhColor := colors.back?.getD ⟨0, 0, 0, 255⟩
+      if name == "linearGradient" || name == "radialGradient" then
+        if out.size < Grad.maxDefs then
+          out := out.push (parseGradDef name attrs)
+          cur := some (out.size - 1)
+          curDepth := depth
+          curStopColor := attrOrStyle attrs "stop-color"
+      else if name == "stop" then
+        match cur with
+        | some i =>
+          if depth == curDepth + 1 then
+            let g := out.getD i default
+            if g.stops.size < Grad.maxStops then
+              let prev := (g.stops.back?).map (·.off) |>.getD 0
+              out := out.setIfInBounds i
+                { g with stops := g.stops.push (parseStop attrs prev inhColor curStopColor) }
+        | none => pure ()
+      colors := colors.push (((attrOrStyle attrs "color").bind parseColor).getD inhColor)
+      depth := depth + 1
+  return out
+
+/-- The rect a `userSpaceOnUse` percentage resolves against: usvg's
+`state.view_box`, which — with no nested `<svg>` in this renderer — is the
+root's `viewBox` if it has one and its own resolved size otherwise.  The same
+rect `applyAttrs` uses for `transform-origin`. -/
+def gradPctRef (events : Array Xml.Event) : Grad.PctRef := Id.run do
+  for ev in events do
+    match ev with
+    | .open_ name attrs =>
+      if name != "svg" then return {}
+      let r := parseRoot attrs
+      let (w, h) := match r.viewBox with
+        | some (_, _, vw, vh) => (vw, vh)
+        | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+      return { w := w * 256, h := h * 256 }
+    | _ => pure ()
+  return {}
+
 /-- Walk the event stream with a style stack.
 
 T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
@@ -1089,6 +1352,10 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         if styleDepth.isSome && styleOk then out := (out ++ bytes).push 32
     return out
   let rules := Css.parseStylesheet combinedCss
+  -- T18: one bounded pre-pass over the same events collects the gradient
+  -- paint servers.  The table is immutable and is handed to the root element's
+  -- `Style`, from which every descendant inherits it by copying.
+  let gradTable := Grad.Defs.build (gradRawDefs events) (gradPctRef events)
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
     let styleDecls := match attr attrs "style" with
       | some v => parseStyleDecls v
@@ -1149,7 +1416,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           if isDisplayNone attrs || !passesConditions attrs then
             skip := 1
           else
-            stack := stack.push (applyEffective default attrs chain)
+            stack := stack.push (applyEffective { (default : Style) with defs := gradTable } attrs chain)
             elemStack := chain
             childCounts := childCounts.push 0
             switchSel := switchSel.push none
