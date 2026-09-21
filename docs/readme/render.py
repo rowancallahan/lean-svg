@@ -95,15 +95,18 @@ def main() -> int:
 
     print(f"\nmachine: {platform.machine()}, {os.cpu_count()} cores, "
           f"macOS {platform.mac_ver()[0]}, at --width {WIDTH}\n")
-    print("| | lean-svg | resvg 0.48.1 | difference (amplified 12x) |")
+    print("| | lean-svg | resvg 0.48.1 | difference (12x) |")
     print("|---|---|---|---|")
     for r in rows:
+        # Percentages are floored, not rounded: 99.6% within 8 is not 100%.
         print(
-            f"| **{r['name']}**<br>{r['within8']:.2f}% within 8<br>{r['exact']:.2f}% exact"
-            f"<br>{r['ms_ours']:.0f} ms vs {r['ms_ref']:.0f} ms "
-            f"| ![{r['name']}, lean-svg](docs/readme/{r['name']}-ours.png) "
-            f"| ![{r['name']}, resvg](docs/readme/{r['name']}-resvg.png) "
-            f"| ![{r['name']}, difference](docs/readme/{r['name']}-diff.png) |"
+            f"| **{r['name']}** "
+            f"| ![{r['name']} rendered by lean-svg](docs/readme/{r['name']}-ours.png)"
+            f"<br>{int(r['within8'])}% within 8<br>{int(r['exact'])}% exact"
+            f"<br>{r['ms_ours']:.0f} ms "
+            f"| ![{r['name']} rendered by resvg](docs/readme/{r['name']}-resvg.png)"
+            f"<br>{r['ms_ref']:.0f} ms "
+            f"| ![difference between the two {r['name']} renders](docs/readme/{r['name']}-diff.png) |"
         )
     return 0
 

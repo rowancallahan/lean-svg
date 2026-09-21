@@ -20,38 +20,21 @@ Long term
 
 ## How close is it?
 
-Two original test images rendered by this project and by [resvg](https://github.com/linebender/resvg),
-the reference it is measured against. The third column amplifies every
-difference 12×, so a visible edge there is usually one or two levels of
-anti-aliasing, not a missing shape.
+Two original test images and the project's stress field, rendered by lean-svg
+and by [resvg](https://github.com/linebender/resvg) 0.48.1. The third column
+amplifies every difference 12x.
 
-| | lean-svg | resvg 0.48.1 | difference (12×) |
+| | lean-svg | resvg 0.48.1 | difference (12x) |
 |---|---|---|---|
-| **confetti**<br>gradients, group opacity,<br>blend modes, arcs, dashes,<br>clipping, text<br><br>99.63% within 8<br>98.27% exact<br>232 ms vs 14 ms | ![confetti rendered by lean-svg](docs/readme/confetti-ours.png) | ![confetti rendered by resvg](docs/readme/confetti-resvg.png) | ![difference between the two confetti renders](docs/readme/confetti-diff.png) |
-| **icons**<br>arcs, dashes, gradients,<br>clipPath, layers, text<br><br>99.60% within 8<br>99.58% exact<br>34 ms vs 10 ms | ![icons rendered by lean-svg](docs/readme/icons-ours.png) | ![icons rendered by resvg](docs/readme/icons-resvg.png) | ![difference between the two icon renders](docs/readme/icons-diff.png) |
-| **stress**<br>~1500 overlapping<br>translucent shapes<br><br>98.69% within 8<br>93.18% exact<br>734 ms vs 87 ms | ![stress field rendered by lean-svg](docs/readme/stress-ours.png) | ![stress field rendered by resvg](docs/readme/stress-resvg.png) | ![difference between the two stress renders](docs/readme/stress-diff.png) |
+| **confetti**<br>gradients, group opacity, blend modes, arcs, dashes, clipping, text | ![confetti rendered by lean-svg](docs/readme/confetti-ours.png)<br>99% within 8<br>98% exact<br>232 ms | ![confetti rendered by resvg](docs/readme/confetti-resvg.png)<br>14 ms | ![difference between the two confetti renders](docs/readme/confetti-diff.png) |
+| **icons**<br>arcs, dashes, gradients, clipPath, layers, text | ![icons rendered by lean-svg](docs/readme/icons-ours.png)<br>99% within 8<br>99% exact<br>34 ms | ![icons rendered by resvg](docs/readme/icons-resvg.png)<br>10 ms | ![difference between the two icon renders](docs/readme/icons-diff.png) |
+| **stress**<br>~1500 overlapping translucent shapes | ![stress field rendered by lean-svg](docs/readme/stress-ours.png)<br>98% within 8<br>93% exact<br>734 ms | ![stress field rendered by resvg](docs/readme/stress-resvg.png)<br>87 ms | ![difference between the two stress renders](docs/readme/stress-diff.png) |
 
-Rendered at 800 px wide on an 8-core arm64 MacBook, macOS 26.6.2; times are the
+Rendered at 800 px wide on an 8-core arm64 MacBook, macOS 26.6.2. Times are the
 median of five runs of the whole binary, including process start, parsing and
-PNG encoding. Reproduce every number with `python3 docs/readme/render.py`.
+PNG encoding. Reproduce with `python3 docs/readme/render.py`.
 
-A file counts as passing when at least 99% of its pixels are within 8 levels of
-resvg's output. The first two pass. The stress field is one of four files in the
-local corpus that still miss at its native size, and the diff column shows why:
-no shape is wrong, but each of its thousands of anti-aliased edges is off by a
-level or two, and that adds up.
-
-Two honest numbers that are not in the table. We are **5 to 16× slower** than
-resvg, which is unoptimised fixed-point arithmetic against hand-tuned SIMD, and
-is the kind of gap that is expected to narrow rather than vanish. And our PNG
-files are **3.6 to 55× larger**, because the encoder writes uncompressed deflate
-blocks on purpose: a verified DEFLATE is not written yet, so the honest choice
-was no compression rather than unproven compression. The images above are
-losslessly recompressed for this README. Closing that gap with
-[lean-zip](https://github.com/kim-em/lean-zip) is milestone M7 in `PLAN.md`.
-
-All three SVGs are this project's own artwork, Apache-2.0 like the rest of it, so
-these renders are ours to publish. See [Licensing and credits](#licensing-and-credits).
+All three SVGs are this project's own artwork, Apache-2.0.
 
 ## Generated Readme
 
