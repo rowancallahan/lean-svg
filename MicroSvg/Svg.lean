@@ -57,9 +57,9 @@ structure Style where
   opacity : Nat := opacityOne
   visible : Bool := true
   /-- The CSS `color` property: inherited, defaults to black, and is what
-  `fill`/`stroke: currentColor` resolve to (`applyAttrs` applies `color`
-  before any other property so the resolution sees the element's own
-  value). -/
+  `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
+  applies `color` before any other property so the resolution sees the
+  element's own value). -/
   color : Rgba := ⟨0, 0, 0, 255⟩
   /-- Whether `pctRefW`/`pctRefH` have been established yet.  False only for
   the literal `default : Style` that `interpret` passes as the parent of the
@@ -70,7 +70,8 @@ structure Style where
   /-- The rect `transform-origin` percentages resolve against: usvg's
   per-element `state.view_box`, which is the same constant rect (the root's
   `viewBox`, or else its own resolved size) for every element in a document
-  with no nested `<svg>`. Set once in `applyAttrs`, from the root's own attrs. -/
+  with no nested `<svg>`. Set once in `applyEffective`, from the root's own
+  attrs. -/
   pctRefW : Fx := 0
   pctRefH : Fx := 0
   /-- `transform-origin`'s resolved offset, *not* inherited: every element
@@ -862,10 +863,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
   | "transform" =>
     -- `translate(originDx, originDy) · transform · translate(-originDx, -originDy)`
-    -- (`applyAttrs` sets `originDx`/`originDy` from this element's own
+    -- (`applyEffective` sets `originDx`/`originDy` from this element's own
     -- `transform-origin`, before any `transform` value is folded in, so this
-    -- sees it regardless of attribute order); a no-op, exactly the plain
-    -- `parseTransform v` from before this task, whenever there is none.
+    -- sees it regardless of attribute order or which cascade layer supplies
+    -- either property); a no-op, exactly the plain `parseTransform v`,
+    -- whenever there is none.
     let localM := parseTransform v
     let wrapped :=
       if st.originDx == 0 && st.originDy == 0 then localM
@@ -883,58 +885,6 @@ def parseStyleDecls (v : ByteArray) : Array (String × ByteArray) :=
     let k := findByte decl 0 58
     if k ≥ decl.size then none
     else some (toStr (lower (trim (decl.extract 0 k))), trim (decl.extract (k + 1) decl.size))
-
-/-- Presentation attributes first, then the `style` attribute (CSS wins);
-`color` is resolved before anything else, from whichever of the two sources
-would normally win, so `fill`/`stroke: currentcolor` on the same element
-always sees the element's own final `color` and never a stale inherited one
-(usvg: "resolves currentColor with the element's own color, inherited if
-absent" — the SVG-wide rule that `color` applies before paints even if it is
-written after `fill`/`stroke` in the markup). -/
-def applyAttrs (parent : Style) (attrs : Array Xml.Attr) : Style :=
-  -- `transform-origin` percentages resolve against the same rect for every
-  -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it, so
-  -- usvg's per-element `state.view_box` is one constant for the whole
-  -- document): the root's `viewBox` if it has one, else the root's own
-  -- resolved size (`resolveRootSize`).  Established once, from the root
-  -- `<svg>`'s own attrs, and inherited unchanged from then on.
-  -- `parent.pctRefSet` is false only for the literal `default : Style` that
-  -- `interpret` passes as the parent of the root element itself -- the one
-  -- call where `attrs` below *are* the root's own `width`/`height`/`viewBox`.
-  let parent :=
-    if parent.pctRefSet then parent
-    else
-      let r := parseRoot attrs
-      let (rw, rh) := match r.viewBox with
-        | some (_, _, vw, vh) => (vw, vh)
-        | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
-      { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
-  let styleDecls := match attr attrs "style" with
-    | some v => parseStyleDecls v
-    | none => #[]
-  let colorVal : Option ByteArray :=
-    match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
-    | some v => some v
-    | none => attr attrs "color"
-  let base := match colorVal with
-    | some v => applyProp parent "color" v
-    | none => parent
-  -- `transform-origin` is *not* inherited (unlike `color`): every element
-  -- gets its own, freshly reset to "no adjustment" here rather than carrying
-  -- the parent's, so an ancestor's `transform-origin` never leaks onto a
-  -- descendant that has no `transform` (or none) of its own.
-  let originVal : Option ByteArray :=
-    match styleDecls.findSome? (fun (n, val) => if n == "transform-origin" then some val else none) with
-    | some v => some v
-    | none => attr attrs "transform-origin"
-  let (odx, ody) := match originVal with
-    | some v => parseTransformOrigin v base.pctRefW base.pctRefH
-    | none => (0, 0)
-  let base := { base with originDx := odx, originDy := ody }
-  let skip (n : String) := n == "style" || n == "color" || n == "transform-origin"
-  let st := attrs.foldl (fun st a => if skip a.name then st else applyProp st a.name a.value) base
-  styleDecls.foldl (fun st (n, val) =>
-    if n == "color" || n == "transform-origin" then st else applyProp st n val) st
 
 /-- `display="none"` (attribute or style) hides the element and its subtree. -/
 def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
@@ -1051,10 +1001,11 @@ T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
 `childCounts`, is kept in exact lockstep with the existing `Style` stack
 (pushed/popped in the same three places: root, `g`, shape; left alone while
 `skip > 0`) to build each element's ancestor `Css.ElemInfo` chain and its
-`:first-child` flag.  `applyEffective` replaces the old `applyAttrs` call at
-all three sites with the four-layer cascade: presentation attributes, then
-non-important CSS, then the `style=""` attribute, then `!important` CSS,
-with `color` still resolved first from whichever layer wins.
+`:first-child` flag.  `applyEffective` is the four-layer cascade at all
+three sites: presentation attributes, then non-important CSS, then the
+`style=""` attribute, then `!important` CSS, with `color` and
+`transform-origin` resolved first from whichever layer wins (and the root's
+percentage reference seeded on the root push).
 
 T27 adds a third stack, `switchSel`, kept the same size as `stack` and
 pushed/popped together, tracking what a `<switch>` ancestor demands of its
@@ -1090,30 +1041,66 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     return out
   let rules := Css.parseStylesheet combinedCss
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
+    -- `transform-origin` percentages resolve against the same rect for every
+    -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it,
+    -- so usvg's per-element `state.view_box` is one constant for the whole
+    -- document): the root's `viewBox` if it has one, else the root's own
+    -- resolved size (`resolveRootSize`).  Established once, from the root
+    -- `<svg>`'s own attrs, and inherited unchanged from then on.
+    -- `parent.pctRefSet` is false only for the literal `default : Style`
+    -- passed as the parent of the root element itself -- the one call where
+    -- `attrs` *are* the root's own `width`/`height`/`viewBox`.
+    let parent :=
+      if parent.pctRefSet then parent
+      else
+        let r := parseRoot attrs
+        let (rw, rh) := match r.viewBox with
+          | some (_, _, vw, vh) => (vw, vh)
+          | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+        { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
     let styleDecls := match attr attrs "style" with
       | some v => parseStyleDecls v
       | none => #[]
     let (normalCss, importantCss) := Css.matchingDeclsSplit rules chain
     let lastNamed := fun (decls : Array (String × ByteArray)) (n : String) =>
       (decls.filter (fun d => d.1 == n)).back?.map (·.2)
-    let colorVal : Option ByteArray :=
-      match lastNamed importantCss "color" with
+    -- The winning value of a single-valued property across the four layers,
+    -- highest precedence first: `!important` CSS, `style=""`, normal CSS,
+    -- presentation attribute.  Used for the two properties that must be
+    -- resolved *before* the generic folds run, regardless of markup order:
+    -- `color` (so `fill`/`stroke: currentcolor` on the same element sees the
+    -- element's own final `color`) and `transform-origin` (so `applyProp`'s
+    -- `"transform"` case sees `originDx`/`originDy`, whichever layer the
+    -- `transform` itself comes from).  usvg lists both `transform` and
+    -- `transform-origin` as presentation attributes (`svgtree/mod.rs`,
+    -- `is_presentation`), so CSS sets them exactly like any other property.
+    let winning := fun (n : String) =>
+      match lastNamed importantCss n with
       | some v => some v
       | none =>
-        match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
+        match styleDecls.findSome? (fun (m, val) => if m == n then some val else none) with
         | some v => some v
         | none =>
-          match lastNamed normalCss "color" with
+          match lastNamed normalCss n with
           | some v => some v
-          | none => attr attrs "color"
-    let base := match colorVal with
+          | none => attr attrs n
+    let base := match winning "color" with
       | some v => applyProp parent "color" v
       | none => parent
-    let skipName (n : String) := n == "style" || n == "color"
+    -- `transform-origin` is *not* inherited (unlike `color`): every element
+    -- gets its own, freshly reset to "no adjustment" here rather than carrying
+    -- the parent's, so an ancestor's `transform-origin` never leaks onto a
+    -- descendant that has no `transform-origin` of its own.
+    let (odx, ody) := match winning "transform-origin" with
+      | some v => parseTransformOrigin v base.pctRefW base.pctRefH
+      | none => (0, 0)
+    let base := { base with originDx := odx, originDy := ody }
+    let early (n : String) := n == "color" || n == "transform-origin"
+    let skipName (n : String) := n == "style" || early n
     let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
-    let afterNormalCss := normalCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterAttrs
-    let afterStyle := styleDecls.foldl (fun st (n, val) => if n == "color" then st else applyProp st n val) afterNormalCss
-    importantCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterStyle
+    let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
+    let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
+    importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
   let mut stack : Array Style := #[]
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
