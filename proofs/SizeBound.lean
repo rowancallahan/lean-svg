@@ -1,0 +1,197 @@
+/-
+# Output size upper bound — working file
+
+Not part of the `LeanSvg` library, so `lake build` does not see it and the
+`sorry` below does not break invariant 5. Check it with:
+
+    lake env lean proofs/SizeBound.lean
+
+## What is being proved, in English
+
+The renderer cannot produce an arbitrarily large file. The size of the PNG it
+writes is bounded by a function of the canvas dimensions alone, and the
+canvas dimensions are already checked at runtime. So a bounded input cannot
+turn into an unbounded output.
+
+Only the **upper bound** is wanted, not the exact size. That decision makes
+this much easier, in two specific ways that are worth naming:
+
+1. `ByteArray.copySlice` clamps its length with `min` against the source's
+   size. For an exact size you would have to prove `rgba` is long enough,
+   which means carrying the canvas-size invariant all the way down. For a
+   bound the `min` is free — it only ever helps.
+2. The number of stored DEFLATE blocks is `⌈raw/65535⌉`. An exact size has to
+   get that count right. A bound can over-count wildly: below, each block
+   header is charged against a single data byte, which is off by a factor of
+   65535 and still gives a usable bound.
+
+## The bound
+
+`zlibStoredRows` appends, to `out`:
+
+  - 2 bytes of zlib header,
+  - one byte per byte of `raw = h * (rowBytes + 1)`,
+  - 5 bytes per stored-block header, and there are at most `raw + 1` of them
+    (really `⌈raw/65535⌉`, but see point 2 above),
+  - 5 more if `raw = 0`, for the empty-stream block,
+  - 4 bytes of Adler-32.
+
+so at most `out.size + 11 + 6 * raw`. Wrapping that in the PNG container adds
+8 signature, 25 IHDR, 4 IDAT length, 4 IDAT type, 4 IDAT CRC and 12 IEND,
+which is 57.
+
+## Status
+
+The four supporting lemmas below are **proved**. The final assembly is not —
+see the note on `encode_size_le` for exactly what is left and why.
+-/
+
+import LeanSvg.Png
+
+/-- The state carried by a `ForInStep`, whichever constructor it used. -/
+def ForInStep.val {β : Type} : ForInStep β → β
+  | .done b => b
+  | .yield b => b
+
+namespace LeanSvg.Png.SizeBound
+
+open LeanSvg Png
+
+/-! ## Generic loop reasoning
+
+Lean has no automation for `for` loops over ranges, so these two lemmas are
+the reusable core. Both reduce a loop to a single obligation about its body.
+They are stated over `List` because `Std.Legacy.Range.forIn_eq_forIn_range'`
+rewrites a range loop into a list loop.
+-/
+
+/-- **The workhorse.** Any predicate preserved by one step of a loop body
+holds of the loop's result. Use this when the invariant relates several
+components of the state, which is the case here: the bound on `o.size`
+depends on `pos`. -/
+theorem forIn_invariant {α β : Type} (P : β → Prop)
+    (f : α → β → Id (ForInStep β))
+    (hstep : ∀ a b, P b → P (f a b).val) :
+    ∀ (l : List α) (init : β), P init → P (Id.run (forIn l init f)) := by
+  intro l
+  induction l with
+  | nil => intro init h; exact h
+  | cons a as ih =>
+    intro init h
+    have h1 := hstep a init h
+    simp only [List.forIn_cons]
+    cases hf : f a init with
+    | done b =>
+      simp only [hf, ForInStep.val] at h1
+      show P b
+      exact h1
+    | yield b =>
+      simp only [hf, ForInStep.val] at h1
+      show P (Id.run (forIn as b f))
+      exact ih b h1
+
+/-- The simpler special case: if every step grows a measure by at most `k`,
+the loop grows it by at most `k` per element. Not strong enough for
+`zlibStoredRows`, where the useful invariant ties size to position, but it is
+the right tool for a loop whose body has a flat per-step cost. -/
+theorem forIn_measure_le {α β : Type} (sz : β → Nat) (k : Nat)
+    (f : α → β → Id (ForInStep β))
+    (hstep : ∀ a b, sz (f a b).val ≤ sz b + k) :
+    ∀ (l : List α) (init : β),
+      sz (Id.run (forIn l init f)) ≤ sz init + l.length * k := by
+  intro l
+  induction l with
+  | nil =>
+    intro init
+    show sz init ≤ sz init + 0 * k
+    omega
+  | cons a as ih =>
+    intro init
+    have h1 := hstep a init
+    have h2 := ih
+    simp only [List.forIn_cons, List.length_cons, Nat.succ_mul]
+    cases hf : f a init with
+    | done b =>
+      simp only [hf, ForInStep.val] at h1
+      show sz b ≤ sz init + (as.length * k + k)
+      omega
+    | yield b =>
+      simp only [hf, ForInStep.val] at h1
+      have h3 := h2 b
+      show sz (Id.run (forIn as b f)) ≤ sz init + (as.length * k + k)
+      omega
+
+/-! ## Leaf lemmas about the two writing primitives -/
+
+/-- Copying `len` bytes into the end of `dest` grows it by at most `len`.
+
+This is where "upper bound only" pays off. `copySlice`'s definition clamps
+the copied range with `min len (src.size - srcOff)`, so the exact size
+depends on whether `src` is long enough. The inequality does not care. -/
+theorem size_copySlice_append_le (src dest : ByteArray) (srcOff len : Nat)
+    (ex : Bool) :
+    (src.copySlice srcOff dest dest.size len ex).size ≤ dest.size + len := by
+  simp only [ByteArray.copySlice, ByteArray.size, Array.size_append,
+    Array.size_extract]
+  omega
+
+/-- A stored-block header is exactly five bytes: it is five `push`es. -/
+theorem size_blockHeader (out : ByteArray) (pos rawSize : Nat) :
+    (blockHeader out pos rawSize).size = out.size + 5 := by
+  simp only [blockHeader, ByteArray.size_push]
+
+/-! ## The target -/
+
+/-- `zlibStoredRows` appends at most `11 + 6 * raw` bytes, where
+`raw = h * (rowBytes + 1)` is the filtered-scanline size.
+
+**Not proved yet.** The invariant to feed `forIn_invariant` is
+
+  `P (o, pos) := o.size ≤ base + 2 + 6 * pos ∧ pos ≤ raw`
+
+for the outer loop, and the same with the inner loop's three-component state
+`(o, pos, off)`. Every step either pushes one byte and increments `pos`
+(covered by the `+ 1 * pos` part), emits a 5-byte header (covered by the
+`+ 5 * pos` slack), or copies `n` bytes while advancing `pos` by the same `n`
+(`size_copySlice_append_le` plus the same slack).
+
+**The obstacle is not the mathematics, it is the term.** Unfolding
+`zlibStoredRows` shows that do-notation destructuring duplicates the entire
+inner `forIn` expression — once to project `.fst` and once for `.snd` — so
+the outer loop's body contains two copies of a large term that have to be
+kept in sync through the proof.
+
+`PLAN.md` already recommends rewriting `zlibStoredRows` as explicit recursion
+with `termination_by` before proving anything about it. Having now seen the
+goal, that recommendation is right and this is the concrete reason for it.
+That rewrite is behaviour-preserving but must be checked byte-identical
+against the corpus, so it is a task in its own right rather than something to
+fold into this file. -/
+theorem zlibStoredRows_size_le (out rgba : ByteArray) (rowBytes h : Nat) :
+    (zlibStoredRows out rgba rowBytes h).size
+      ≤ out.size + 11 + 6 * (h * (rowBytes + 1)) := by
+  sorry
+
+/-- The whole file is bounded by a function of the canvas dimensions: the
+container overhead is 57 bytes, plus the zlib stream's `11 + 6 * raw`.
+
+Follows from `zlibStoredRows_size_le` by unfolding `encode`, whose other
+seven steps all append constants. -/
+theorem encode_size_le (w h : Nat) (rgba : ByteArray) :
+    (encode w h rgba).size ≤ 68 + 6 * (h * (w * 4 + 1)) := by
+  sorry
+
+/-- What the bound is for. `render` already rejects `w` or `h` above `maxDim`
+and `w * h` above `maxPixels` at runtime, and the bound above is monotone in
+both, so the output size is capped by a constant. This is the statement that
+answers "no arbitrary image size"; it needs only `encode_size_le` plus
+monotonicity, both of which are arithmetic. -/
+theorem encode_size_le_const (w h : Nat) (rgba : ByteArray)
+    (maxDim : Nat) (hw : w ≤ maxDim) (hh : h ≤ maxDim) :
+    (encode w h rgba).size ≤ 68 + 6 * (maxDim * (maxDim * 4 + 1)) := by
+  have hb := encode_size_le w h rgba
+  have : h * (w * 4 + 1) ≤ maxDim * (maxDim * 4 + 1) :=
+    Nat.mul_le_mul hh (by omega)
+  omega
+
+end LeanSvg.Png.SizeBound
