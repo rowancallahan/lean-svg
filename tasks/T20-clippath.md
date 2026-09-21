@@ -350,14 +350,16 @@ Corpora, `--fast` (width 100), direct route, `--dir masking --dir paint-servers
 | every other directory in the slice (41 of them) | — | unchanged |
 | **total** | 402/737 | **449/737** |
 
-47 newly passing, **0 newly failing**, no directory below main's count.  The
-44 of those from the clip work land in two groups: the 41 Report 1 already had,
-plus the four real text-clip fixtures (`clipping-with-text`,
-`clipping-with-complex-text-1`/`-2`, `clipping-with-complex-text-and-clip-rule`,
-99.94–99.97% each).  The `objectBoundingBox` precision fix adds the last three:
-`clip-path-with-transform` and `transform-on-clipPath` 98.30% → **99.97%**,
-`structure/transform-origin/on-clippath-objectBoundingBox` 96.60% → **99.82%**,
-and `clipPathUnits=objectBoundingBox` improves 99.50% → 99.99% inside its pass.
+47 newly passing, **0 newly failing**, no directory below main's count, measured
+in two steps.  The clip merge itself accounts for 44, which includes the four
+text-clip fixtures that are now real tests rather than hollow ones
+(`clipping-with-text`, `clipping-with-complex-text-1`/`-2`,
+`clipping-with-complex-text-and-clip-rule`, 99.94–99.97% each).  The
+`objectBoundingBox` precision fix then adds 3 on top:
+`clip-path-with-transform` and `transform-on-clipPath` 98.30% → **99.97%**, and
+`structure/transform-origin/on-clippath-objectBoundingBox` 96.60% → **99.82%**;
+it also improves `clipPathUnits=objectBoundingBox` 99.50% → 99.99% inside its
+existing pass.
 
 Remaining `masking/clip*` failures, one line each:
 
