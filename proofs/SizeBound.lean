@@ -241,61 +241,58 @@ theorem encode_size_le' (w h : Nat) (rgba : ByteArray) (C : Nat)
 /-- `zlibStoredRows` appends at most `11 + 6 * raw` bytes, where
 `raw = h * (rowBytes + 1)` is the filtered-scanline size.
 
-**Not proved yet, and the reason is sharper than "loops are awkward".**
+**Not proved yet, but the route changed on 2026-09-21** when Rowan relaxed
+the requirement: a bound of 2-3x the image is fine, the goal being "you will
+not fill your hard drive", not a tight number.
 
-The obvious invariant does not work, and it is worth knowing why before
-anyone tries again. Write `base` for the starting size and `k = pos / 65535`.
-The natural guess is
+That removes the hard part entirely. The tight bound needed an invariant
+conditional on `pos % 65535`, because a block header adds 5 bytes *without*
+advancing `pos`, so a position-only bound cannot stop that branch firing
+repeatedly. A loose bound does not care: **the header can fire at most once
+per loop iteration**, and the iteration counts are known up front. So the
+flat `forIn_measure_le` above suffices and no conditional invariant is
+needed.
 
-  `P (o, pos) := o.size ≤ base + 2 + pos + 5 * (k + 1)`
+The arithmetic, with `pieces = rowBytes / 65535 + 2`:
 
-and it survives every data byte: one byte written, `pos` up by one, allowance
-up by one. It fails on the block header. A header adds 5 bytes to `o.size`
-*without advancing `pos`*, so from the invariant's point of view nothing
-stops that branch firing again and again at the same position. No amount of
-constant slack fixes this — the bound has to rule out repetition, not absorb
-it.
+  - inner step: at most one header (5) plus a copy of at most 65535, so
+    65540; `size_copySlice_append_le` gives the copy;
+  - inner loop: `pieces * 65540`;
+  - outer step: one header (5), one filter byte (1), one inner loop;
+  - outer loop: `h * (6 + pieces * 65540)`;
+  - plus 2 zlib header, 4 Adler-32, 5 for the empty-stream block.
 
-In the code it cannot repeat: a header is only emitted when
-`pos % 65535 = 0`, and it is always immediately followed by a write that
-advances `pos` (in the inner loop the copy length is
-`min (65535 - pos % 65535) (stop - off)`, which is non-zero exactly when a
-header was just written). But that argument has to appear in the invariant,
-which therefore has to be conditional on the residue:
+For a full-width canvas this lands near 2x the true size, which is what was
+asked for. For a narrow one it is looser, because the per-step bound charges
+65535 for a copy that is really `rowBytes`; still a constant cap, which is
+the point.
 
-  `P (o, pos) := (pos % 65535 = 0 → o.size ≤ base + 2 + pos + 5 * k)`
-  `           ∧ (pos % 65535 ≠ 0 → o.size ≤ base + 2 + pos + 5 * (k + 1))`
+**The measure also dissolves the term-duplication problem.** Do-notation
+duplicates the inner `forIn` once per tuple projection, but the size measure
+only ever projects `.fst`, so the second copy is never looked at.
 
-The first conjunct is the "header not yet written for this block" state and
-carries exactly the 5 bytes of slack the header will consume. Checked at the
-inner-loop body boundary where `n = 65535` the two conjuncts hand off
-correctly, with equality.
+**Progress so far**, in `scratchpad/L5.lean`: `unfold` then `simp only` with
+`Id.run`, a local `hbind` (`e >>= k = k e` in `Id`, by `rfl`), and
+`Std.Legacy.Range.forIn_eq_forIn_range'` reduces the goal to explicit
+projections on two `forIn`s over `List.range'`. `[:h].size = h` needs
+`simp [Std.Legacy.Range.size]`, not `rfl`. `forIn_measure_le` then applies
+with the measure given explicitly as `fun s : ByteArray × Nat => s.1.size`,
+which keeps unification first-order.
 
-That is provable. It is not a few lines. Estimate 150–250 lines across the
-two nested loops, most of it residue arithmetic rather than anything deep.
+What is left is plumbing, not insight: push `hpure` through the two branches
+of the `rawSize == 0` split, then discharge the two per-step obligations.
+Both steps are `Nat` arithmetic over `size_blockHeader`,
+`ByteArray.size_push` and `size_copySlice_append_le`, all three proved above.
 
-**The second obstacle is still there too.** Unfolding shows do-notation
-duplicates the entire inner `forIn` term, once per tuple projection, so the
-outer body carries two copies that must stay in step. `generalize` should
-abstract both at once since they are syntactically identical, but that is
-untested.
-
-**lean-zip does not help here.** It has no output-size theorems at all — its
-specifications are about round-tripping, CRC properties and Huffman prefix-
-freeness. Its level 0 does emit stored blocks like ours, but adopting its
-encoder would change our output bytes, break corpus byte-identity, and make
-it a runtime dependency with C primitives. It would cost the README's "no
-dependencies, no FFI" line and still not supply the theorem.
-
-`PLAN.md` recommends rewriting this function as explicit recursion with
-`termination_by` before proving anything about it. That remains the cheaper
-route: it removes the term duplication entirely and turns the loop induction
-into ordinary structural recursion on `Nat`. It is a change to real encoding
-code, so it needs the byte-identity harness afterwards. -/
+**lean-zip does not help.** It has no output-size theorems at all — only
+round-tripping, CRC properties and Huffman prefix-freeness. Its level 0 does
+emit stored blocks like ours, but adopting its encoder would change our
+output bytes, break corpus byte-identity, and add a runtime dependency with C
+primitives. It would cost the README's "no dependencies, no FFI" line and
+still not supply the theorem. -/
 theorem zlibStoredRows_size_le (out rgba : ByteArray) (rowBytes h : Nat) :
     (zlibStoredRows out rgba rowBytes h).size
-      ≤ out.size + 16 + h * (rowBytes + 1)
-          + 5 * (h * (rowBytes + 1) / 65535) := by
+      ≤ out.size + 11 + h * (6 + (rowBytes / 65535 + 2) * 65540) := by
   sorry
 
 /-- The `ByteArray` that `encode` returns is bounded by a function of the
@@ -312,9 +309,9 @@ No longer an independent hole: it now derives from `encode_size_le'` (proved)
 and `zlibStoredRows_size_le` (the one remaining `sorry`). -/
 theorem encode_size_le (w h : Nat) (rgba : ByteArray) :
     (encode w h rgba).size
-      ≤ 73 + h * (w * 4 + 1) + 5 * (h * (w * 4 + 1) / 65535) := by
+      ≤ 68 + h * (6 + (w * 4 / 65535 + 2) * 65540) := by
   have := encode_size_le' w h rgba
-      (16 + h * (w * 4 + 1) + 5 * (h * (w * 4 + 1) / 65535))
+      (11 + h * (6 + (w * 4 / 65535 + 2) * 65540))
       (fun out => by have := zlibStoredRows_size_le out rgba (w * 4) h; omega)
   omega
 
@@ -326,13 +323,13 @@ monotonicity, both of which are arithmetic. -/
 theorem encode_size_le_const (w h : Nat) (rgba : ByteArray)
     (maxDim : Nat) (hw : w ≤ maxDim) (hh : h ≤ maxDim) :
     (encode w h rgba).size
-      ≤ 73 + maxDim * (maxDim * 4 + 1)
-          + 5 * (maxDim * (maxDim * 4 + 1) / 65535) := by
+      ≤ 68 + maxDim * (6 + (maxDim * 4 / 65535 + 2) * 65540) := by
   have hb := encode_size_le w h rgba
-  have hmono : h * (w * 4 + 1) ≤ maxDim * (maxDim * 4 + 1) :=
+  have hdiv : w * 4 / 65535 ≤ maxDim * 4 / 65535 :=
+    Nat.div_le_div_right (by omega)
+  have hmono : h * (6 + (w * 4 / 65535 + 2) * 65540)
+      ≤ maxDim * (6 + (maxDim * 4 / 65535 + 2) * 65540) :=
     Nat.mul_le_mul hh (by omega)
-  have hdiv : h * (w * 4 + 1) / 65535 ≤ maxDim * (maxDim * 4 + 1) / 65535 :=
-    Nat.div_le_div_right hmono
   omega
 
 end LeanSvg.Png.SizeBound
