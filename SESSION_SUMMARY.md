@@ -24,8 +24,31 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   merge and zero-length dots): stroke-dasharray/offset slice 5/23 → 11/23,
   the rest flattening-limited or `em`/percent units; new `23_dashes.svg`
   PASS; all other files byte-identical.
-- Corpus now **19/23** at the strict bar. Failing: 12_badge, 14_flower,
-  15_spiral, 16_stress (all < 1 pt short, curve/stroke antialiasing).
+- **T30 native quadratics** (`PathCmd.quadTo`, tiny-skia `QuadraticEdge`
+  rule, `Q`/`T` no longer elevated): 03_curves +0.33, 12_badge +0.28,
+  15_spiral +0.23, everything else byte-identical; 15_spiral now emits
+  exactly resvg's 532 segments. Note: `shift==0` bumps to 1 (2 segments),
+  as in the Rust, not to a line.
+- **T27 switch/conditionals** (`interpret` rewrite, `passesConditions`):
+  structure/switch 1/13 → 13/13, systemLanguage 4/10 → 6/10 (rest need
+  clipPath, gradients, text). Replicates usvg quirks: unknown tags are not
+  switch candidates, `display:none` winner renders nothing, root `<svg>` is
+  gated too. Corpus byte-identical.
+- **T25 fonts** (`MicroSvg/Font.lean`, pure total TrueType parser: cmap 4/12,
+  glyf simple+composite with fuel, hmtx, kern, GPOS pair adjustment;
+  `MicroSvg/Fonts/{NotoSans,NotoSansBold,NotoSansItalic}.lean` OFL Latin
+  subsets ~32 KB each; `fontdump` debug exe, the only IO, not linked into
+  `microsvg`): exact match vs fontTools on 431/431 subset glyphs ×3 and
+  2791/2791 full-font glyphs; fuzz 2000/2000 clean. Renderer untouched.
+- **Font demo** (`tests/out/fontdemo/`, built by the scratch script
+  `fontdemo.py`; served by `.claude/launch.json` config `reports` on port
+  8767): "Hello, fonts! AVAWAY fjord" as paths from `fontdump --embedded`
+  vs resvg `<text>` with the same TTF. **Layout is pixel-exact** (resvg on
+  our paths == resvg on `<text>`, 100% identical). Our rasteriser on those
+  paths: 96.3% exact, and *no* pixels within 1–8, max diff 255 → to
+  investigate (flipped `scale(k -k)` transform + native quads? see T31 note).
+- Corpus now **19/23** at the strict bar. Failing: 12_badge 98.56, 14_flower
+  97.81, 15_spiral 97.48, 16_stress 97.48 (curve/stroke antialiasing).
 
 Design decisions today: fonts ship embedded (OFL Noto Sans subsets) and the
 TrueType parser is a pure total function `bytes → outlines`, so the effect
@@ -39,10 +62,7 @@ agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 
 | task | model | branch | what | merge check |
 |---|---|---|---|---|
-| T25 fonts | Sonnet | `t25-fonts` | `MicroSvg/Font.lean` pure total TrueType parser, embedded Noto Sans subsets, `fontdump` exe, fontTools oracle + fuzz | 0 mismatches vs fontTools, fuzz clean, corpus byte-identical |
-| T27 switch | Sonnet | `t27-switch` | `<switch>`, `systemLanguage`, required* in `interpret` | structure/switch ≥10/13, systemLanguage ≥8/10 |
 | T29 CSS | Sonnet | `t29-css` | `MicroSvg/Css.lean` (simplecss subset), `<style>` integration in `interpret`, `tests/CssTests.lean` `#guard`s | structure/style ≥13/16 |
-| T30 quadratics | Sonnet | `t30-quads` | `PathCmd.quadTo` + tiny-skia `QuadraticEdge` rule; `Q`/`T` no longer elevated | no file drops > 0.02; usvg-route medians not lower |
 | T24b | Sonnet | `t24b-transform-origin` | `transform-origin`, percent root `width`/`height` | structure/transform-origin ≥80%, structure/svg up |
 
 If a report arrives after the break, merge with:
@@ -60,6 +80,19 @@ the task file and worktree with the same model.
 
 1. Merge whatever landed; refresh corpora numbers with
    `python3 tests/run_corpora.py --fast --out tests/out/corpora-fast`.
+1b. **T31 (Opus when usage allows) edge rounding.** Found via the font demo:
+   a plain `<rect x=100 width=300 height=700 transform="translate(20 110)
+   scale(0.072 0.072)">` (positive or flipped scale, rect or path, same
+   result) differs from resvg on 142 px, all by whole quarter-steps
+   (63/96/127/128/176 levels) → one supersample row/column off on straight
+   edges at fractional positions. Quads differ by 1/16 steps (15/16/31/32),
+   the known flattening residual. Check `Raster.mkEdge` top/bottom rounding
+   against tiny-skia `LineEdge::new` (`fdot6::round`, the `(y+32)>>6` rule
+   and the `SHIFT` handling in `edge_builder`), and whether tiny-skia takes
+   the `fill_rect` exact-area path for rect-shaped paths. Repro SVGs: the
+   six cases in the scratch script `fontdemo.py`'s sibling run (see summary
+   text above); rebuild with any 0.072-scaled rect. This likely explains a
+   chunk of the 12_badge/14_flower/16_stress residual too.
 2. Wave 2 (Opus, one at a time): **T19** defs table + `use`/`symbol`
    (`interpret`; after T27/T29), then **T22** group opacity as a layer.
 3. Sonnet-eligible leftovers: paint-order and crispEdges (after T23), nested

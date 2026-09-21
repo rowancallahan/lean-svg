@@ -573,10 +573,7 @@ def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
         if up == 113 then p 0
         else if nextQ () then ⟨2 * cur.x - lastQ.x, 2 * cur.y - lastQ.y⟩ else cur
       let q := if up == 113 then p 2 else p 0
-      -- exact degree elevation: c1 = cur + 2/3 (qc − cur), c2 = q + 2/3 (qc − q)
-      let c1 : Pt := ⟨cur.x + Int.ediv (2 * (qc.x - cur.x)) 3, cur.y + Int.ediv (2 * (qc.y - cur.y)) 3⟩
-      let c2 : Pt := ⟨q.x + Int.ediv (2 * (qc.x - q.x)) 3, q.y + Int.ediv (2 * (qc.y - q.y)) 3⟩
-      out := out.push (.cubicTo c1 c2 q)
+      out := out.push (.quadTo qc q)
       lastQ := qc
       prevWasQ := true
       cur := q
@@ -776,27 +773,92 @@ def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
     height := (attr attrs "height").bind parseLengthAll,
     viewBox := vb }
 
+/-- SVG conditional processing on `attrs`: `systemLanguage`, `requiredFeatures`,
+`requiredExtensions`.  Matches usvg's `is_condition_passed`
+(`crates/usvg/src/parser/switch.rs`).
+
+`requiredExtensions` present at all always fails the element, since we
+support none.  `requiredFeatures` is a space-separated list (never trimmed,
+never collapsed: an empty value or a stray double space produces an empty
+token, same as Rust's `str::split(' ')`); every token must be one of usvg's
+own hard-coded SVG 1.1 Feature Strings — what *usvg* claims to implement, not
+what *we* happen to — or the element is skipped.  `systemLanguage` is a
+comma-separated list; it passes if some entry, after trimming, equals `en` or
+starts with `en-` (usvg's default `languages = ["en"]`); an empty value has
+no matching entry, so it fails.  Either attribute absent passes that check. -/
+def passesConditions (attrs : Array Xml.Attr) : Bool := Id.run do
+  if (attr attrs "requiredExtensions").isSome then return false
+  match attr attrs "requiredFeatures" with
+  | some v =>
+    let features : List String :=
+      ["http://www.w3.org/TR/SVG11/feature#SVGDOM-static",
+       "http://www.w3.org/TR/SVG11/feature#SVG-static",
+       "http://www.w3.org/TR/SVG11/feature#CoreAttribute",
+       "http://www.w3.org/TR/SVG11/feature#Structure",
+       "http://www.w3.org/TR/SVG11/feature#BasicStructure",
+       "http://www.w3.org/TR/SVG11/feature#ContainerAttribute",
+       "http://www.w3.org/TR/SVG11/feature#ConditionalProcessing",
+       "http://www.w3.org/TR/SVG11/feature#Image",
+       "http://www.w3.org/TR/SVG11/feature#Style",
+       "http://www.w3.org/TR/SVG11/feature#Shape",
+       "http://www.w3.org/TR/SVG11/feature#Text",
+       "http://www.w3.org/TR/SVG11/feature#BasicText",
+       "http://www.w3.org/TR/SVG11/feature#PaintAttribute",
+       "http://www.w3.org/TR/SVG11/feature#BasicPaintAttribute",
+       "http://www.w3.org/TR/SVG11/feature#OpacityAttribute",
+       "http://www.w3.org/TR/SVG11/feature#GraphicsAttribute",
+       "http://www.w3.org/TR/SVG11/feature#BasicGraphicsAttribute",
+       "http://www.w3.org/TR/SVG11/feature#Marker",
+       "http://www.w3.org/TR/SVG11/feature#Gradient",
+       "http://www.w3.org/TR/SVG11/feature#Pattern",
+       "http://www.w3.org/TR/SVG11/feature#Clip",
+       "http://www.w3.org/TR/SVG11/feature#BasicClip",
+       "http://www.w3.org/TR/SVG11/feature#Mask",
+       "http://www.w3.org/TR/SVG11/feature#Filter",
+       "http://www.w3.org/TR/SVG11/feature#BasicFilter",
+       "http://www.w3.org/TR/SVG11/feature#XlinkAttribute"]
+    let mut i := 0
+    for _ in [0:v.size + 1] do
+      if i > v.size then break
+      let j := findByte v i 32
+      let tok := v.extract i j
+      if !(features.any fun f => eqAscii tok f) then return false
+      i := j + 1
+  | none => pure ()
+  match attr attrs "systemLanguage" with
+  | some v =>
+    let mut matched := false
+    for e in splitTrim v 44 do
+      if eqAscii e "en" || startsWith e 0 "en-" then
+        matched := true
+        break
+    if !matched then return false
+  | none => pure ()
+  return true
+
 /-- Walk the event stream with a style stack.
 
-T29 adds CSS from `<style>` elements.  Every `<style>` in the document
-contributes, including ones after an element that uses their classes, so the
-stylesheet is collected in one pass over `events` *before* the main walk
-(`combinedCss`, gated on the element's `type` attribute being absent, empty,
-or `text/css`; multiple `<style>`s, and CDATA-vs-plain-text chunks within
-one, are simply concatenated in document order — CSS is whitespace
-insensitive at chunk boundaries so a separator byte is enough).  The main
-walk keeps a second stack, `elemStack`/`childCounts`, in exact lockstep with
-the existing `Style` stack (pushed/popped in the same three places: root,
-`g`, shape; left alone while `skip > 0`, same as `stack`) to build each
-element's ancestor `Css.ElemInfo` chain and its `:first-child` flag.
+T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
+(`combinedCss`) before the main walk.  A second stack, `elemStack`/
+`childCounts`, is kept in exact lockstep with the existing `Style` stack
+(pushed/popped in the same three places: root, `g`, shape; left alone while
+`skip > 0`) to build each element's ancestor `Css.ElemInfo` chain and its
+`:first-child` flag.  `applyEffective` replaces the old `applyAttrs` call at
+all three sites with the four-layer cascade: presentation attributes, then
+non-important CSS, then the `style=""` attribute, then `!important` CSS,
+with `color` still resolved first from whichever layer wins.
 
-`applyEffective` replaces the old `applyAttrs` call at all three sites with
-the four-layer cascade the task asks for: presentation attributes, then
-non-important CSS, then the `style=""` attribute, then `!important` CSS.
-`color` is still special-cased to resolve first — from whichever of the four
-layers wins — exactly as `applyAttrs` already did for its two layers, so
-`currentcolor` on `fill`/`stroke` never sees a stale value regardless of
-which layer sets `color`. -/
+T27 adds a third stack, `switchSel`, kept the same size as `stack` and
+pushed/popped together, tracking what a `<switch>` ancestor demands of its
+direct children: `none` (unfiltered), `some none` (switch with no passing
+child, all children skipped), or `some (some j)` (only the direct child
+whose `.open_` event is at index `j` may render).  `g`, `switch`, shape
+elements and the root `<svg>` all also check `passesConditions attrs`
+alongside `isDisplayNone`.  A `<switch>` that passes its own checks runs a
+bounded forward lookahead to find the first direct child whose tag usvg
+recognises and whose own `passesConditions` holds; that index becomes its
+`switchSel` target.  All three stacks move together at every push/pop site
+so CSS resolution and switch selection never drift out of sync. -/
 def interpret (events : Array Xml.Event) : Except String Doc := do
   let combinedCss : ByteArray := Id.run do
     let mut out := ByteArray.empty
@@ -847,11 +909,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let mut stack : Array Style := #[]
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
+  let mut switchSel : Array (Option (Option Nat)) := #[]
   let mut skip : Nat := 0
   let mut shapes : Array Shape := #[]
   let mut root : Option RootInfo := none
-  for ev in events do
-    match ev with
+  for idx in [0:events.size] do
+    match events.getD idx default with
     | .text _ => pure ()
     | .close =>
       if skip > 0 then skip := skip - 1
@@ -859,6 +922,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         stack := stack.pop
         elemStack := elemStack.pop
         childCounts := childCounts.pop
+        switchSel := switchSel.pop
     | .open_ name attrs =>
       if skip > 0 then
         skip := skip + 1
@@ -874,18 +938,71 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
           root := some (parseRoot attrs)
-          stack := stack.push (applyEffective default attrs chain)
-          elemStack := chain
-          childCounts := childCounts.push 0
+          if isDisplayNone attrs || !passesConditions attrs then
+            skip := 1
+          else
+            stack := stack.push (applyEffective default attrs chain)
+            elemStack := chain
+            childCounts := childCounts.push 0
+            switchSel := switchSel.push none
         | some _ =>
-          if name == "g" then
-            if isDisplayNone attrs then skip := 1
+          let allowed := match switchSel.back?.getD none with
+            | none => true
+            | some none => false
+            | some (some target) => idx == target
+          if !allowed then skip := 1
+          else if name == "g" then
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               stack := stack.push (applyEffective parent attrs chain)
               elemStack := chain
               childCounts := childCounts.push 0
+              switchSel := switchSel.push none
+          else if name == "switch" then
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              -- First direct child (depth 0 relative to this `switch`) whose
+              -- own conditional-processing attributes pass; `none` if the
+              -- switch closes with no such child.  Tag support and
+              -- `display:none` are deliberately not considered here, only
+              -- checked once we reach that child below (matching usvg: the
+              -- switch commits to this child regardless).
+              --
+              -- usvg's `svgtree` drops any element with an unrecognised tag
+              -- name (and `<style>`, special-cased) while building its tree,
+              -- before `switch`'s own child search ever runs, so such a
+              -- child is not a candidate at all here either (`non-SVG-
+              -- child.svg`: `switch` skips straight past `<random/>` to the
+              -- next real child) — every other SVG 1.1 element name usvg
+              -- knows still is, whether or not *we* render it.
+              let svgTagNames : List String :=
+                ["a", "circle", "clipPath", "defs", "ellipse", "feBlend", "feColorMatrix",
+                 "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting",
+                 "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
+                 "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge",
+                 "feMergeNode", "feMorphology", "feOffset", "fePointLight", "feSpecularLighting",
+                 "feSpotLight", "feTile", "feTurbulence", "filter", "g", "image", "line",
+                 "linearGradient", "marker", "mask", "path", "pattern", "polygon", "polyline",
+                 "radialGradient", "rect", "stop", "svg", "switch", "symbol", "text", "textPath",
+                 "tref", "tspan", "use"]
+              let target : Option Nat := Id.run do
+                let mut depth : Nat := 0
+                for j in [idx + 1 : events.size] do
+                  match events.getD j default with
+                  | .close =>
+                    if depth == 0 then return none else depth := depth - 1
+                  | .open_ cname cattrs =>
+                    if depth == 0 && svgTagNames.contains cname && passesConditions cattrs then
+                      return some j
+                    else depth := depth + 1
+                  | .text _ => pure ()
+                return none
+              stack := stack.push (applyEffective parent attrs chain)
+              elemStack := chain
+              childCounts := childCounts.push 0
+              switchSel := switchSel.push (some target)
           else if isShape name then
-            if isDisplayNone attrs then skip := 1
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let st := applyEffective parent attrs chain
               match shapeCmds name attrs with
@@ -894,6 +1011,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               stack := stack.push st
               elemStack := chain
               childCounts := childCounts.push 0
+              switchSel := switchSel.push none
           else
             skip := 1
   match root with
