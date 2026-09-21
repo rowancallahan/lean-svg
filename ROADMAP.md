@@ -287,12 +287,95 @@ first would de-risk that change.
 creep in unnoticed. Small, and arguably should come before either of the
 above, since it protects what already exists.
 
-## 4. Suggested order, if picking this up again
+### 3d. The five that actually matter
+
+Rowan's own ordering, stated 2026-09-21: no clobbering; one input and one
+output; no arbitrary running; no arbitrary image size; no arbitrary image
+input. PNG validity and locality both rank below these.
+
+**All five are already designed.** They are `PLAN.md` M3 and M3b, and none of
+them needs fresh design work — only the proof grind. Restating them here with
+difficulty, since that is what was missing:
+
+| # | property | where | effort | note |
+|---|---|---|---|---|
+| 1 | max input size | M3b.4 | ~half a day | a real theorem for almost no proof burden |
+| 2 | input ≠ output | M3b.0 | free | subsumed by no-clobber |
+| 3 | no clobbering | M3b.1 | 1–2 days | needs the model change |
+| 4 | output size exact, then bounded | M3, M3b.2 | ~1 week, then a day | the grind |
+| 5 | bounded work | M3b.3 | see below | the weak one |
+
+**Start with (1).** `render` rejects an oversized input before parsing, and
+the theorem is one line. It is the cheapest complete theorem available and a
+good way back in.
+
+**(3) is the centrepiece.** It requires changing the model from
+`FS := String → ByteArray` to `String → Option ByteArray` and adding
+`Op.outputExists`, because today every path has contents and "this file
+already exists" is not expressible. The six existing theorems then need
+re-proving against the new model, which is mechanical rather than hard. The
+trusted `execIO` grows from six lines to about eight, gaining one
+`pathExists` call. This is also the exercise sitting in
+`learn/hello-effects/Step3NoClobber.lean`.
+
+**(4) is where the time goes**, and it is the same `forIn` pain as the
+locality theorem in 3b: `Png.zlibStored` and `Png.encode` want rewriting as
+explicit recursion with `termination_by` before anything can be proved about
+their sizes. Doing 3b first would make this cheaper, and vice versa. They
+share the idiom.
+
+**(5) is the weakest of the five and worth saying so.** Totality already
+guarantees termination; this would bound *duration*, which is arguably
+operational rather than a proof obligation. Fuel threaded through `render` is
+pure and provable but invasive, touching every hot loop and costing
+performance. A wall-clock cap in the trusted shell is three lines but is not
+a theorem and grows the trusted core. Worth noting that invariant 3 (every
+loop bounded by input size or a constant) plus (1) plus the existing
+dimension checks already give a finite bound *structurally* — turning that
+argument into a theorem is the real work, and it is large.
+
+## 4. A cleaner way to take lean-zip: proof-time, not run-time
+
+Rowan wants lean-zip optional. There is a better shape than optional, and it
+removes the trade in 3a entirely.
+
+**The encoder already emits stored DEFLATE blocks, and stored blocks are
+ordinary RFC 1951.** Any conforming inflate reads them, lean-zip's included.
+So lean-zip never has to ship in the binary:
+
+- **Core package.** Unchanged. Zero dependencies, zero FFI, stored blocks.
+  This is what `lake build` produces and what users run.
+- **Proof package.** A separate Lake package, since `require` is
+  package-level, living in something like `proofs/png/` with its own
+  lakefile. It depends on both lean-svg and lean-zip, and proves that
+  lean-zip's *verified* inflate reads our output back correctly:
+
+  ```
+  ZlibDecode.decompress (idatPayload (Png.encode px w h)) = .ok (rows px w h)
+  ```
+
+CI builds both; the shipped binary links neither lean-zip nor any C.
+
+The claim this buys is strong and easy to state: *a formally verified DEFLATE
+decoder, written by someone else, reads our output back to exactly the pixels
+we put in.* The README keeps "no FFI, no dependencies" without an asterisk,
+because the dependency exists only while checking the proof.
+
+The remaining piece is the container layer, which lean-zip does not cover:
+signature, chunk framing, CRC-32, IHDR fields. That is ours to write and
+prove, and it is the easy layer.
+
+If real compression is ever wanted for size reasons, that is the point at
+which lean-zip becomes a genuine runtime dependency and the trade in 3a comes
+back. Not before.
+
+## 5. Suggested order, if picking this up again
 
 1. T43, CI proofs. Small, protects the six theorems that already hold.
-2. The PNG round-trip theorem. About a week. Check first whether lean-zip's
-   pure-Lean path is separable from its four C primitives, since that decides
-   which of the three options in 3a is available.
-3. The locality theorem, cheap half. One week.
-4. Then decide whether features or the expensive half of locality is worth
-   more.
+2. M3b.4, max input size. Half a day, and a complete theorem.
+3. M3b.1, no-clobber, with the model change. The centrepiece.
+4. M3, output shape. The grind, and it unlocks M3b.2.
+5. The PNG round trip, as a separate proof-time package per section 4.
+6. The locality theorem, cheap half. Shares the loop idiom with (4).
+
+Features rank below all of these unless the goal changes.
