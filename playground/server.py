@@ -459,6 +459,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "bad Content-Length"})
             return
         if length > API_MAX_BODY:
+            # The body is never read, so drop the connection rather than let
+            # its leftover bytes be parsed as the next keep-alive request.
+            self.close_connection = True
             self._json(413, {
                 "error": "request body too large (limit %d MB)" % (API_MAX_BODY // (1024 * 1024))
             })
