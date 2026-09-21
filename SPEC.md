@@ -18,8 +18,29 @@ EOF
 ```
 
 `[propext]` means propositional extensionality only, which is part of Lean's
-foundations. `sorryAx` would mean a hole. As of this writing every theorem
-below reports `[propext]`.
+foundations. Lean has three standard axioms — `propext`, `Quot.sound` and
+`Classical.choice` — and any of the three is ordinary; Mathlib rests on all
+of them. `sorryAx` is the one that matters: it means a hole, and a theorem
+reporting it proves nothing. As of this writing every theorem in section 1
+reports `[propext]`.
+
+## These proofs have not been independently reviewed
+
+Read this before relying on anything below.
+
+The axiom list tells you a proof has no holes. It does not tell you the
+theorem says what you want, and that is the harder question. A flawless proof
+of the wrong statement is worthless, and this specification has already
+contained one: `runFS_frame` is true and was for a time described as "only
+touches the two files you named", which it does not establish — see section 4
+on input and output paths.
+
+So the statements themselves need checking by a human, line by line, against
+what a reader would take them to mean. That review has not happened yet.
+Until it does, treat section 1 as *claims whose proofs check*, not as
+*guarantees*. The model in `LeanSvg/Effect.lean` and the six-line
+`Prog.execIO` deserve the most scrutiny, because everything else is stated
+relative to them.
 
 ---
 
@@ -102,7 +123,14 @@ Lean here. The encoder is ordinary code, tested against a real decoder.
 
 **The output size is not proved bounded.** `render` checks dimensions at
 runtime, but no theorem relates the returned `ByteArray`'s length to them.
-Planned as M3 in `PLAN.md`.
+
+Work in progress in `proofs/SizeBound.lean`, which is deliberately outside the
+`LeanSvg` library so its holes cannot reach `lake build`. Current state: the
+supporting lemmas are proved, and the two theorems that would actually
+establish the bound are `sorry`, so they report `sorryAx` and prove nothing
+yet. The intended statement is about the `ByteArray` that `Png.encode`
+returns, not about the file on disk — what the operating system does with
+those bytes is outside the model either way.
 
 **No-clobber is not proved, and cannot currently be stated.** The model says
 `FS := String → ByteArray`: every path has contents, so a missing file reads as

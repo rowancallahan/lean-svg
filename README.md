@@ -69,6 +69,13 @@ python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
   of what is *not* proven.
 - `learn/` — a standalone hello-world project that builds the effect monad from scratch, with an exercise (kept locally, not tracked in this repository).
   scratch, with an exercise: prove no-clobber yourself.
+- `proofs/` — proof work in progress, kept outside the `LeanSvg` library so
+  that unfinished proofs cannot reach `lake build`. `SizeBound.lean` is an
+  attempt at an output-size bound: the supporting lemmas check, the two
+  theorems that would establish the bound are still holes. Nothing here is a
+  claim yet.
+- `ROADMAP.md` — features remaining, and difficulty estimates for the
+  theorems not yet attempted.
 - `DESIGN.md` — what is proven, what is trusted, threat model, algorithms.
 - `PLAN.md` — milestones, settled decisions, what to delegate.
 

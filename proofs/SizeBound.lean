@@ -1,6 +1,34 @@
 /-
 # Output size upper bound — working file
 
+## STATUS: NOT PROVED. DO NOT CITE THIS AS A GUARANTEE.
+
+`zlibStoredRows_size_le` and `encode_size_le` are `sorry`. They report
+`sorryAx` and establish nothing. `encode_size_le_const` is stated in terms of
+`encode_size_le`, so it inherits the hole.
+
+Proved and hole-free: `forIn_invariant`, `forIn_measure_le`,
+`size_copySlice_append_le`, `size_blockHeader`. These report `[propext,
+Quot.sound]`, or `[propext]` for `size_blockHeader`. `Quot.sound` is one of
+Lean's three standard axioms and arrives from core's `List.forIn_cons` and
+`Array.size_append`; it is not a hole.
+
+Check for yourself:
+
+    lake env lean proofs/SizeBound.lean          -- expect exactly 2 sorry warnings
+
+The statements below also need reading by a human against what they ought to
+say. A correct proof of the wrong statement is worth nothing, and the bound
+here was already wrong once in a way the kernel would never have caught: an
+earlier version claimed `6 * raw`, which is true but six times looser than
+the encoder deserves. See "The bound" below.
+
+## Scope
+
+The theorems are about the `ByteArray` that `Png.encode` returns. They say
+nothing about the file on disk. What the operating system does with those
+bytes is outside the model, and deliberately so.
+
 Not part of the `LeanSvg` library, so `lake build` does not see it and the
 `sorry` below does not break invariant 5. Check it with:
 
