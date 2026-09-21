@@ -60,6 +60,24 @@ structure Style where
   before any other property so the resolution sees the element's own
   value). -/
   color : Rgba := ⟨0, 0, 0, 255⟩
+  /-- Whether `pctRefW`/`pctRefH` have been established yet.  False only for
+  the literal `default : Style` that `interpret` passes as the parent of the
+  root `<svg>` element itself; every other `Style` inherits `true` and the
+  values below unchanged, since this renderer has no nested `<svg>`/`<symbol>`
+  to rescope them. -/
+  pctRefSet : Bool := false
+  /-- The rect `transform-origin` percentages resolve against: usvg's
+  per-element `state.view_box`, which is the same constant rect (the root's
+  `viewBox`, or else its own resolved size) for every element in a document
+  with no nested `<svg>`. Set once in `applyAttrs`, from the root's own attrs. -/
+  pctRefW : Fx := 0
+  pctRefH : Fx := 0
+  /-- `transform-origin`'s resolved offset, *not* inherited: every element
+  gets its own, reset to `(0, 0)` (a no-op) unless this element itself has the
+  property.  `applyProp`'s `"transform"` case wraps its matrix with
+  `translate(originDx, originDy) · _ · translate(-originDx, -originDy)`. -/
+  originDx : Fx := 0
+  originDy : Fx := 0
   ctm : Mat := Mat.identity
 deriving Repr, Inhabited
 
@@ -69,8 +87,10 @@ structure Shape where
 deriving Inhabited
 
 structure RootInfo where
-  width : Option Fx := none
-  height : Option Fx := none
+  /-- The raw parsed number and whether it was a percentage (`resolveRootSize`
+  resolves it against the `viewBox` or the 100×100 default). -/
+  width : Option (Fx × Bool) := none
+  height : Option (Fx × Bool) := none
   viewBox : Option (Fx × Fx × Fx × Fx) := none
 deriving Inhabited
 
@@ -636,6 +656,164 @@ def lengthAttr (attrs : Array Xml.Attr) (name : String) (dflt : Fx) : Fx :=
   | some v => (parseLengthAll v).getD dflt
   | none => dflt
 
+/-- A length or percentage at a byte offset -- like `parseLength` (which this
+wraps for every non-percent unit), except it also accepts `%`: there is no
+reference to resolve it against here, so the raw `N` of `N%` is returned
+alongside the flag, and the caller resolves it against whatever the SVG spec
+names for that attribute (`resolvePct`). -/
+def parseLenPctAt (bs : ByteArray) (i : Nat) : Option (Fx × Bool × Nat) :=
+  match parseNumber bs i with
+  | none => none
+  | some (v, j) =>
+    if at' bs j == 37 then some (v, true, j + 1)
+    else match parseLength bs i with
+      | some (v', j') => some (v', false, j')
+      | none => none
+
+/-- Parse a whole attribute value as a length or a percentage. -/
+def parseLengthOrPercent (bs : ByteArray) : Option (Fx × Bool) :=
+  let t := trim bs
+  match parseLenPctAt t 0 with
+  | some (v, pct, j) => if j == t.size then some (v, pct) else none
+  | none => none
+
+/-- Resolve a length-or-percentage pair (as `parseLengthOrPercent`/
+`parseLenPctAt` return it) against a reference length: usvg's `convert_length`
+for `Units::UserSpaceOnUse` (`crates/usvg/src/parser/units.rs`), i.e. the raw
+number times the reference over 100, floor-divided like every other unit
+conversion in `parseLength`; unchanged if it was not a percentage. -/
+def resolvePct (l : Fx × Bool) (ref : Fx) : Fx :=
+  if l.2 then Int.ediv (l.1 * ref) 25600 else l.1
+
+/-- Resolve the root element's natural (pre-`--width`/`--zoom`) size in user
+units from `width`, `height` and `viewBox`, matching usvg's `resolve_svg_size`
+(`crates/usvg/src/parser/converter.rs`, `get_svg_size`): a percentage on
+either axis resolves against the matching `viewBox` dimension when a
+`viewBox` is present, or against the 100×100 default otherwise
+(`Options::default_size`); when exactly one of `width`/`height` is given and a
+`viewBox` is present, the other is derived from the `viewBox`'s aspect ratio,
+exactly as before this task. `none` means the size cannot be determined (one
+of `width`/`height` given, the other entirely absent, no `viewBox`) -- unlike
+usvg we do not fall back to a bounding-box refit here (a separate, bigger
+feature; see T24a's `Report` on `no-size.svg`), so the caller keeps failing
+exactly as it did before percentages existed. -/
+def resolveRootSize (root : RootInfo) : Option (Fx × Fx) :=
+  match root.width, root.height, root.viewBox with
+  | some w, some h, some (_, _, vw, vh) => some (resolvePct w vw, resolvePct h vh)
+  | some w, some h, none => some (resolvePct w (Fx.ofNat 100), resolvePct h (Fx.ofNat 100))
+  | some w, none, some (_, _, vw, vh) =>
+    let wv := resolvePct w vw
+    some (wv, if vw > 0 then Int.ediv (wv * vh) vw else wv)
+  | none, some h, some (_, _, vw, vh) =>
+    let hv := resolvePct h vh
+    some (if vh > 0 then Int.ediv (hv * vw) vh else hv, hv)
+  | none, none, some (_, _, vw, vh) => some (vw, vh)
+  | none, none, none => some (Fx.ofNat 100, Fx.ofNat 100)
+  | _, _, _ => none
+
+def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
+  let vb := match attr attrs "viewBox" with
+    | some v =>
+      let ns := parseNumberList v
+      if ns.size == 4 then some (ns.getD 0 0, ns.getD 1 0, ns.getD 2 0, ns.getD 3 0) else none
+    | none => none
+  { width := (attr attrs "width").bind parseLengthOrPercent,
+    height := (attr attrs "height").bind parseLengthOrPercent,
+    viewBox := vb }
+
+/-! ## `transform-origin` -/
+
+/-- One `transform-origin` token: a directional keyword or a length/percentage
+(the raw number and whether it was a percentage, as `parseLenPctAt` returns
+it).  Mirrors svgtypes' `Position`/`DirectionalPosition`
+(`transform_origin.rs`, `directional_position.rs`): a length is usable on
+either axis, while a keyword is usable only on the axis(es) its name implies
+(`center` on both). -/
+inductive OriginTok where
+  | len (v : Fx) (isPct : Bool)
+  | left
+  | right
+  | top
+  | bottom
+  | center
+deriving Inhabited
+
+def OriginTok.isHoriz : OriginTok → Bool
+  | .top => false
+  | .bottom => false
+  | _ => true
+
+def OriginTok.isVert : OriginTok → Bool
+  | .left => false
+  | .right => false
+  | _ => true
+
+/-- Usable as *either* axis without being a directional keyword: a length, or
+`center` (svgtypes' `check`). -/
+def OriginTok.isCheck : OriginTok → Bool
+  | .len _ _ => true
+  | .center => true
+  | _ => false
+
+/-- As a length/percentage (`From<Position> for Length` /
+`From<DirectionalPosition> for Length` in svgtypes): `left`/`top` are `0%`,
+`right`/`bottom` are `100%`, `center` is `50%`. -/
+def OriginTok.asLen : OriginTok → Fx × Bool
+  | .len v p => (v, p)
+  | .left => (0, true)
+  | .top => (0, true)
+  | .right => (Fx.ofNat 100, true)
+  | .bottom => (Fx.ofNat 100, true)
+  | .center => (Fx.ofNat 50, true)
+
+def parseOriginTok (bs : ByteArray) (i : Nat) : Option (OriginTok × Nat) :=
+  if isAlpha (at' bs i) then
+    let ne := skipWhile bs i isAlpha
+    let w := bs.extract i ne
+    if eqAscii w "left" then some (.left, ne)
+    else if eqAscii w "right" then some (.right, ne)
+    else if eqAscii w "top" then some (.top, ne)
+    else if eqAscii w "bottom" then some (.bottom, ne)
+    else if eqAscii w "center" then some (.center, ne)
+    else none
+  else
+    match parseLenPctAt bs i with
+    | some (v, pct, j) => some (.len v pct, j)
+    | none => none
+
+/-- Parse `transform-origin`: one or two lengths/percentages/keywords
+(`left|center|right` for x, `top|center|bottom` for y; one value → the second
+is `center`), resolved against `(refW, refH)`.  usvg always resolves
+`transform-origin` percentages against the *current viewport*, on every
+element, never the object bounding box: `resolve_transform`
+(`crates/usvg/src/parser/converter.rs`) hard-codes `Units::UserSpaceOnUse`
+regardless of element type, so `convert_length` always takes the `view_box`
+branch.  Confirmed against the `structure/transform-origin` corpus -- e.g.
+`left`/`right`/`right bottom`/`top left` land at the *viewport*'s edges, not
+the rectangle's own bounding box, even though the two coincide for several of
+those fixtures (a 200×200 viewBox and a rect centred in it).  A malformed
+value, or a three-token one (a z-offset, which this 2-D renderer has no use
+for and doesn't validate), yields `(0, 0)`: a no-op wherever it's applied,
+identical to `transform-origin` being entirely absent. -/
+def parseTransformOrigin (bs : ByteArray) (refW refH : Fx) : Fx × Fx :=
+  let t := trim bs
+  if t.size == 0 then (0, 0)
+  else match parseOriginTok t 0 with
+    | none => (0, 0)
+    | some (p1, j1) =>
+      let j1' := skipWsComma t j1
+      if j1' ≥ t.size then
+        if p1.isHoriz then (resolvePct p1.asLen refW, resolvePct OriginTok.center.asLen refH)
+        else (resolvePct OriginTok.center.asLen refW, resolvePct p1.asLen refH)
+      else match parseOriginTok t j1' with
+        | none => (0, 0)
+        | some (p2, j2) =>
+          if skipWsComma t j2 < t.size then (0, 0)
+          else if p1.isCheck && p2.isCheck then (resolvePct p1.asLen refW, resolvePct p2.asLen refH)
+          else if p1.isHoriz && p2.isVert then (resolvePct p1.asLen refW, resolvePct p2.asLen refH)
+          else if p1.isVert && p2.isHoriz then (resolvePct p2.asLen refW, resolvePct p1.asLen refH)
+          else (0, 0)
+
 /-- Resolve a parsed paint against the style's own `color` (for
 `currentcolor`). -/
 def resolvePaint (st : Style) : PaintSpec → Paint
@@ -681,7 +859,17 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   -- that *has* the attribute and drops them when that one does not parse.
   | "stroke-dasharray" => { st with dashes := (parseAbsLengthList v).getD #[] }
   | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
-  | "transform" => { st with ctm := st.ctm.mul (parseTransform v) }
+  | "transform" =>
+    -- `translate(originDx, originDy) · transform · translate(-originDx, -originDy)`
+    -- (`applyAttrs` sets `originDx`/`originDy` from this element's own
+    -- `transform-origin`, before any `transform` value is folded in, so this
+    -- sees it regardless of attribute order); a no-op, exactly the plain
+    -- `parseTransform v` from before this task, whenever there is none.
+    let localM := parseTransform v
+    let wrapped :=
+      if st.originDx == 0 && st.originDy == 0 then localM
+      else ((Mat.translate st.originDx st.originDy).mul localM).mul (Mat.translate (-st.originDx) (-st.originDy))
+    { st with ctm := st.ctm.mul wrapped }
   | "visibility" =>
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
@@ -703,6 +891,23 @@ always sees the element's own final `color` and never a stale inherited one
 absent" — the SVG-wide rule that `color` applies before paints even if it is
 written after `fill`/`stroke` in the markup). -/
 def applyAttrs (parent : Style) (attrs : Array Xml.Attr) : Style :=
+  -- `transform-origin` percentages resolve against the same rect for every
+  -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it, so
+  -- usvg's per-element `state.view_box` is one constant for the whole
+  -- document): the root's `viewBox` if it has one, else the root's own
+  -- resolved size (`resolveRootSize`).  Established once, from the root
+  -- `<svg>`'s own attrs, and inherited unchanged from then on.
+  -- `parent.pctRefSet` is false only for the literal `default : Style` that
+  -- `interpret` passes as the parent of the root element itself -- the one
+  -- call where `attrs` below *are* the root's own `width`/`height`/`viewBox`.
+  let parent :=
+    if parent.pctRefSet then parent
+    else
+      let r := parseRoot attrs
+      let (rw, rh) := match r.viewBox with
+        | some (_, _, vw, vh) => (vw, vh)
+        | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+      { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
   let styleDecls := match attr attrs "style" with
     | some v => parseStyleDecls v
     | none => #[]
@@ -713,9 +918,22 @@ def applyAttrs (parent : Style) (attrs : Array Xml.Attr) : Style :=
   let base := match colorVal with
     | some v => applyProp parent "color" v
     | none => parent
-  let skip (n : String) := n == "style" || n == "color"
+  -- `transform-origin` is *not* inherited (unlike `color`): every element
+  -- gets its own, freshly reset to "no adjustment" here rather than carrying
+  -- the parent's, so an ancestor's `transform-origin` never leaks onto a
+  -- descendant that has no `transform` (or none) of its own.
+  let originVal : Option ByteArray :=
+    match styleDecls.findSome? (fun (n, val) => if n == "transform-origin" then some val else none) with
+    | some v => some v
+    | none => attr attrs "transform-origin"
+  let (odx, ody) := match originVal with
+    | some v => parseTransformOrigin v base.pctRefW base.pctRefH
+    | none => (0, 0)
+  let base := { base with originDx := odx, originDy := ody }
+  let skip (n : String) := n == "style" || n == "color" || n == "transform-origin"
   let st := attrs.foldl (fun st a => if skip a.name then st else applyProp st a.name a.value) base
-  styleDecls.foldl (fun st (n, val) => if n == "color" then st else applyProp st n val) st
+  styleDecls.foldl (fun st (n, val) =>
+    if n == "color" || n == "transform-origin" then st else applyProp st n val) st
 
 /-- `display="none"` (attribute or style) hides the element and its subtree. -/
 def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
@@ -761,16 +979,6 @@ def shapeCmds (name : String) (attrs : Array Xml.Attr) : Option (Array PathCmd) 
 def isShape (name : String) : Bool :=
   name == "path" || name == "rect" || name == "circle" || name == "ellipse" ||
   name == "line" || name == "polygon" || name == "polyline"
-
-def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
-  let vb := match attr attrs "viewBox" with
-    | some v =>
-      let ns := parseNumberList v
-      if ns.size == 4 then some (ns.getD 0 0, ns.getD 1 0, ns.getD 2 0, ns.getD 3 0) else none
-    | none => none
-  { width := (attr attrs "width").bind parseLengthAll,
-    height := (attr attrs "height").bind parseLengthAll,
-    viewBox := vb }
 
 /-- SVG conditional processing on `attrs`: `systemLanguage`, `requiredFeatures`,
 `requiredExtensions`.  Matches usvg's `is_condition_passed`
