@@ -311,15 +311,25 @@ def parseTransform (bs : ByteArray) : Mat := Id.run do
     if at' bs j != 40 then break
     let close := findByte bs (j + 1) 41
     if close ≥ bs.size then break
-    let args := parseNumberList (bs.extract (j + 1) close)
+    let argBytes := bs.extract (j + 1) close
+    let args := parseNumberList argBytes
+    -- `scale`'s factors and `matrix`'s `a b c d` are multiplicative
+    -- coefficients, not positions: parsed on the coarser `Fx` (1/256) grid
+    -- and then promoted, their quantization is amplified by whatever they
+    -- multiply (T31).  `args16` lexes the same tokens directly onto the
+    -- 16.16 grid the matrix stores them on, so they reach `Mat` exactly,
+    -- with no `* 256` promotion.  `translate`'s offsets and `matrix`'s `e f`
+    -- stay positions, read from `args` (`Fx`) as before.
+    let args16 := parseNumberList16 argBytes
     let g := fun k => args.getD k 0
+    let g16 := fun k => args16.getD k 0
     let t : Option Mat :=
       if eqAscii name "matrix" && args.size == 6 then
-        some (Mat.mk' (g 0 * 256) (g 1 * 256) (g 2 * 256) (g 3 * 256) (g 4) (g 5))
+        some (Mat.mk' (g16 0) (g16 1) (g16 2) (g16 3) (g 4) (g 5))
       else if eqAscii name "translate" && (args.size == 1 || args.size == 2) then
         some (Mat.translate (g 0) (if args.size == 2 then g 1 else 0))
       else if eqAscii name "scale" && (args.size == 1 || args.size == 2) then
-        some (Mat.scale (g 0) (if args.size == 2 then g 1 else g 0))
+        some (Mat.scale16 (g16 0) (if args.size == 2 then g16 1 else g16 0))
       else if eqAscii name "rotate" && args.size == 1 then
         some (Mat.rotate (g 0))
       else if eqAscii name "rotate" && args.size == 3 then

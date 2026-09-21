@@ -156,15 +156,18 @@ def first_line(text, limit=160):
 # --------------------------------------------------------------------------
 
 
-def render_one(
-    svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
-    resvg_args=None,
-):
+def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
+                keep_renders_dir=None, resvg_args=None):
     """Render one file both ways and score it.
 
     Returns a row dict. When `keep` is true the loaded RGBA arrays and the
     on-disk PNG paths are kept on the row so a composite can be written; the
     scratch PNGs are deleted otherwise.
+
+    When `keep_renders_dir` is given, whatever reference/ours PNGs exist at
+    the point the file's row is finished (i.e. as far as rendering got) are
+    copied to `keep_renders_dir/<corpus>/<route>/<relative path>.{ref,ours}.png`,
+    for a gallery to read later. This is independent of `keep`.
     """
     root = CORPORA_DIR / CORPORA[corpus][0]
     rel = svg.relative_to(root).as_posix()
@@ -198,7 +201,18 @@ def render_one(
     for stale in scratch:
         stale.unlink(missing_ok=True)
 
+    def save_renders():
+        if keep_renders_dir is None:
+            return
+        dest = keep_renders_dir / corpus / route / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if ref_png.is_file():
+            shutil.copy2(ref_png, str(dest) + ".ref.png")
+        if ours_png.is_file():
+            shutil.copy2(ours_png, str(dest) + ".ours.png")
+
     def cleanup():
+        save_renders()
         if not keep:
             for path in scratch:
                 path.unlink(missing_ok=True)
@@ -346,7 +360,8 @@ CSV_FIELDS = [
 ]
 
 
-def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, resvg_args=None):
+def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_renders_dir=None,
+                     resvg_args=None):
     width = width_for(corpus)
     tmpdir = Path(tempfile.mkdtemp(prefix="corpora_%s_%s_" % (corpus, route)))
     try:
@@ -359,7 +374,8 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, resvg_a
             # scratch files, so unique slots cost nothing.
             return render_one(
                 svg, corpus, route, width, binary, tmpdir, i,
-                tol, threshold, keep=False, resvg_args=resvg_args,
+                tol, threshold, keep=False, keep_renders_dir=keep_renders_dir,
+                resvg_args=resvg_args,
             )
 
         start = time.perf_counter()
@@ -879,6 +895,11 @@ def main():
              % ", ".join("%s %d" % (c, w) for c, w in FAST_WIDTHS.items()),
     )
     parser.add_argument(
+        "--width", type=int, default=None,
+        help="override the render width for every selected corpus (beats "
+             "both the per-corpus default and --fast)",
+    )
+    parser.add_argument(
         "--out", metavar="DIR", default=None,
         help="write the CSVs, summary.md and worst/ here instead of %s "
              "(use this from a worktree so the main results are not clobbered)"
@@ -914,13 +935,26 @@ def main():
         help="do not pin the resvg oracle's fonts to the test suite's bundled "
              "set (falls back to whatever fonts resvg finds on the system)",
     )
+    parser.add_argument(
+        "--keep-renders", metavar="DIR", default=None,
+        help="save each file's reference and our render as PNGs under "
+             "DIR/<corpus>/<route>/<relative path>.{ref,ours}.png, for a "
+             "gallery to build on; off by default and otherwise no behaviour "
+             "change",
+    )
     args = parser.parse_args()
 
     if args.out:
         OUT_DIR = Path(args.out).expanduser().resolve()
         WORST_DIR = OUT_DIR / "worst"
 
+    keep_renders_dir = (
+        Path(args.keep_renders).expanduser().resolve() if args.keep_renders else None
+    )
+
     WIDTHS.update(FAST_WIDTHS if args.fast else {c: CORPORA[c][2] for c in CORPORA})
+    if args.width is not None:
+        WIDTHS.update({c: args.width for c in CORPORA})
     if args.jobs is None:
         args.jobs = (os.cpu_count() or 4) if args.fast else 4
 
@@ -1057,7 +1091,7 @@ def main():
         )
         rows, elapsed, csv_path = run_corpus_route(
             corpus, route, files, binary, args.tol, args.threshold, args.jobs,
-            resvg_args=resvg_args,
+            keep_renders_dir, resvg_args=resvg_args,
         )
         s = stats_for(rows)
         print(
