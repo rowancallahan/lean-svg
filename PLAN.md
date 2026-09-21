@@ -531,6 +531,29 @@ shipping 55× files.
 - Separately (user): open a PR to lean-zip. Candidate contributions: a zlib
   wrapper if missing, or a fuzz harness like `tests/run_adversarial.py`.
 
+## M8b — CI that enforces the proof boundary  [Sonnet; requested 2026-09-21]
+
+There is no CI yet. The guarantees that matter most are currently kept by
+review, which is the weakest link in a repository several agents edit at once.
+Turn each into a check that fails the build. See `tasks/T43-ci-proofs.md`.
+
+1. **The theorems still hold, with no holes.** `#print axioms` on all six
+   effect theorems must report exactly `[propext]`. `sorryAx` anywhere is a
+   failure, which also catches a `sorry` slipped in to make something compile.
+2. **The effect type still has exactly two constructors.** `Op` gaining a
+   third is the single change that would most weaken the project's claims, and
+   nothing would currently catch it.
+3. **No IO outside the effect layer.** `IO.` must not appear in any
+   `LeanSvg/*.lean` except `Effect.lean`.
+4. **The invariants in `tasks/README.md`** that are mechanically checkable:
+   no `partial`, `unsafe`, `@[extern]`, `panic!`, `!`-indexing or `Float` in
+   `LeanSvg/`.
+5. **`lake build` clean**, plus `run_tests.py`, `run_tiles.py`,
+   `run_adversarial.py` and `tests/CssTests.lean`.
+
+Items 1 to 4 need no oracle and should run on every push. Item 5 needs resvg
+and the test corpora, so it may need a separate job or a cached install.
+
 ## M8 — Fuzzing  [Opus]
 
 - `tests/fuzz.py`: mutation fuzzer over the corpus (byte flips, splices,
