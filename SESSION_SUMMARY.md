@@ -58,23 +58,25 @@ agents for scoped, mechanically checked tasks; at most 2 Opus at once; Opus
 agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 (usage) and a break once the in-flight work lands.**
 
-## In flight at the pause (worktrees under `.worktrees/`, branch per task)
+## Paused (Rowan's request, late 2026-09-20; agents stopped, work on disk)
 
-| task | model | branch | what | merge check |
-|---|---|---|---|---|
-| T29 CSS | Sonnet | `t29-css` | `MicroSvg/Css.lean` (simplecss subset), `<style>` integration in `interpret`, `tests/CssTests.lean` `#guard`s | structure/style ≥13/16 |
-| T24b | Sonnet | `t24b-transform-origin` | `transform-origin`, percent root `width`/`height` | structure/transform-origin ≥80%, structure/svg up |
+| task | branch / worktree | state | to resume |
+|---|---|---|---|
+| **T24b** transform-origin + percent root sizes | `t24b-transform-origin` / `.worktrees/T24b` | **code complete, uncommitted** (`Render.lean`, `Svg.lean`, task file with report edits); agent was at "commit everything" | resume the T24b Sonnet agent (or by hand): `lake build`, run the spec's Verify, commit, then merge into main with the recipe below |
+| **T29** CSS `<style>` | `t29-css` / `.worktrees/T29`, commit 3294751 | **feature complete and verified** (structure/style 16/16, 38 `#guard`s, adversarial 42/42) but conflicts with T27 in `Svg.interpret` (5 hunks) | **T29m** merge task (`tasks/T29m-merge-css-switch.md`): a `git merge main` is in progress in that worktree (`MERGE_HEAD` present, `Svg.lean` unmerged). Resume the T29m Sonnet agent, or `git merge --abort` there and start it fresh. Bar: switch 13/13, systemLanguage 6/10, style 16/16, style-attribute 3/4, corpus byte-identical |
 
-If a report arrives after the break, merge with:
+All other in-flight work landed (see the merged list above). No agents are running.
+
+Merge recipe:
 ```bash
 git merge --no-edit <branch> && lake build && \
   python3 tests/run_tests.py | tail -3 && \
   python3 tests/run_tiles.py | tail -1 && \
   python3 tests/run_adversarial.py | tail -1
 ```
-T27 and T29 both edit `interpret`; expect a small conflict on the second
-merge (resolve by keeping both pre-passes). Unfinished agents: resume from
-the task file and worktree with the same model.
+PLAN.md now carries the reviewed "Scoped feature plan" (text, layers,
+gradients, clipping, masks, nested svg), approved by Rowan; use it with
+FEATURES.md when ordering wave 2.
 
 ## Next steps after the break (no new Opus until usage allows)
 
