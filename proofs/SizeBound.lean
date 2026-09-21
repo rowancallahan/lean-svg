@@ -20,25 +20,51 @@ this much easier, in two specific ways that are worth naming:
    size. For an exact size you would have to prove `rgba` is long enough,
    which means carrying the canvas-size invariant all the way down. For a
    bound the `min` is free — it only ever helps.
-2. The number of stored DEFLATE blocks is `⌈raw/65535⌉`. An exact size has to
-   get that count right. A bound can over-count wildly: below, each block
-   header is charged against a single data byte, which is off by a factor of
-   65535 and still gives a usable bound.
+2. The number of stored DEFLATE blocks is `⌈raw/65535⌉`, and an exact size
+   has to get that count right. The bound below still has to count them, but
+   only up to the slack the invariant already carries, which is easier.
+
+**The bound must stay tight, and an earlier draft of this file did not.** It
+charged each 5-byte block header against a *single* data byte rather than
+against the 65535 bytes a block actually covers, giving `6 * raw`. That 6x
+was an artifact of the proof, not of the encoder. The encoder writes each
+pixel exactly once — four bytes per pixel, plus one filter byte per row —
+which is the tautological minimum for an uncompressed still image. A bound
+that exceeds it by a constant factor is measuring the proof, not the code.
 
 ## The bound
 
 `zlibStoredRows` appends, to `out`:
 
   - 2 bytes of zlib header,
-  - one byte per byte of `raw = h * (rowBytes + 1)`,
-  - 5 bytes per stored-block header, and there are at most `raw + 1` of them
-    (really `⌈raw/65535⌉`, but see point 2 above),
+  - one byte per byte of `raw = h * (rowBytes + 1) = 4*w*h + h`, which is
+    every pixel once plus one filter byte per row,
+  - 5 bytes per stored-block header, and there are `⌊raw/65535⌋ + 1` of them,
   - 5 more if `raw = 0`, for the empty-stream block,
   - 4 bytes of Adler-32.
 
-so at most `out.size + 11 + 6 * raw`. Wrapping that in the PNG container adds
-8 signature, 25 IHDR, 4 IDAT length, 4 IDAT type, 4 IDAT CRC and 12 IEND,
-which is 57.
+so at most `out.size + 16 + raw + 5 * (raw / 65535)`. Wrapping that in the
+PNG container adds 8 signature, 25 IHDR, 4 IDAT length, 4 IDAT type, 4 IDAT
+CRC and 12 IEND, which is 57. Total `73 + raw + 5 * (raw / 65535)`, where the
+division term is under 0.008% of `raw`.
+
+There is no animation case to exclude. The encoder emits a single IDAT
+stream for one static frame; it has no APNG path, so nothing here can repeat
+a pixel across frames.
+
+## Empirical check
+
+Rendering `tests/svg/12_badge.svg` at 800x800 gives, in bytes:
+
+  | quantity                        | value     |
+  |---------------------------------|-----------|
+  | `raw` (every pixel once + filter) | 2 560 800 |
+  | actual file                     | 2 561 063 |
+  | bound above                      | 2 561 068 |
+
+Five bytes of slack. The 263 bytes between `raw` and the actual file are 57
+of container framing, 2 of zlib header, 4 of Adler-32 and forty 5-byte block
+headers. A bound that is not within a hair of `raw` is a broken bound.
 
 ## Status
 
@@ -147,13 +173,23 @@ theorem size_blockHeader (out : ByteArray) (pos rawSize : Nat) :
 
 **Not proved yet.** The invariant to feed `forIn_invariant` is
 
-  `P (o, pos) := o.size ≤ base + 2 + 6 * pos ∧ pos ≤ raw`
+  `P (o, pos) := o.size ≤ base + 2 + pos + 5 * (pos / 65535 + 1) ∧ pos ≤ raw`
 
 for the outer loop, and the same with the inner loop's three-component state
-`(o, pos, off)`. Every step either pushes one byte and increments `pos`
-(covered by the `+ 1 * pos` part), emits a 5-byte header (covered by the
-`+ 5 * pos` slack), or copies `n` bytes while advancing `pos` by the same `n`
-(`size_copySlice_append_le` plus the same slack).
+`(o, pos, off)`. The `5 * (pos / 65535 + 1)` term is what keeps the bound
+tight, and it is preserved because the slack arrives exactly when it is
+needed:
+
+  - A data byte grows `o.size` by 1 and `pos` by 1, and the bound grows by 1.
+  - A header is emitted only when `pos % 65535 = 0`. Just before it, `k`
+    headers have been written and `pos / 65535 = k`, so the bound allows
+    `5 * (k + 1)` against an actual `5 * k` — exactly 5 bytes of slack, which
+    the header consumes.
+  - Between headers `pos / 65535` is constant, so the slack is not
+    replenished until `pos` reaches the next multiple, which is precisely
+    when the next header is due.
+  - A `copySlice` of `n` bytes advances `pos` by the same `n`
+    (`size_copySlice_append_le`), so it is the data-byte case `n` times.
 
 **The obstacle is not the mathematics, it is the term.** Unfolding
 `zlibStoredRows` shows that do-notation destructuring duplicates the entire
@@ -169,16 +205,22 @@ against the corpus, so it is a task in its own right rather than something to
 fold into this file. -/
 theorem zlibStoredRows_size_le (out rgba : ByteArray) (rowBytes h : Nat) :
     (zlibStoredRows out rgba rowBytes h).size
-      ≤ out.size + 11 + 6 * (h * (rowBytes + 1)) := by
+      ≤ out.size + 16 + h * (rowBytes + 1)
+          + 5 * (h * (rowBytes + 1) / 65535) := by
   sorry
 
-/-- The whole file is bounded by a function of the canvas dimensions: the
-container overhead is 57 bytes, plus the zlib stream's `11 + 6 * raw`.
+/-- The whole file is bounded by a function of the canvas dimensions: 73
+bytes of fixed overhead, plus `raw = 4*w*h + h` for the pixels themselves,
+plus one 5-byte block header per 65535 bytes.
+
+This is the statement that should look tautological, and does: `raw` is every
+pixel written exactly once, and everything else is sub-percent.
 
 Follows from `zlibStoredRows_size_le` by unfolding `encode`, whose other
 seven steps all append constants. -/
 theorem encode_size_le (w h : Nat) (rgba : ByteArray) :
-    (encode w h rgba).size ≤ 68 + 6 * (h * (w * 4 + 1)) := by
+    (encode w h rgba).size
+      ≤ 73 + h * (w * 4 + 1) + 5 * (h * (w * 4 + 1) / 65535) := by
   sorry
 
 /-- What the bound is for. `render` already rejects `w` or `h` above `maxDim`
@@ -188,10 +230,14 @@ answers "no arbitrary image size"; it needs only `encode_size_le` plus
 monotonicity, both of which are arithmetic. -/
 theorem encode_size_le_const (w h : Nat) (rgba : ByteArray)
     (maxDim : Nat) (hw : w ≤ maxDim) (hh : h ≤ maxDim) :
-    (encode w h rgba).size ≤ 68 + 6 * (maxDim * (maxDim * 4 + 1)) := by
+    (encode w h rgba).size
+      ≤ 73 + maxDim * (maxDim * 4 + 1)
+          + 5 * (maxDim * (maxDim * 4 + 1) / 65535) := by
   have hb := encode_size_le w h rgba
-  have : h * (w * 4 + 1) ≤ maxDim * (maxDim * 4 + 1) :=
+  have hmono : h * (w * 4 + 1) ≤ maxDim * (maxDim * 4 + 1) :=
     Nat.mul_le_mul hh (by omega)
+  have hdiv : h * (w * 4 + 1) / 65535 ≤ maxDim * (maxDim * 4 + 1) / 65535 :=
+    Nat.div_le_div_right hmono
   omega
 
 end LeanSvg.Png.SizeBound
