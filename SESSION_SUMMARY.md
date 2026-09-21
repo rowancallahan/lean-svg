@@ -40,6 +40,13 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   subsets ~32 KB each; `fontdump` debug exe, the only IO, not linked into
   `microsvg`): exact match vs fontTools on 431/431 subset glyphs ×3 and
   2791/2791 full-font glyphs; fuzz 2000/2000 clean. Renderer untouched.
+- **Font demo** (`tests/out/fontdemo/`, built by the scratch script
+  `fontdemo.py`; served by `.claude/launch.json` config `reports` on port
+  8767): "Hello, fonts! AVAWAY fjord" as paths from `fontdump --embedded`
+  vs resvg `<text>` with the same TTF. **Layout is pixel-exact** (resvg on
+  our paths == resvg on `<text>`, 100% identical). Our rasteriser on those
+  paths: 96.3% exact, and *no* pixels within 1–8, max diff 255 → to
+  investigate (flipped `scale(k -k)` transform + native quads? see T31 note).
 - Corpus now **19/23** at the strict bar. Failing: 12_badge 98.56, 14_flower
   97.81, 15_spiral 97.48, 16_stress 97.48 (curve/stroke antialiasing).
 
