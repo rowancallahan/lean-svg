@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" font-family="Noto Sans">
+  <rect width="400" height="400" fill="#fdfdfb"/>
+  <!-- sizes: the glyph scale is font-size / unitsPerEm in fixed point -->
+  <text x="12" y="010" font-size="8" fill="#1d3557">tiny eight AVA</text>
+  <text x="12" y="030" font-size="14" fill="#1d3557">fourteen Waving</text>
+  <text x="12" y="060" font-size="26" fill="#1d3557">Twenty-six AVATo</text>
+  <!-- face selection -->
+  <text x="12" y="092" font-size="22" font-weight="bold" fill="#e63946">Bold face</text>
+  <text x="180" y="092" font-size="22" font-style="italic" fill="#e63946">Italic face</text>
+  <!-- three anchors about one vertical rule -->
+  <path d="M 200 104 V 176" fill="none" stroke="#c9c9c9" stroke-width="1"/>
+  <g font-size="17" fill="#2a9d8f">
+    <text x="200" y="120" text-anchor="start">start anchor</text>
+    <text x="200" y="144" text-anchor="middle">middle anchor</text>
+    <text x="200" y="168" text-anchor="end">end anchor</text>
+  </g>
+  <!-- letter-spacing (positive and negative) and word-spacing -->
+  <text x="12" y="196" font-size="17" letter-spacing="4" fill="#264653">wide tracking</text>
+  <text x="12" y="220" font-size="17" letter-spacing="-1.5" word-spacing="9"
+        fill="#264653">tight glyphs, spaced words</text>
+  <!-- per-character dx/dy lists, shorter than the text -->
+  <text x="12" y="252" font-size="20" dx="0 3 6 9 12" dy="0 -5 -8 -5 0"
+        fill="#6a4c93">JUMPY dx dy list</text>
+  <!-- an x list: every character with an absolute x starts its own anchored chunk -->
+  <text x="12 40 68 96 124 152" y="278" font-size="18" fill="#6a4c93">SPREAD</text>
+  <!-- a tspan chain: weight, slant, size and fill all inherited then overridden -->
+  <text x="12" y="306" font-size="17" fill="#1d3557">plain <tspan
+      font-weight="bold">bold</tspan> then <tspan font-style="italic"
+      fill="#e76f51">italic <tspan font-size="24">big</tspan></tspan> end</text>
+  <!-- kerning off, so the pair adjustments disappear -->
+  <text x="12" y="330" font-size="17" style="font-kerning:none" fill="#457b9d">AV To Yo Wa (no kerning)</text>
+  <!-- stroked text: fill-less, and filled with a dashed stroke -->
+  <text x="12" y="372" font-size="38" fill="none" stroke="#1d3557" stroke-width="1.5">Stroked</text>
+  <text x="196" y="372" font-size="38" fill="#f4a261" stroke="#264653" stroke-width="1"
+        stroke-dasharray="4 3">Dashy</text>
+</svg>

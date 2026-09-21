@@ -29,9 +29,9 @@ def usage : String :=
   "       fontdump --embedded <NotoSans|NotoSansBold|NotoSansItalic> <text>\n"
 
 def embeddedBytes (name : String) : Option ByteArray :=
-  if name == "NotoSans" then some MicroSvg.Fonts.NotoSans.bytes
-  else if name == "NotoSansBold" then some MicroSvg.Fonts.NotoSansBold.bytes
-  else if name == "NotoSansItalic" then some MicroSvg.Fonts.NotoSansItalic.bytes
+  if name == "NotoSans" then some (MicroSvg.Fonts.NotoSans.bytes ())
+  else if name == "NotoSansBold" then some (MicroSvg.Fonts.NotoSansBold.bytes ())
+  else if name == "NotoSansItalic" then some (MicroSvg.Fonts.NotoSansItalic.bytes ())
   else none
 
 /-! ## Minimal JSON writer (no library dependency) -/

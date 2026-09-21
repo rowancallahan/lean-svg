@@ -142,6 +142,49 @@ def generate_cases():
         "</svg>\n".encode("utf-8"),
     )
 
+    # ~1 MB of text content inside a single <text> element.
+    words = ["lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing"]
+    rnd = random.Random(42)
+    chunks = []
+    total = 0
+    while total < 1_000_000:
+        chunk = rnd.choice(words) + " "
+        chunks.append(chunk)
+        total += len(chunk)
+    big_text = "".join(chunks)
+    write_text(
+        "text_1mb.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n'
+        '<text x="10" y="50" font-size="12">%s</text>\n</svg>\n' % big_text,
+    )
+
+    # a <text> with 10 000 nested <tspan> elements.
+    tspan_depth = 10_000
+    write_text(
+        "text_nested_tspans.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n'
+        '<text x="10" y="50" font-size="12">'
+        + "<tspan>" * tspan_depth
+        + "hi"
+        + "</tspan>" * tspan_depth
+        + "</text>\n</svg>\n",
+    )
+
+    # a text element with an enormous font-size.
+    write_text(
+        "text_huge_font_size.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n'
+        '<text x="10" y="50" font-size="1e9">hi</text>\n</svg>\n',
+    )
+
+    # a text element whose x attribute is a list of 100 000 numbers.
+    x_list = " ".join(str(i % 100) for i in range(100_000))
+    write_text(
+        "text_x_list_100k.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n'
+        '<text x="%s" y="50" font-size="12">hi</text>\n</svg>\n' % x_list,
+    )
+
     return sorted(GEN_DIR.iterdir())
 
 
