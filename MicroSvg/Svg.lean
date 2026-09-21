@@ -772,16 +772,94 @@ def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
     height := (attr attrs "height").bind parseLengthAll,
     viewBox := vb }
 
-/-- Walk the event stream with a style stack. -/
+/-- SVG conditional processing on `attrs`: `systemLanguage`, `requiredFeatures`,
+`requiredExtensions`.  Matches usvg's `is_condition_passed`
+(`crates/usvg/src/parser/switch.rs`).
+
+`requiredExtensions` present at all always fails the element, since we
+support none.  `requiredFeatures` is a space-separated list (never trimmed,
+never collapsed: an empty value or a stray double space produces an empty
+token, same as Rust's `str::split(' ')`); every token must be one of usvg's
+own hard-coded SVG 1.1 Feature Strings — what *usvg* claims to implement, not
+what *we* happen to — or the element is skipped.  `systemLanguage` is a
+comma-separated list; it passes if some entry, after trimming, equals `en` or
+starts with `en-` (usvg's default `languages = ["en"]`); an empty value has
+no matching entry, so it fails.  Either attribute absent passes that check. -/
+def passesConditions (attrs : Array Xml.Attr) : Bool := Id.run do
+  if (attr attrs "requiredExtensions").isSome then return false
+  match attr attrs "requiredFeatures" with
+  | some v =>
+    let features : List String :=
+      ["http://www.w3.org/TR/SVG11/feature#SVGDOM-static",
+       "http://www.w3.org/TR/SVG11/feature#SVG-static",
+       "http://www.w3.org/TR/SVG11/feature#CoreAttribute",
+       "http://www.w3.org/TR/SVG11/feature#Structure",
+       "http://www.w3.org/TR/SVG11/feature#BasicStructure",
+       "http://www.w3.org/TR/SVG11/feature#ContainerAttribute",
+       "http://www.w3.org/TR/SVG11/feature#ConditionalProcessing",
+       "http://www.w3.org/TR/SVG11/feature#Image",
+       "http://www.w3.org/TR/SVG11/feature#Style",
+       "http://www.w3.org/TR/SVG11/feature#Shape",
+       "http://www.w3.org/TR/SVG11/feature#Text",
+       "http://www.w3.org/TR/SVG11/feature#BasicText",
+       "http://www.w3.org/TR/SVG11/feature#PaintAttribute",
+       "http://www.w3.org/TR/SVG11/feature#BasicPaintAttribute",
+       "http://www.w3.org/TR/SVG11/feature#OpacityAttribute",
+       "http://www.w3.org/TR/SVG11/feature#GraphicsAttribute",
+       "http://www.w3.org/TR/SVG11/feature#BasicGraphicsAttribute",
+       "http://www.w3.org/TR/SVG11/feature#Marker",
+       "http://www.w3.org/TR/SVG11/feature#Gradient",
+       "http://www.w3.org/TR/SVG11/feature#Pattern",
+       "http://www.w3.org/TR/SVG11/feature#Clip",
+       "http://www.w3.org/TR/SVG11/feature#BasicClip",
+       "http://www.w3.org/TR/SVG11/feature#Mask",
+       "http://www.w3.org/TR/SVG11/feature#Filter",
+       "http://www.w3.org/TR/SVG11/feature#BasicFilter",
+       "http://www.w3.org/TR/SVG11/feature#XlinkAttribute"]
+    let mut i := 0
+    for _ in [0:v.size + 1] do
+      if i > v.size then break
+      let j := findByte v i 32
+      let tok := v.extract i j
+      if !(features.any fun f => eqAscii tok f) then return false
+      i := j + 1
+  | none => pure ()
+  match attr attrs "systemLanguage" with
+  | some v =>
+    let mut matched := false
+    for e in splitTrim v 44 do
+      if eqAscii e "en" || startsWith e 0 "en-" then
+        matched := true
+        break
+    if !matched then return false
+  | none => pure ()
+  return true
+
+/-- Walk the event stream with a style stack.
+
+Each currently-open frame also carries, in `switchSel` (kept the same size as
+`stack`, pushed and popped together), what a `<switch>` ancestor demands of
+its direct children: `none` when the nearest open frame is not a `switch`
+(children are unfiltered), `some none` when it is a `switch` with no passing
+child (every child is skipped), and `some (some j)` when only the direct
+child whose `.open_` event is at index `j` may render — every other direct
+child, whether it would itself pass or not, is skipped along with its
+subtree, matching usvg's `switch::convert`, which commits to the first
+`is_condition_passed` child and never backtracks even if that child then
+turns out to be unrenderable (`display:none`, or a tag we don't support). -/
 def interpret (events : Array Xml.Event) : Except String Doc := do
   let mut stack : Array Style := #[]
+  let mut switchSel : Array (Option (Option Nat)) := #[]
   let mut skip : Nat := 0
   let mut shapes : Array Shape := #[]
   let mut root : Option RootInfo := none
-  for ev in events do
-    match ev with
+  for idx in [0:events.size] do
+    match events.getD idx default with
     | .close =>
-      if skip > 0 then skip := skip - 1 else stack := stack.pop
+      if skip > 0 then skip := skip - 1
+      else
+        stack := stack.pop
+        switchSel := switchSel.pop
     | .open_ name attrs =>
       if skip > 0 then
         skip := skip + 1
@@ -791,19 +869,75 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
           root := some (parseRoot attrs)
-          stack := stack.push (applyAttrs default attrs)
+          -- usvg checks `is_visible_element` (display, transform, conditional
+          -- processing) on the root `<svg>` too (`converter::convert_doc`):
+          -- if it fails, the whole document renders as an empty (but
+          -- correctly sized) tree, not an error.
+          if isDisplayNone attrs || !passesConditions attrs then
+            skip := 1
+          else
+            stack := stack.push (applyAttrs default attrs)
+            switchSel := switchSel.push none
         | some _ =>
-          if name == "g" then
-            if isDisplayNone attrs then skip := 1
-            else stack := stack.push (applyAttrs parent attrs)
+          let allowed := match switchSel.back?.getD none with
+            | none => true
+            | some none => false
+            | some (some target) => idx == target
+          if !allowed then skip := 1
+          else if name == "g" then
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              stack := stack.push (applyAttrs parent attrs)
+              switchSel := switchSel.push none
+          else if name == "switch" then
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              -- First direct child (depth 0 relative to this `switch`) whose
+              -- own conditional-processing attributes pass; `none` if the
+              -- switch closes with no such child.  Tag support and
+              -- `display:none` are deliberately not considered here, only
+              -- checked once we reach that child below (matching usvg: the
+              -- switch commits to this child regardless).
+              --
+              -- usvg's `svgtree` drops any element with an unrecognised tag
+              -- name (and `<style>`, special-cased) while building its tree,
+              -- before `switch`'s own child search ever runs, so such a
+              -- child is not a candidate at all here either (`non-SVG-
+              -- child.svg`: `switch` skips straight past `<random/>` to the
+              -- next real child) — every other SVG 1.1 element name usvg
+              -- knows still is, whether or not *we* render it.
+              let svgTagNames : List String :=
+                ["a", "circle", "clipPath", "defs", "ellipse", "feBlend", "feColorMatrix",
+                 "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting",
+                 "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
+                 "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge",
+                 "feMergeNode", "feMorphology", "feOffset", "fePointLight", "feSpecularLighting",
+                 "feSpotLight", "feTile", "feTurbulence", "filter", "g", "image", "line",
+                 "linearGradient", "marker", "mask", "path", "pattern", "polygon", "polyline",
+                 "radialGradient", "rect", "stop", "svg", "switch", "symbol", "text", "textPath",
+                 "tref", "tspan", "use"]
+              let target : Option Nat := Id.run do
+                let mut depth : Nat := 0
+                for j in [idx + 1 : events.size] do
+                  match events.getD j default with
+                  | .close =>
+                    if depth == 0 then return none else depth := depth - 1
+                  | .open_ cname cattrs =>
+                    if depth == 0 && svgTagNames.contains cname && passesConditions cattrs then
+                      return some j
+                    else depth := depth + 1
+                return none
+              stack := stack.push (applyAttrs parent attrs)
+              switchSel := switchSel.push (some target)
           else if isShape name then
-            if isDisplayNone attrs then skip := 1
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let st := applyAttrs parent attrs
               match shapeCmds name attrs with
               | some cmds => if st.visible && cmds.size > 0 then shapes := shapes.push ⟨cmds, st⟩
               | none => pure ()
               stack := stack.push st
+              switchSel := switchSel.push none
           else
             skip := 1
   match root with
