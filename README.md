@@ -14,6 +14,8 @@ Long term
 - Better font support, curently fonts ship with the program and can't use system fonts, I want to find a safer way of reading the font cache but haven't decided on what that means yet.
 - Better multi core and gpu support
 - aenas translation to rust. Getting provable guarantees is also possible by translating rust into lean and proving things about the translation. The eventual goal of this project is to see how close to speed parity we can get with resvg. This won't work for all rust but it might be enough to get major speedups and get things close enough to be happy.
+- have all tests and harnesses for performance be written in lean
+- Rewrite entire spec and go over it in closer detail
 
 
 ## Generated Readme
