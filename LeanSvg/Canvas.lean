@@ -783,7 +783,22 @@ def compositeBlend (cv layer : Canvas) (ox oy : Nat) (opacity : F32)
 
 /-- Composite `layer` onto `cv` with its top-left corner at pixel `(ox, oy)` of
 `cv`, with `opacity` (a binary32 in `[0, 1]`, `F32.one` for none), `opQ` (the
-same opacity on the `opGrid` grid) and `mode`. -/
+same opacity on the `opGrid` grid) and `mode`.
+
+**ROLLBACK POINT (T44).** `normal` layers take the integer path
+(`compositeNormal`), which is 6.4x faster per pixel than the f32 pipeline but
+is *not* bit-identical to resvg: it differs by at most one level, on
+`26_layers.svg` alone out of the 27 test files. Every other blend mode still
+goes through `compositeBlend`, which is the original f32 code, untouched.
+
+To return to exact-but-slow behaviour, change the line below to
+
+    compositeBlend cv layer ox oy opacity mode
+
+unconditionally, and delete nothing else — `compositeNormal` becomes dead code
+and both paths keep compiling. That single edit restores byte-identity with
+the pre-T44 renders. See `tasks/T44-integer-composite.md` for the measurements
+and the exact rounding analysis. -/
 def compositeLayer (cv layer : Canvas) (ox oy : Nat) (opacity : F32) (opQ : Nat)
     (mode : BlendMode) : Canvas :=
   if mode == .normal then compositeNormal cv layer ox oy opQ
