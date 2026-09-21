@@ -99,14 +99,17 @@ def main() -> int:
     print("|---|---|---|---|")
     for r in rows:
         # Percentages are floored, not rounded: 99.6% within 8 is not 100%.
+        # Every cell carries three lines under its image, so the rows line up;
+        # `n/a` fills the slots that have no number.
         print(
             f"| **{r['name']}** "
             f"| ![{r['name']} rendered by lean-svg](docs/readme/{r['name']}-ours.png)"
             f"<br>{int(r['within8'])}% within 8<br>{int(r['exact'])}% exact"
             f"<br>{r['ms_ours']:.0f} ms "
             f"| ![{r['name']} rendered by resvg](docs/readme/{r['name']}-resvg.png)"
-            f"<br>{r['ms_ref']:.0f} ms "
-            f"| ![difference between the two {r['name']} renders](docs/readme/{r['name']}-diff.png) |"
+            f"<br>n/a<br>n/a<br>{r['ms_ref']:.0f} ms "
+            f"| ![difference between the two {r['name']} renders](docs/readme/{r['name']}-diff.png)"
+            f"<br>n/a<br>n/a<br>n/a |"
         )
     return 0
 

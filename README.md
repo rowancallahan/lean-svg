@@ -26,9 +26,9 @@ amplifies every difference 12x.
 
 | | lean-svg | resvg 0.48.1 | difference (12x) |
 |---|---|---|---|
-| **confetti**<br>gradients, group opacity, blend modes, arcs, dashes, clipping, text | ![confetti rendered by lean-svg](docs/readme/confetti-ours.png)<br>99% within 8<br>98% exact<br>232 ms | ![confetti rendered by resvg](docs/readme/confetti-resvg.png)<br>14 ms | ![difference between the two confetti renders](docs/readme/confetti-diff.png) |
-| **icons**<br>arcs, dashes, gradients, clipPath, layers, text | ![icons rendered by lean-svg](docs/readme/icons-ours.png)<br>99% within 8<br>99% exact<br>34 ms | ![icons rendered by resvg](docs/readme/icons-resvg.png)<br>10 ms | ![difference between the two icon renders](docs/readme/icons-diff.png) |
-| **stress**<br>~1500 overlapping translucent shapes | ![stress field rendered by lean-svg](docs/readme/stress-ours.png)<br>98% within 8<br>93% exact<br>734 ms | ![stress field rendered by resvg](docs/readme/stress-resvg.png)<br>87 ms | ![difference between the two stress renders](docs/readme/stress-diff.png) |
+| **confetti**<br>gradients, group opacity, blend modes, arcs, dashes, clipping, text | ![confetti rendered by lean-svg](docs/readme/confetti-ours.png)<br>99% within 8<br>98% exact<br>232 ms | ![confetti rendered by resvg](docs/readme/confetti-resvg.png)<br>n/a<br>n/a<br>14 ms | ![difference between the two confetti renders](docs/readme/confetti-diff.png)<br>n/a<br>n/a<br>n/a |
+| **icons**<br>arcs, dashes, gradients, clipPath, layers, text | ![icons rendered by lean-svg](docs/readme/icons-ours.png)<br>99% within 8<br>99% exact<br>34 ms | ![icons rendered by resvg](docs/readme/icons-resvg.png)<br>n/a<br>n/a<br>10 ms | ![difference between the two icons renders](docs/readme/icons-diff.png)<br>n/a<br>n/a<br>n/a |
+| **stress**<br>~1500 overlapping translucent shapes | ![stress rendered by lean-svg](docs/readme/stress-ours.png)<br>98% within 8<br>93% exact<br>734 ms | ![stress rendered by resvg](docs/readme/stress-resvg.png)<br>n/a<br>n/a<br>87 ms | ![difference between the two stress renders](docs/readme/stress-diff.png)<br>n/a<br>n/a<br>n/a |
 
 Rendered at 800 px wide on an 8-core arm64 MacBook, macOS 26.6.2. Times are the
 median of five runs of the whole binary, including process start, parsing and
