@@ -19,8 +19,8 @@ def usage : String :=
   "                      --zoom asks for, so a viewer can tile a large virtual\n" ++
   "                      image; the size limits apply to the tile.  Zoom factors\n" ++
   "                      above 4096x are clamped.\n" ++
-  "  --threads N         render the image in up to N horizontal bands in\n" ++
-  "                      parallel (0 or 1 = serial, the default).  The output is\n" ++
+  "  --threads N         render the image on up to N threads, as horizontal\n" ++
+  "                      bands (0 or 1 = serial, the default).  The output is\n" ++
   "                      byte-identical whatever N is.  Set LEAN_NUM_THREADS to\n" ++
   "                      size the runtime's worker pool."
 
