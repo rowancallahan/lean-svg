@@ -399,6 +399,17 @@ nearest binary32 — no double rounding. -/
 def opacityF32 (o : Nat) : F32 :=
   if o ≥ Svg.opacityOne then F32.one else F32.ofRat o Svg.opacityOne
 
+/-- The same opacity on `Canvas.opGrid`, for `Canvas.compositeLayer`'s integer
+`normal` path: round-half-up of `opGrid · o` off the `opacityOne` grid.
+
+Rounding the file's decimal rather than `opacityF32`'s binary32 avoids a second
+rounding, and `opGrid` is 256 times finer than the `u8` a fill's alpha is
+quantised to — which is what keeps the composite within one level of the f32
+pipeline (`Canvas.blendOverScaled`). -/
+def opacityQ (o : Nat) : Nat :=
+  if o ≥ Svg.opacityOne then Canvas.opGrid
+  else (o * Canvas.opGrid * 2 / Svg.opacityOne + 1) / 2
+
 /-- One frame of the layer stack: the canvas being painted, where it sits in
 band coordinates, the clip its children use, and how it composites back. -/
 structure Layer where
@@ -407,6 +418,8 @@ structure Layer where
   oy : Nat
   clip : Clip
   opacity : F32
+  /-- `opacity` on `Canvas.opGrid`, quantised once per layer (`opacityQ`). -/
+  opacityQ : Nat
   blend : BlendMode
   /-- T20: the group's own `clip-path` masks, in device space, multiplied into
   the layer just before it composites (resvg's `clip::apply` on the
@@ -489,7 +502,8 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
             err := some "layer budget"
             break
           livePixels := livePixels + lw * lh
-          stack := stack.push ⟨cur, curOx, curOy, curClip, opacityF32 g.opacity, g.blend, chain⟩
+          stack := stack.push ⟨cur, curOx, curOy, curClip, opacityF32 g.opacity,
+            opacityQ g.opacity, g.blend, chain⟩
           cur := Canvas.new lw lh none
           curClip := r
           curOx := r.x0
@@ -509,7 +523,7 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
           -- Popped *before* the composite so that the parent's pixel array is
           -- uniquely referenced and `compositeLayer` can update it in place.
           stack := stack.pop
-          cur := parent.cv.compositeLayer done lx ly parent.opacity parent.blend
+          cur := parent.cv.compositeLayer done lx ly parent.opacity parent.opacityQ parent.blend
           curOx := parent.ox
           curOy := parent.oy
           curClip := parent.clip
@@ -526,7 +540,7 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
       stack := stack.pop
       let done := Clip.applyToCanvas parent.clips cur curOx curOy
       cur := parent.cv.compositeLayer done (curOx - parent.ox) (curOy - parent.oy)
-        parent.opacity parent.blend
+        parent.opacity parent.opacityQ parent.blend
       curOx := parent.ox
       curOy := parent.oy
   return (w, h, cur.toRgbaBytes)

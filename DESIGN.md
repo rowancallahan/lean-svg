@@ -115,7 +115,9 @@ compositing layer (§3.9), and `clip-path`/`clip-rule`/`clipPathUnits`
 (§3.10).
 
 Known deviations: nested `<svg>` skipped; `color-dodge` and `color-burn` are
-within two levels of resvg rather than exact (§3.9).
+within two levels of resvg rather than exact, and a `normal` layer composite is
+an exact integer source-over rather than the f32 pipeline, within one level
+(§3.9).
 
 ### 3.4 Flattening
 
@@ -257,6 +259,25 @@ byte pairs per mode: 14 of the 16 modes are bit-exact, and `color-dodge` and
 `color-burn` are within 2 of 255 because tiny-skia evaluates their one division
 with `_mm_rcp_ps`, a 12-bit hardware approximation whose result is not
 specified portably; the exact reciprocal is used instead.
+
+**`normal` is an integer source-over (T44).** The f32 emulation costs ~357 ns
+per composited pixel against resvg's ~7, and a layer is the largest remaining
+cost in the renderer, so `normal` — the mode a plain `opacity` takes, and the
+overwhelming majority of layers — leaves the f32 path. `Canvas.compositeNormal`
+computes the same formula exactly in integers instead, rounding once, to
+nearest even, where `store_8888` does:
+
+    out = round_to_nearest_even ( (255·c·op + d·(255 − sa·op)) / 255 )
+
+with the group opacity on `Canvas.opGrid` (`255 · 256`) rather than as a `u8`.
+That is 6.4× faster and differs from the f32 pipeline by at most **1 of 255**,
+on 0–0.4% of a layer's pixels, and not at all at an opacity the grid represents
+exactly (1, 0.8, 0.6, 0.4 …). Both the exact arithmetic and the fine grid are
+load-bearing: the obvious cheap version — the lowp `div255` and a `u8` opacity
+— is off by 2 on 12–17% of them, which `toRgbaBytes` then divides back out by
+the pixel's alpha into 30 levels on an antialiased edge. Every other mode stays
+on `compositeBlend`, unchanged and bit-exact. This is the project's only
+deliberate fidelity trade, authorised for this one mode.
 
 Two performance notes that are really Lean runtime notes, both worth 4× on a
 composite: a `Nat` literal that does not fit in 32 bits compiles to a decimal

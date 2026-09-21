@@ -107,6 +107,77 @@ are the premultiplied, coverage-scaled source channels. -/
        (Nat.min 255 (sb + div255 (db * inv)))
        (Nat.min 255 (sa + div255 (da * inv)))
 
+/-! ### An integer source-over for a layer
+
+`div255` above is tiny-skia's *lowp* approximation.  It is what the lowp blend
+stages are built out of, so `fillMask` has to use it to stay bit-identical, but
+it is biased upwards by up to a whole level (`div255 1632 = 7`, where
+`1632 / 255 = 6.4`).  A layer composite is approximating the **f32** pipeline
+instead, which rounds once, to nearest *even*, at `store_8888`, so the integer
+form below is written to do exactly that and nothing else:
+
+    out = round_to_nearest_even ( (255·c · op + d · (255 − sa · op)) / 255 )
+
+evaluated exactly, with the group opacity `op` carried on the `opGrid` grid
+rather than as a `u8`.  Both of those matter, and both were measured: with
+`div255` and a `u8` opacity the result is off by up to 2 of 255 on 12–17% of a
+layer's pixels, and `toRgbaBytes` then divides that error back out by the
+pixel's alpha — 30 levels on `07_opacity`'s alpha-6 edge, and a fully
+transparent pixel turning into an alpha-1 one.  Exactly, on the fine grid, with
+the matching tie-break, it is off by at most 1 on 0–0.4% of them, and is
+bit-identical at every opacity the grid represents exactly (1, 0.8, 0.6, 0.4,
+…).  `tasks/T44-integer-composite.md` has both tables.
+-/
+
+/-- Grid the group opacity is carried on, `255 · 256`.
+
+`255` so that an opacity of 1 is exact and the copy path stays a copy; the
+further `256` is what a `u8` opacity is missing.  It is also what keeps the
+arithmetic unboxed: the numerator below is under `2^33`. -/
+def opGrid : Nat := 65280
+
+/-- `opGrid · 255`, the denominator of the composite. -/
+def opDen : Nat := 16646400
+
+/-- `⌊x / 65025⌋` for every `x < 2^25`, as a multiply and a shift (checked
+exhaustively).  `65025 = 255²`, and `opDen = 256 · 65025`, so `storeQ` reaches
+the quotient it wants with one shift and this — a 64-bit hardware division
+would cost more than the rest of the composite.  The constant is under `2^32`
+and the shift is a right shift, so nothing here reaches GMP (`F32.pow2Tab`). -/
+@[inline] def div65025 (x : Nat) : Nat := (x * 67636241) >>> 42
+
+/-- `round_to_nearest_even (n / opDen)` for every `n < 2^33`, which is the
+`_mm_cvtps_epi32` in tiny-skia's `store_8888` done on an exact rational.
+
+`⌊n / (256 · 65025)⌋ = ⌊⌊n / 256⌋ / 65025⌋`, so the quotient is a shift and a
+`div65025`; the remainder is then reassembled from both halves, and the
+tie-break compares twice it against `opDen`. -/
+@[inline] def storeQ (n : Nat) : Nat :=
+  let t := n >>> 8
+  let q := div65025 t
+  let r2 := 2 * ((t - q * 65025) * 256 + (n &&& 255))
+  if r2 > opDen then q + 1
+  else if r2 == opDen && q &&& 1 == 1 then q + 1
+  else q
+
+/-- Source-over of one premultiplied layer pixel `s` onto the premultiplied
+destination `dst`, at group opacity `opQ` on the `opGrid` grid.  `k` is the
+loop-invariant `255 · opQ`.
+
+`inv` is `255 − sa · op` on the same grid, unquantised — the f32 pipeline does
+not round it either — so the only rounding is `storeQ`'s.  At `opQ = opGrid`
+the source passes through unchanged and an opaque pixel reproduces itself,
+which is what `compositeLayer`'s copy path relies on.  The clamps guard a layer
+pixel that is not properly premultiplied; `fillMask` cannot produce one, but
+excluding it costs nothing. -/
+@[inline] def blendOverScaled (dst s opQ k : Nat) : Nat :=
+  let sa := s &&& 255
+  let inv := opDen - sa * opQ
+  pack (Nat.min 255 (storeQ (((s >>> 24) &&& 255) * k + ((dst >>> 24) &&& 255) * inv)))
+       (Nat.min 255 (storeQ (((s >>> 16) &&& 255) * k + ((dst >>> 16) &&& 255) * inv)))
+       (Nat.min 255 (storeQ (((s >>> 8) &&& 255) * k + ((dst >>> 8) &&& 255) * inv)))
+       (Nat.min 255 (storeQ (sa * k + (dst &&& 255) * inv)))
+
 /-! ### Coverage thresholds
 
 `fillMask` reduces the mask's `cov ∈ [0, 65536]` to tiny-skia's 0..255 coverage
@@ -620,21 +691,42 @@ def blendPixel (mode : BlendMode) (srcTab dstTab : Array F32) (s d : Nat) : Nat 
        mad da (sub one a) a)
   pack (toU8 r) (toU8 g) (toU8 b) (toU8 a)
 
-/-- Composite `layer` onto `cv` with its top-left corner at pixel `(ox, oy)` of
-`cv`, with `opacity` (a binary32 in `[0, 1]`, `F32.one` for none) and `mode`.
+/-! ### `normal` is an integer source-over
 
-A transparent layer pixel leaves the destination untouched in every mode (with
-`s = sa = 0` each formula collapses to `d` exactly, in f32 as much as here),
-so those are skipped without arithmetic; an opaque pixel composited normally
-at full opacity is the source itself (`255 · F` rounds to exactly `1.0`, so
-`inv(sa) = 0` and `unnorm` returns the byte it came from), so that case is a
-copy.  Everything else goes through `blendPixel`. -/
-def compositeLayer (cv layer : Canvas) (ox oy : Nat) (opacity : F32) (mode : BlendMode) :
-    Canvas := Id.run do
-  let scaled := opacity != F32.one
-  let byteTab := (Array.range 256).map fun c => F32.mul (F32.ofNat c) F32.inv255
-  let srcTab := if scaled then byteTab.map (F32.mul · opacity) else byteTab
-  let copyOpaque := mode == .normal && !scaled
+`blendPixel` above is the f32 pipeline, and for `.normal` it is thirteen
+software-float operations — eight table reads, four `mul`, four `add`, one
+`sub`, four `toU8` — where the canvas already holds premultiplied u8 and
+`blendOverScaled` is the same composite in integers.  T44 measured the f32 path
+at 357 ns/px against resvg's 6.6 and traded the last level of `normal`'s
+fidelity for it, with Rowan's authorisation; every other mode stays on
+`blendPixel`, unchanged and bit-exact.
+
+What is left of the trade is the opacity's own quantisation onto `opGrid`: an
+opacity the grid does not represent exactly can move a channel by one level,
+and `toRgbaBytes` then divides that back out by the pixel's alpha, so a nearly
+transparent pixel can move further than one level in the PNG.  Measured over
+all 16.7 M `(channel, source alpha, destination)` triples at fourteen
+opacities, that is at most 1 level on 0–0.4% of them.
+-/
+
+/-! ### Walking a layer
+
+The two paths are separate functions with separate loops.  They share only the
+traversal, and keeping them apart means `compositeBlend` below is the function
+that was here before, unchanged, so a mode still on the f32 path cannot have
+paid anything for this task — a shared loop would have added a per-pixel test
+and one more live value to it.  Whether that costs anything measurable was not
+established either way: on this machine the ±1% paired noise floor sits under
+a ~2% shift that merely *adding* code to this file produces, which an unchanged
+fill path shows just as clearly (T44's report, §5).
+
+Both skip a transparent layer pixel without arithmetic: with `s = sa = 0`
+every formula collapses to `d` exactly, in f32 as much as in integers. -/
+
+/-- `compositeLayer` for `.normal`: the integer source-over, at group opacity
+`opQ` on the `opGrid` grid.  At full opacity an opaque pixel is the source
+itself, so that case is a copy. -/
+def compositeNormal (cv layer : Canvas) (ox oy opQ : Nat) : Canvas := Id.run do
   -- `w` and `h` are read out *before* `px`, and `cv` is not touched again, so
   -- the destination array reaches the loop uniquely referenced and is updated
   -- in place; mentioning `cv.h` inside the loop would keep `cv` alive and cost
@@ -642,6 +734,9 @@ def compositeLayer (cv layer : Canvas) (ox oy : Nat) (opacity : F32) (mode : Ble
   let w := cv.w
   let h := cv.h
   let lw := layer.w
+  -- `255 · opQ`, the source's multiplier, hoisted out of the pixel loop.
+  let k := 255 * opQ
+  let copyOpaque := opQ == opGrid
   let mut px := cv.px
   for ly in [0:layer.h] do
     let y := oy + ly
@@ -658,8 +753,41 @@ def compositeLayer (cv layer : Canvas) (ox oy : Nat) (opacity : F32) (mode : Ble
       if copyOpaque && sa == 255 then
         px := px.setIfInBounds idx s
       else
-        px := px.setIfInBounds idx (blendPixel mode srcTab byteTab s (px.getD idx 0))
+        px := px.setIfInBounds idx (blendOverScaled (px.getD idx 0) s opQ k)
   return ⟨w, h, px⟩
+
+/-- `compositeLayer` for every mode but `.normal`: the f32 pipeline, through
+`blendPixel`.  `srcTab`/`dstTab` are hoisted out of the pixel loop. -/
+def compositeBlend (cv layer : Canvas) (ox oy : Nat) (opacity : F32)
+    (mode : BlendMode) : Canvas := Id.run do
+  let scaled := opacity != F32.one
+  let byteTab := (Array.range 256).map fun c => F32.mul (F32.ofNat c) F32.inv255
+  let srcTab := if scaled then byteTab.map (F32.mul · opacity) else byteTab
+  let w := cv.w
+  let h := cv.h
+  let lw := layer.w
+  let mut px := cv.px
+  for ly in [0:layer.h] do
+    let y := oy + ly
+    if y ≥ h then break
+    let lrow := ly * lw
+    let row := y * w
+    for lx in [0:lw] do
+      let s := layer.px.getD (lrow + lx) 0
+      if s &&& 255 == 0 then continue
+      let x := ox + lx
+      if x ≥ w then break
+      let idx := row + x
+      px := px.setIfInBounds idx (blendPixel mode srcTab byteTab s (px.getD idx 0))
+  return ⟨w, h, px⟩
+
+/-- Composite `layer` onto `cv` with its top-left corner at pixel `(ox, oy)` of
+`cv`, with `opacity` (a binary32 in `[0, 1]`, `F32.one` for none), `opQ` (the
+same opacity on the `opGrid` grid) and `mode`. -/
+def compositeLayer (cv layer : Canvas) (ox oy : Nat) (opacity : F32) (opQ : Nat)
+    (mode : BlendMode) : Canvas :=
+  if mode == .normal then compositeNormal cv layer ox oy opQ
+  else compositeBlend cv layer ox oy opacity mode
 
 end Canvas
 end LeanSvg

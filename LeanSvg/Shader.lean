@@ -686,15 +686,17 @@ structure Rt where
   `SourceOver` to `Source`: true only for a linear gradient whose every stop
   is opaque (`Shader::is_opaque` is unconditionally `false` for a radial). -/
   isOpaque : Bool
-  /-- The premultiplied ramp, one entry per 16.16 parameter value, split by
-  channel: empty until `withRamp` fills it, which `fillMaskShader` does only
-  for a draw big enough to pay for the build (`rampArea`).  Filled or not, the
-  colour is the same — the entries *are* `rampCalc` — so a tile, a thread band
-  and the whole image agree whatever each one decides. -/
-  rr : Array Nat := #[]
-  rg : Array Nat := #[]
-  rb : Array Nat := #[]
-  ra : Array Nat := #[]
+  /-- The premultiplied ramp, one `Canvas.pack`ed RGBA entry per 16.16
+  parameter value: empty until `withRamp` fills it, which `fillMaskShader` does
+  only for a draw big enough to pay for the build (`rampArea`).  Filled or not,
+  the colour is the same — the entries *are* `rampCalc` — so a tile, a thread
+  band and the whole image agree whatever each one decides.
+
+  One packed array rather than four per-channel ones: the per-pixel read is one
+  bounds check and three shift-and-mask instead of four bounds checks, and the
+  table is 0.5 MB instead of 2 MB.  The layout changes, the arithmetic does
+  not, so every pixel is bit-identical either way. -/
+  ramp : Array Nat := #[]
 deriving Inhabited
 
 /-! ### The colour ramp -/
@@ -800,28 +802,25 @@ a table it would have used loses less than that.  Below the threshold the
 draw evaluates the ramp per pixel, as it always did. -/
 def rampArea : Nat := 262144
 
-/-- Fill `Rt.rr … ra`: one `rampCalc` per 16.16 parameter value.  65537 entries
-in four arrays of `Nat`, ~2 MB, live only while the draw that built them is
-running — `fillMaskShader` builds at most one per draw and keeps none. -/
+/-- Fill `Rt.ramp`: one `rampCalc` per 16.16 parameter value, packed.  65537
+entries in one array of `Nat`, ~0.5 MB, live only while the draw that built
+them is running — `fillMaskShader` builds at most one per draw and keeps
+none. -/
 def withRamp (sh : Rt) : Rt := Id.run do
   let ss := sh.stops
-  let mut rr : Array Nat := Array.emptyWithCapacity 65537
-  let mut rg : Array Nat := Array.emptyWithCapacity 65537
-  let mut rb : Array Nat := Array.emptyWithCapacity 65537
-  let mut ra : Array Nat := Array.emptyWithCapacity 65537
+  let mut ramp : Array Nat := Array.emptyWithCapacity 65537
   for u in [0:65537] do
     let (r, g, b, a) := rampCalc ss u
-    rr := rr.push r
-    rg := rg.push g
-    rb := rb.push b
-    ra := ra.push a
-  return { sh with rr := rr, rg := rg, rb := rb, ra := ra }
+    ramp := ramp.push (Canvas.pack r g b a)
+  return { sh with ramp := ramp }
 
 /-- The premultiplied colour at parameter `u ∈ [0, 65536]`: a table read when
 `withRamp` has run for this draw, otherwise the same value from the stops. -/
 @[inline] def rampAt (sh : Rt) (u : Nat) : Nat × Nat × Nat × Nat :=
-  if sh.rr.isEmpty then rampCalc sh.stops u
-  else (sh.rr.getD u 0, sh.rg.getD u 0, sh.rb.getD u 0, sh.ra.getD u 0)
+  if sh.ramp.isEmpty then rampCalc sh.stops u
+  else
+    let v := sh.ramp.getD u 0
+    ((v >>> 24) &&& 255, (v >>> 16) &&& 255, (v >>> 8) &&& 255, v &&& 255)
 
 /-- `PadX1` / `ReflectX1` / `RepeatX1` on a 16.16 parameter, giving `[0, 65536]`.
 `pad` may clamp unconditionally because the ramp is already flat outside the
