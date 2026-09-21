@@ -144,6 +144,23 @@ def parseNumber (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
     let r : Fx := Fx.clamp (Int.ofNat (scaleDecimal mant exp10 256 Fx.maxVal.toNat))
     some (if neg then -r else r, j)
 
+/-- Parse a decimal number in SVG/CSS syntax starting at byte `i`, on the
+16.16 grid (`2^-16` per unit) instead of `Fx`'s 1/256.  For the *linear* part
+of a transform matrix — `scale`'s factors, `matrix`'s `a b c d` — the value
+is a multiplicative coefficient, not a position: quantizing it to 1/256
+amplifies that quantization by whatever the coefficient multiplies (T31's
+finding — `scale(0.072 ...)` parsed at 1/256 lands on 0.0703125, off by
+2.3%, which is over a full device pixel on a few-hundred-unit shape). The
+cap here is generous and only bounds `scaleDecimal`'s own output to a fixed
+size cheaply; the real, meaningful clamp happens once the value reaches a
+matrix (`Mat.mk'`'s `clampLin`, `Geom.lean`). -/
+def parseNumber16 (bs : ByteArray) (i : Nat) : Option (Int × Nat) :=
+  match parseDecimal bs i with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    let r : Int := Int.ofNat (scaleDecimal mant exp10 65536 1099511627776)
+    some (if neg then -r else r, j)
+
 open Bytes in
 /-- Parse a length: a number with an optional unit.  Absolute units are converted
 to CSS pixels.  Percentages are rejected (no context to resolve them). -/
@@ -225,6 +242,23 @@ def parseNumberList (bs : ByteArray) : Array Fx := Id.run do
     i := Bytes.skipWsComma bs i
     if i ≥ bs.size then break
     match parseNumber bs i with
+    | some (v, j) =>
+      out := out.push v
+      i := j
+    | none => break
+  return out
+
+/-- Parse a whitespace/comma separated list of numbers on the 16.16 grid (see
+`parseNumber16`).  Lexes the exact same tokens, with the exact same stopping
+rule, as `parseNumberList` — same count for any input, just landed on a
+finer grid — so a caller can pair the two element-for-element. -/
+def parseNumberList16 (bs : ByteArray) : Array Int := Id.run do
+  let mut out : Array Int := #[]
+  let mut i := 0
+  for _ in [0:bs.size + 1] do
+    i := Bytes.skipWsComma bs i
+    if i ≥ bs.size then break
+    match parseNumber16 bs i with
     | some (v, j) =>
       out := out.push v
       i := j
