@@ -526,10 +526,7 @@ def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
         if up == 113 then p 0
         else if nextQ () then ⟨2 * cur.x - lastQ.x, 2 * cur.y - lastQ.y⟩ else cur
       let q := if up == 113 then p 2 else p 0
-      -- exact degree elevation: c1 = cur + 2/3 (qc − cur), c2 = q + 2/3 (qc − q)
-      let c1 : Pt := ⟨cur.x + Int.ediv (2 * (qc.x - cur.x)) 3, cur.y + Int.ediv (2 * (qc.y - cur.y)) 3⟩
-      let c2 : Pt := ⟨q.x + Int.ediv (2 * (qc.x - q.x)) 3, q.y + Int.ediv (2 * (qc.y - q.y)) 3⟩
-      out := out.push (.cubicTo c1 c2 q)
+      out := out.push (.quadTo qc q)
       lastQ := qc
       prevWasQ := true
       cur := q
