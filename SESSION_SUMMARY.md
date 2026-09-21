@@ -29,6 +29,11 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   15_spiral +0.23, everything else byte-identical; 15_spiral now emits
   exactly resvg's 532 segments. Note: `shift==0` bumps to 1 (2 segments),
   as in the Rust, not to a line.
+- **T27 switch/conditionals** (`interpret` rewrite, `passesConditions`):
+  structure/switch 1/13 → 13/13, systemLanguage 4/10 → 6/10 (rest need
+  clipPath, gradients, text). Replicates usvg quirks: unknown tags are not
+  switch candidates, `display:none` winner renders nothing, root `<svg>` is
+  gated too. Corpus byte-identical.
 - Corpus now **19/23** at the strict bar. Failing: 12_badge 98.56, 14_flower
   97.81, 15_spiral 97.48, 16_stress 97.48 (curve/stroke antialiasing).
 
@@ -45,7 +50,6 @@ agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 | task | model | branch | what | merge check |
 |---|---|---|---|---|
 | T25 fonts | Sonnet | `t25-fonts` | `MicroSvg/Font.lean` pure total TrueType parser, embedded Noto Sans subsets, `fontdump` exe, fontTools oracle + fuzz | 0 mismatches vs fontTools, fuzz clean, corpus byte-identical |
-| T27 switch | Sonnet | `t27-switch` | `<switch>`, `systemLanguage`, required* in `interpret` | structure/switch ≥10/13, systemLanguage ≥8/10 |
 | T29 CSS | Sonnet | `t29-css` | `MicroSvg/Css.lean` (simplecss subset), `<style>` integration in `interpret`, `tests/CssTests.lean` `#guard`s | structure/style ≥13/16 |
 | T24b | Sonnet | `t24b-transform-origin` | `transform-origin`, percent root `width`/`height` | structure/transform-origin ≥80%, structure/svg up |
 
