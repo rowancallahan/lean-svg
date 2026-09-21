@@ -73,3 +73,105 @@ and tiny-skia `src/shaders/{gradient,linear_gradient,radial_gradient}.rs`,
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
+
+## Report
+
+Branch `t18-gradients`, merged with `main` at 2a819ed (T31 edge rounding, T32
+gallery) before verification.  Started from the local agent's WIP commit
+0cdc7f2, which already built; this session verified it against the spec,
+fixed nothing in the Lean, and ran every item under `## Verify`.
+
+### What changed
+
+- `MicroSvg/Shader.lean` (new, 937 lines): the defs table (`Grad.RawDef`,
+  `Grad.Defs.build`, hashed id lookup, `href` chain with fuel 8 that stops at
+  a revisited node), usvg's resolution rules (`Grad.resolve`: same-type
+  coordinate inheritance, common-attribute inheritance, monotone stops,
+  `userSpaceOnUse` percentages against the root viewBox, the degenerate
+  cases that collapse to first/last/average colour), the tight user-space
+  bounding box (`Grad.tightBox`, cubic and quadratic extrema solved
+  exactly), one composed 16.16 affine map inverted once per draw
+  (`Grad.Aff`), the per-pixel evaluation (`Grad.paramAt`: linear, radial and
+  two-point conical via `Nat.sqrt`; `spreadT` pad/reflect/repeat; `rampAt`
+  with tiny-skia's `lowp` order: unpremultiplied lerp, `round(c·255)`, then
+  `div255` premultiply), and `Canvas.fillMaskShader`.  The module doc
+  records how T19/T20/T21 can add entry kinds to the table.
+- `MicroSvg/Svg.lean`: `Paint.gradient idx`; `PaintSpec.url id fallback`;
+  `parsePaint` split into `parseSolidColor` + `parseUrlPaint` (quoted ids,
+  `none` / colour / `currentColor` fallbacks); `resolvePaint` looks the id
+  up in `Style.defs`; a bounded pre-pass (`gradRawDefs`, `gradPctRef`) in
+  `interpret` that builds the table once and hands it to the root `Style`.
+  `interpret` itself changed by four lines.
+- `MicroSvg/Render.lean`: `Clip` carries the `--viewport` origin;
+  `drawShape` routes fill and stroke through one `paintMask` helper that
+  calls `Grad.build` for `.gradient`; solid paints take the unchanged
+  `fillMask` path.  `render`'s type is unchanged.
+- `MicroSvg/Canvas.lean` untouched: the shader blitter lives in
+  `Shader.lean` as `Canvas.fillMaskShader`, so the solid fast path is
+  byte-identical by construction and the file stays free for T22/T20.
+- `tests/svg/24_gradients.svg` (new), `tests/run_adversarial.py` (+6 cases).
+- `MicroSvg/Effect.lean`: `git diff main -- MicroSvg/Effect.lean` is empty.
+
+### Verify
+
+- `lake build`: clean, no warnings (forced rebuild of the three touched
+  modules).
+- `24_gradients.svg` vs resvg 0.48.1: 99.993% within 8, 92.145% exact,
+  max delta 16 (target ≥ 99%).
+- Corpora, `--fast` (width 100), direct route, main's binary → this branch:
+
+  | directory | before | after |
+  |---|---|---|
+  | paint-servers/linearGradient | 5/40 | 39/40 |
+  | paint-servers/radialGradient | 2/45 | 44/45 |
+  | paint-servers/stop | 0/32 | 31/32 |
+  | paint-servers/stop-color | 0/1 | 1/1 |
+  | paint-servers/stop-opacity | 0/2 | 2/2 |
+  | painting/fill | 43/60 | 51/60 |
+  | structure/defs | 2/7 | 6/7 |
+
+  Nothing newly fails.  The suite in the current resvg checkout has 40/45/32
+  files in the three gradient directories (the spec's 38 was an older
+  count).  Re-run at `--width 300`: same pass set, every passing file
+  ≥ 99.95% within 8.  Remaining failures, one line each:
+  - `linearGradient/hsla-color`, `radialGradient/hsla-color`,
+    `stop/hsla-color`: `hsla()` stop colours, T34's `parsePaint` change.
+  - `painting/fill/hsl-*` (6 files), `hsla-with-percentage-s-and-l-values`:
+    `hsl()`/`hsla()` fill colours, T34.
+  - `painting/fill/rgba-0-127-0-50percent`, `rgba-0-50percent-0-0.5`:
+    percentage channels in `rgba()`, pre-existing on main.
+  - `painting/fill/pattern-on-shape`: `<pattern>`, out of scope.
+  - `structure/defs/style-inheritance`: `<use>`, T19.
+- `python3 tests/run_tests.py`: 20/24 pass; the 4 failures (12, 14, 15, 16)
+  are main's.  All 23 pre-existing files are byte-identical to main's
+  binary at natural size and `--width 800` (`cmp` on the PNGs).
+- `run_tiles.py`: 24/24 stitch byte-identically, including `24_gradients`.
+  `--threads 4` on `24_gradients` at 800 px is byte-identical to serial.
+- `run_adversarial.py`: 50/50 clean, including the six new cases
+  (`grad_100k_stops`, `grad_4097_defs`, `grad_href_self_cycle`,
+  `grad_href_chain_9`, `grad_huge_radius`, `grad_zero_area_shape`).  Against
+  resvg, the self-cycle and zero-area cases are pixel-exact; the other four
+  differ where the spec's caps bite (256 stops kept of 100 000, entry 4097
+  dropped so the fallback colour shows, a 9-link chain exceeds fuel 8 so the
+  paint is `none`, and coordinates of 1e9 clamp at `Fx.maxVal`).
+- Timing, median of 3, this machine:
+
+  | file | main | branch |
+  |---|---|---|
+  | 16_stress natural | 232 ms | 238 ms |
+  | 16_stress `--width 800` | 793 ms | 797 ms |
+  | 16_stress `--width 1600` | 2581 ms | 2565 ms |
+  | 24_gradients natural (360×240) | — | 41 ms |
+  | 24_gradients `--width 800` | — | 199 ms |
+
+### Not done / deviations
+
+- No Python oracle for the colour ramp was written; the corpus and the
+  side-by-side composites were sufficient to confirm the `lowp` model.
+- A focal (two-point conical) radial uses the same `lowp` ramp as the rest;
+  tiny-skia switches to `highp` there.  Differences are within tolerance
+  on every focal test in the suite.
+- `drawShape`'s fill and stroke arms now go through a shared `paintMask`
+  closure rather than one added `match` arm each, so T34's `paint-order`
+  edit will touch the same lines; the closure is self-contained and the
+  order of the two blocks is unchanged.
