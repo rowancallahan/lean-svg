@@ -49,6 +49,21 @@ pure; store in a `let`).
   (fill, stroke, opacities, dashes all apply as for paths). Glyph advance
   = `advance × scale + kern + letter-spacing (+ word-spacing at spaces)`.
 
+## Known ceiling (measured 2026-09-21 with `fontdump --embedded NotoSans`)
+
+Of the 147 files in the nine text directories above, 20 contain characters
+outside the embedded Latin subset and will render `.notdef` for them: 9
+Arabic (`font-kerning/arabic-script`, `letter-spacing/mixed-scripts`,
+`letter-spacing/on-Arabic`, `text-anchor/on-tspan-with-arabic`,
+`text/bidi-reordering`, `text/fill-rule=evenodd`, `text/rotate-on-Arabic`,
+`text/x-and-y-with-multiple-values-and-arabic-text`, `tspan/bidi-reordering`),
+5 combining marks (`text/complex-grapheme*`, `text/rotate-with-multiple-values-and-complex-text`,
+`text/zalgo`), 4 Cyrillic (overlapping the previous plus `text/escaped-text-4`),
+2 CJK (`letter-spacing/non-ASCII-character`, `text/xml-lang=ja`), 3 emoji
+(`text/compound-emojis*`, `text/emojis`). Count them as expected failures in
+the report, not as layout bugs. Directories font-size, font-weight,
+font-style and word-spacing are fully covered by the subset.
+
 ## Oracle font pinning
 
 The harness currently lets resvg pick system fonts. Add to
@@ -247,3 +262,62 @@ Lean 4.34.0 was installed from the GitHub release tarball (the elan host
 `release.lean-lang.org` is blocked by this session's egress policy);
 resvg 0.48.1 via `cargo install`. The resvg checkout keeps its suite at
 `crates/resvg/tests` (not a top-level `tests`), so the symlink points there.
+
+## Merge with main (T38 + T34 + T37)
+
+`origin/main` at `a932752` merged into `t36-text`. One conflicted file,
+`MicroSvg/Svg.lean`, three hunks, all resolved by keeping both sides:
+
+- The text-property parsers (T36) and `paintOrderKindOf`/`strokeBeforeFill`
+  (T34) are independent top-level definitions; both kept.
+- `applyProp`: T36's nine text arms and T34's `"paint-order"` arm; both kept.
+- `applyEffective`'s `skipName`: T38 introduced `early` (`color` and
+  `transform-origin`, both resolved before the four folds) and T36 excluded
+  `font-kerning` from the presentation-attribute layer. Merged to
+  `n == "style" || early n || n == "font-kerning"`, so `transform-origin`
+  still resolves from every cascade layer and `font-kerning` still reaches
+  `applyProp` only through `style=""`/CSS.
+
+T36's own `pctRefW`/`pctRefH` seed at the root push site in `interpret` is
+deleted, as `tasks/T38-transform-origin-cascade.md` asks: `applyEffective`
+now seeds the same values from the root's own attrs whenever
+`parent.pctRefSet` is false, which is exactly the root push. The root push
+is back to `applyEffective default attrs chain`. Percentage references for
+text are unaffected (`text/letter-spacing` still 8/12, below).
+
+### Verification after the merge (resvg 0.48.1, Lean 4.34.0)
+
+| check | result |
+|---|---|
+| `lake build` | clean, 41 jobs, no errors, no warnings |
+| `git diff origin/main -- MicroSvg/Effect.lean` | empty |
+| `run_tests.py` | 20/24; `25_text` 99.530% within-8 (99.302% exact); the 4 failures (12, 14, 15, 16) are main's |
+| 23 pre-existing `tests/svg` files vs main's binary | 46/46 PNGs byte-identical (natural size and `--width 800`) |
+| `run_tiles.py --no-timing` | 24/24 stitch byte-identically |
+| `run_adversarial.py` | 48/48 clean |
+
+Corpora, resvg suite, direct route, `--fast` (width 100), same harness for
+both binaries:
+
+| dir | main `a932752` | merged | bar |
+|---|---|---|---|
+| text/text | 1/44 | 27/44 | 27 |
+| text/tspan | 2/31 | 28/31 | 28 |
+| text/text-anchor | 1/13 | 12/13 | 12 |
+| text/letter-spacing | 1/12 | 8/12 | 8 |
+| text/font-size | 4/20 | 19/20 | 19 |
+| text/font-weight | 0/12 | 9/12 | 9 |
+| structure/transform-origin | 14/23 | 15/23 | ≥ 14 |
+| painting/fill | 48/60 | 48/60 | ≥ main |
+| structure/style | 16/18 | 16/18 | 16 |
+| structure/switch | 13/13 | 13/13 | 13 |
+| **total** | 100/246 | **195/246** | |
+
+Newly failing against main: 0. Newly passing: 95, of which one is not a text
+file — `structure/transform-origin/on-text.svg`, which needs both T38's
+cascade fix and T36's text rendering, so it passes only on the merge. That
+is why transform-origin reads 15/23 rather than T38's 14/23 (measured here
+against 0.48.1; T38's report measured 16/23 against resvg 0.45.1).
+`structure/style` holds 18 files in the current suite, not 16; the two that
+fail (`current-color-fill-before-color`, `current-color-stroke-before-color`)
+fail identically on main's binary.
