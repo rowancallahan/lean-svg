@@ -134,3 +134,64 @@ lake build && make test && make tiles && make adversarial
 python3 tests/run_corpora.py --fast --limit 50   # quick corpora sample
 python3 playground/server.py --port 8766         # http://127.0.0.1:8766
 ```
+
+---
+
+## Update 2026-09-21: performance, licensing, and a stopping point (main ecddf8c, pushed)
+
+Public at https://github.com/rowancallahan/lean-svg (renamed from microsvg).
+
+**Performance.** Three wins, in the order they were found:
+
+- **T41 gradients.** `Int.ediv` per channel per pixel in `lerpCh`, not the
+  stop search. Bit-exact; 1.05–1.09x on arm64, 1.40x on x86 (ARM divides
+  faster).
+- **T42 flattening.** The atomic-refcount theory was refuted three ways. The
+  real cause was `pack` allocating three GMP bignums per pixel, because
+  `Nat`'s `<<<` has no scalar fast path in the Lean runtime (unlike `>>>`,
+  `land`, `lor`). confetti 1446 -> 417 ms, stress 3621 -> 976 ms.
+- **T44 integer compositing.** `normal`-mode layers moved off the f32
+  pipeline to integer source-over, 6.4x per pixel. An authorised fidelity
+  trade: `26_layers.svg` alone changes, 3.53% of its pixels, max delta one
+  level. Rollback point documented at `Canvas.compositeLayer`.
+
+README timings at 800 px over the day: confetti 232 -> 63 ms, stress
+734 -> 242 ms, icons 34 -> 26 ms. **stress at 2000 px with `--threads 4` is
+262.2 ms against resvg's 262.2 ms, dead even** over 11 interleaved runs.
+
+**Threading, concluded.** Hardware ceiling measured at 5.23x using fully
+independent processes, so the cap is memory bandwidth, not core count. We
+reach 3.5x. The gap is load imbalance, slowest band over mean 1.25.
+Over-decomposition *hurts* because the per-band cull is a fixed cost every
+band pays in full. Recorded as `tasks/T45-someday-hoist-band-culling.md`,
+not scheduled: 40-60 lines through the hot path, worth roughly 20%.
+
+**Proof boundary untouched.** `Task.spawn`/`Task.get` are pure, so band
+parallelism lives inside `render` and the effect layer never sees threads.
+Processes would need new `Op` constructors and would destroy the "exactly two
+effects" guarantee. Ruled out deliberately.
+
+**Docs and licensing.** `SPEC.md` added, stating the six theorems in English
+alongside the Lean and, in section 4, what is *not* established. README got a
+3x3 comparison table using only this project's own artwork, with per-image
+timings, and a formal licensing section. `NOTICE` rewritten after an audit
+found errors.
+
+**`ROADMAP.md` added** — features left, time estimates, and difficulty
+assessments for two candidate theorems (PNG round-trip, and compositor
+locality). Read that first when picking this up again.
+
+**State at the stopping point.** 23/27 fidelity, 27/27 tiles byte-identical,
+61/61 adversarial clean, theorems `[propext]`. Suite 868/1679 = 51.7%, up
+from 24.3%.
+
+**Left for Rowan.** The no-clobber exercise in
+`learn/hello-effects/Step3NoClobber.lean`. The T40 Pages site is still a
+cloud session on its own branch, not merged, not deployed. Worktree cleanup
+needs running locally (the sandbox blocks `.git/worktrees` writes):
+
+```
+git worktree prune && git branch -D t16-arcs t17-flatten t18-gradients \
+  t23-dashes t24a-basics t24b-transform-origin t25-fonts t27-switch t29-css \
+  t30-quads t31-edge-rounding t32-gallery t34-paint-order t36-text t37-dropzone
+```
