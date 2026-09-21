@@ -303,7 +303,7 @@ difficulty, since that is what was missing:
 | 2 | input ≠ output | M3b.0 | free | subsumed by no-clobber |
 | 3 | no clobbering | M3b.1 | 1–2 days | needs the model change |
 | 4 | output size exact, then bounded | M3, M3b.2 | ~1 week, then a day | the grind |
-| 5 | bounded work | M3b.3 | see below | the weak one |
+| 5 | bounded work | M3b.3 | dropped | halting is enough |
 
 **Start with (1).** `render` rejects an oversized input before parsing, and
 the theorem is one line. It is the cheapest complete theorem available and a
@@ -318,21 +318,35 @@ trusted `execIO` grows from six lines to about eight, gaining one
 `pathExists` call. This is also the exercise sitting in
 `learn/hello-effects/Step3NoClobber.lean`.
 
-**(4) is where the time goes**, and it is the same `forIn` pain as the
-locality theorem in 3b: `Png.zlibStored` and `Png.encode` want rewriting as
-explicit recursion with `termination_by` before anything can be proved about
-their sizes. Doing 3b first would make this cheaper, and vice versa. They
-share the idiom.
+**(4) is smaller than PLAN.md's five-step sketch suggests.** Rowan's
+observation on 2026-09-21 is correct: with stored blocks the output size is a
+function of `w` and `h` alone, so the statement is definitional rather than
+discovered. Better still, the function is already written and already
+load-bearing. `Png.zlibLen` (`LeanSvg/Png.lean:166`) is used twice in
+`Png.encode`: to size the buffer, and at `:219` to **write the IDAT chunk
+length field before the data exists**. If it were wrong the PNG would be
+malformed. So `sizeFor w h := 8 + 25 + (12 + zlibLen (4*w) h) + 12` needs no
+inventing, and the theorem reduces to a single lemma — `zlibStoredRows`
+appends exactly `zlibLen rowBytes h` bytes — with the rest being arithmetic
+on constants.
 
-**(5) is the weakest of the five and worth saying so.** Totality already
-guarantees termination; this would bound *duration*, which is arguably
-operational rather than a proof obligation. Fuel threaded through `render` is
-pure and provable but invasive, touching every hot loop and costing
-performance. A wall-clock cap in the trusted shell is three lines but is not
-a theorem and grows the trusted core. Worth noting that invariant 3 (every
-loop bounded by input size or a constant) plus (1) plus the existing
-dimension checks already give a finite bound *structurally* — turning that
-argument into a theorem is the real work, and it is large.
+The remaining work is the `forIn` idiom, shared with the locality theorem in
+3b: `zlibStoredRows` wants rewriting as explicit recursion with
+`termination_by` before anything can be proved about its length. Doing either
+of 3b or this first makes the other cheaper.
+
+**This is the theorem with the closing window**, and it is the claim the
+earlier draft of 3a got wrong. The round trip does not degrade when
+compression lands, because lean-zip proves it. The *exact* size theorem does:
+under real DEFLATE the output length depends on pixel content, so it weakens
+from an equality to an upper bound. `PLAN.md` near line 528 already noted
+this. If the exact version is wanted, it has to be proved while the encoder
+emits stored blocks.
+
+**(5) is dropped.** Decided 2026-09-21: halting is enough, and bounding
+duration is operational rather than a proof obligation. Totality already
+guarantees termination. Do not thread fuel through `render` — it would touch
+every hot loop and cost performance for a property nobody asked for.
 
 ## 4. A cleaner way to take lean-zip: proof-time, not run-time
 
