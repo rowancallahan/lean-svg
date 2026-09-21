@@ -302,7 +302,7 @@ difficulty, since that is what was missing:
 | 1 | max input size | M3b.4 | ~half a day | a real theorem for almost no proof burden |
 | 2 | input ≠ output | M3b.0 | free | subsumed by no-clobber |
 | 3 | no clobbering | M3b.1 | 1–2 days | needs the model change |
-| 4 | output size exact, then bounded | M3, M3b.2 | ~1 week, then a day | the grind |
+| 4 | output size upper bound | M3b.2 | ~2–3 days | skip M3; the bound is enough |
 | 5 | bounded work | M3b.3 | dropped | halting is enough |
 
 **Start with (1).** `render` rejects an oversized input before parsing, and
@@ -318,30 +318,42 @@ trusted `execIO` grows from six lines to about eight, gaining one
 `pathExists` call. This is also the exercise sitting in
 `learn/hello-effects/Step3NoClobber.lean`.
 
-**(4) is smaller than PLAN.md's five-step sketch suggests.** Rowan's
-observation on 2026-09-21 is correct: with stored blocks the output size is a
-function of `w` and `h` alone, so the statement is definitional rather than
-discovered. Better still, the function is already written and already
-load-bearing. `Png.zlibLen` (`LeanSvg/Png.lean:166`) is used twice in
-`Png.encode`: to size the buffer, and at `:219` to **write the IDAT chunk
-length field before the data exists**. If it were wrong the PNG would be
-malformed. So `sizeFor w h := 8 + 25 + (12 + zlibLen (4*w) h) + 12` needs no
-inventing, and the theorem reduces to a single lemma — `zlibStoredRows`
-appends exactly `zlibLen rowBytes h` bytes — with the rest being arithmetic
-on constants.
+**(4) is an upper bound only.** Decided 2026-09-21: the exact size is not
+wanted, so `PLAN.md` M3 can be skipped and M3b.2 proved directly. The
+statement is
 
-The remaining work is the `forIn` idiom, shared with the locality theorem in
-3b: `zlibStoredRows` wants rewriting as explicit recursion with
-`termination_by` before anything can be proved about its length. Doing either
-of 3b or this first makes the other cheaper.
+```
+render opts inp = .ok png → png.size ≤ Png.maxSize
+```
 
-**This is the theorem with the closing window**, and it is the claim the
-earlier draft of 3a got wrong. The round trip does not degrade when
-compression lands, because lean-zip proves it. The *exact* size theorem does:
-under real DEFLATE the output length depends on pixel content, so it weakens
-from an equality to an upper bound. `PLAN.md` near line 528 already noted
-this. If the exact version is wanted, it has to be proved while the encoder
-emits stored blocks.
+with `maxSize := sizeFor maxDim maxDim`. `render` already checks `w, h ≤
+maxDim` and `w * h ≤ maxPixels` at runtime, so what is needed is that
+`sizeFor` is monotone in both arguments, which is immediate since it is a sum
+of monotone terms.
+
+Rowan's argument for why this is definitional is right: with stored blocks
+the size is a function of `w` and `h` alone. The function is also already
+written and already load-bearing. `Png.zlibLen` (`LeanSvg/Png.lean:166`) is
+used twice in `Png.encode`, once to size the buffer and once at `:219` to
+**write the IDAT chunk length field before the data exists**. If it were
+wrong the PNG would be malformed, so the encoder already stakes structural
+validity on it. `sizeFor w h := 8 + 25 + (12 + zlibLen (4*w) h) + 12` needs
+no inventing.
+
+Wanting only the inequality makes this materially easier than M3 would have
+been. The exact version has to nail the block-count arithmetic
+(`nblocks = ⌈raw/65535⌉`) precisely; the bound tolerates any over-estimate,
+so the induction over `zlibStoredRows` never has to be tight. The remaining
+work is the `forIn` idiom shared with the locality theorem in 3b:
+`zlibStoredRows` wants rewriting as explicit recursion with `termination_by`.
+Doing either of 3b or this first makes the other cheaper.
+
+**No deadline on this one.** An earlier draft of this paragraph called it the
+theorem with the closing window. That was true only for the exact version.
+An upper bound survives real compression, because a conforming DEFLATE
+encoder falls back to stored blocks whenever compression would not help, so
+the compressed output is at most the stored size plus a small constant. The
+bound holds either way, and lean-zip can land whenever.
 
 **(5) is dropped.** Decided 2026-09-21: halting is enough, and bounding
 duration is operational rather than a proof obligation. Totality already
@@ -388,7 +400,7 @@ back. Not before.
 1. T43, CI proofs. Small, protects the six theorems that already hold.
 2. M3b.4, max input size. Half a day, and a complete theorem.
 3. M3b.1, no-clobber, with the model change. The centrepiece.
-4. M3, output shape. The grind, and it unlocks M3b.2.
+4. M3b.2, output size upper bound. Skip M3 — only the inequality is wanted.
 5. The PNG round trip, as a separate proof-time package per section 4.
 6. The locality theorem, cheap half. Shares the loop idiom with (4).
 
