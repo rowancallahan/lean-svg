@@ -27,6 +27,10 @@ def maxVal : Fx := 1073741824
 def clamp (a : Fx) : Fx :=
   if a > maxVal then maxVal else if a < -maxVal then -maxVal else a
 
+/-- Is `a` in the range `clamp` maps onto?  Hot paths that do their arithmetic
+in a fixed width (`Mat.apply`) check this before they assume a bound. -/
+@[inline] def inRange (a : Fx) : Bool := -maxVal ≤ a && a ≤ maxVal
+
 def ofNat (n : Nat) : Fx := clamp ((n : Int) * 256)
 def ofInt (n : Int) : Fx := clamp (n * 256)
 

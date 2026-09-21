@@ -25,9 +25,10 @@ structure Options where
   transparent (or the background colour).  The zoom is still the one `width`
   or `zoom` asks for, so the caller can tile a large virtual image. -/
   viewport : Option (Int × Int × Nat × Nat) := none
-  /-- How many horizontal bands of the output to render in parallel.  `0` or `1`
-  is the serial path, unchanged and the reference.  Higher values split the
-  output into at most that many bands of consecutive rows, render each as a
+  /-- How many threads to render the output on.  `0` or `1` is the serial path,
+  unchanged and the reference.  Higher values split the output into bands of
+  consecutive rows — several per thread, see `Render.bandsPerThread`, so that
+  the task pool can even out bands that are not equal work — render each as a
   `Task`, and concatenate the rows.  A band *is* a `viewport` tile (§3.8), so
   the output is byte-identical whatever this is set to. -/
   threads : Nat := 0
@@ -309,7 +310,11 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
           let scale := Int.ediv cov16 256
           let covScale := (Int.ediv (255 * scale) 256).toNat
           let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
-          match ((Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip)).map
+          -- `clip.vx`/`clip.vy` put the canvas in the whole zoomed image, which
+          -- is where `hairline`'s edge clamps belong: without them a band or a
+          -- tile pins a sample to its own first row instead of the image's.
+          match ((Raster.hairline W H dev st.cap a8 covScale clip.vx clip.vy).bind
+              (clipMask clip)).map
               (Clip.applyChain chain) with
           | some m => paintMask cv st.stroke m st.strokeOpacity
           | none => cv
@@ -526,16 +531,38 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
       curOy := parent.oy
   return (w, h, cur.toRgbaBytes)
 
+/-- Bands per worker thread.
+
+One band per thread is what a row split costs least, and it is also what makes
+the slowest band the whole render: rows are not equal work, so a band that
+lands on the busy part of the image finishes long after the others and every
+other thread waits for it.  Measured at `--width 2000` on four cores (median of
+15 interleaved runs), cutting *more* bands than threads and letting the task
+pool hand them out as workers free up is worth 10-30 %:
+
+| file | k = threads | k = 2·threads | k = 3·threads | k = 4·threads | k = 6·threads |
+|---|---|---|---|---|---|
+| `confetti` | 288 ms | 331 ms | 291 ms | **259 ms** | 266 ms |
+| `16_stress_2000` | 566 ms | 486 ms | **480 ms** | 489 ms | 519 ms |
+| `24_gradients` | 302 ms | 241 ms | **218 ms** | 220 ms | 224 ms |
+| `26_layers` | 475 ms | 448 ms | 445 ms | 411 ms | **362 ms** |
+| `icons` | 102 ms | 99 ms | 93 ms | **86 ms** | 87 ms |
+
+Past that the per-band fixed cost — one `Canvas`, and one culling pass over
+every shape in the document — starts to outweigh what better balance buys
+(`16_stress_2000` has 2 001 shapes and pays about 13 ms per band for the
+culling alone).  Four is where the two curves cross. -/
+def bandsPerThread : Nat := 4
+
 /-- How many bands to cut `h` output rows into for `threads` threads.
 
 `1` means "render serially", which is what happens unless the caller asked for
 at least two threads and the canvas is tall enough to be worth splitting: at
 least `2·threads` rows, and never a band shorter than 32 rows, so the per-band
-overhead (one `Canvas`, one culling pass over the shapes) stays small next to
-the work a band does. -/
+overhead stays small next to the work a band does. -/
 def bandCount (threads h : Nat) : Nat :=
   if threads < 2 || h < 2 * threads then 1
-  else Nat.max 1 (Nat.min threads (h / 32))
+  else Nat.max 1 (Nat.min (bandsPerThread * threads) (h / 32))
 
 /-- Split a `w × h` output into `k` bands of rows, render them in parallel and
 concatenate their RGBA bytes.

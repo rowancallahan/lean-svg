@@ -78,9 +78,42 @@ def identity : Mat := ⟨65536, 0, 0, 65536, 0, 0⟩
 def mk' (a b c d : Int) (e f : Fx) : Mat :=
   ⟨clampLin a, clampLin b, clampLin c, clampLin d, Fx.clamp e, Fx.clamp f⟩
 
+/-- Is `v` inside the bound `clampLin` imposes on a linear coefficient? -/
+@[inline] def linInRange (v : Int) : Bool := -linMax ≤ v && v ≤ linMax
+
+/-- Map a point through the matrix.
+
+This is the hottest arithmetic in the renderer — every flattened point of every
+shape goes through it — and it is exactly the case `tasks/README.md`'s
+invariant 4 warns about.  `m.a * p.x` is a 16.16 coefficient times an `Fx`, so
+it is a 2^58-ish product even for an ordinary document, while Lean's unboxed
+`Int` stops at 32 bits (`lean_int_mul` falls back to `lean_int_big_mul`, which
+allocates an `mpz` and frees it again).  A callgrind run of
+`16_stress_2000.svg` at `--width 400` put `Mat.apply` at 21 % of all
+instructions, most of it GMP and `malloc`.
+
+`Int64` is unboxed, allocates nothing, and is *exact* here: with
+`|p.x|, |p.y| ≤ Fx.maxVal` (2^30) and `|m.a| … |m.d| ≤ linMax` (2^28) — the
+bounds `Fx.clamp` and `clampLin` put on every value this module produces —
+each product is at most 2^58 and their sum at most 2^59, well inside `Int64`.
+`>>> 16` is an arithmetic shift, which is floor division by 65536, which is
+`Int.ediv · 65536` for a positive divisor.  The result is clamped back to `Fx`
+as before.
+
+The guard is not decoration: a `Mat` or a `Pt` built outside those bounds would
+wrap around, so anything out of range takes the old unbounded `Int` path
+instead.  Nothing in the renderer reaches it (every constructor clamps), and it
+costs six scalar comparisons on the path that does. -/
 def apply (m : Mat) (p : Pt) : Pt :=
-  ⟨Fx.clamp (Int.ediv (m.a * p.x + m.c * p.y) 65536 + m.e),
-   Fx.clamp (Int.ediv (m.b * p.x + m.d * p.y) 65536 + m.f)⟩
+  if Fx.inRange p.x && Fx.inRange p.y
+      && linInRange m.a && linInRange m.b && linInRange m.c && linInRange m.d then
+    let x := Int64.ofInt p.x
+    let y := Int64.ofInt p.y
+    ⟨Fx.clamp (((Int64.ofInt m.a * x + Int64.ofInt m.c * y) >>> 16).toInt + m.e),
+     Fx.clamp (((Int64.ofInt m.b * x + Int64.ofInt m.d * y) >>> 16).toInt + m.f)⟩
+  else
+    ⟨Fx.clamp (Int.ediv (m.a * p.x + m.c * p.y) 65536 + m.e),
+     Fx.clamp (Int.ediv (m.b * p.x + m.d * p.y) 65536 + m.f)⟩
 
 /-- `m.mul n` applies `n` first, then `m` (matrix product `m · n`). -/
 def mul (m n : Mat) : Mat :=

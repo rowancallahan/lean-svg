@@ -55,7 +55,18 @@ the tie and rounds down instead. -/
 @[inline] def unpremul (c a : Nat) : Nat :=
   if a == 0 then 0 else Nat.min 255 ((c * 510 + a) / (2 * a))
 
-@[inline] def pack (r g b a : Nat) : Nat := (r <<< 24) ||| (g <<< 16) ||| (b <<< 8) ||| a
+/-- Pack four 8-bit channels into one pixel word.
+
+The shifts are written as multiplications by a power of two, which is the same
+`Nat` (`n <<< k = n * 2^k`) but not the same machine code: `lean_nat_shiftl` is
+the one bitwise operation Lean's runtime has no scalar fast path for — it goes
+out of line into GMP and allocates an `mpz` — while `lean_nat_mul` is inlined
+with an overflow check.  `F32.pow2Tab` below says the same thing about the
+float path; this is the line that every painted pixel goes through.  The three
+constants are under `2^32`, so the code generator emits them as scalars rather
+than as `lean_cstr_to_nat` calls. -/
+@[inline] def pack (r g b a : Nat) : Nat :=
+  (r * 16777216) ||| (g * 65536) ||| (b * 256) ||| a
 
 def new (w h : Nat) (bg : Option Rgba) : Canvas :=
   let v := match bg with

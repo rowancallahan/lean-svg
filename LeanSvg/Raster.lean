@@ -406,13 +406,31 @@ is what `RectClipBlitter` does. -/
 to the mask rectangle `(mx, my, bw, bh)`.
 
 The single loop runs over the segment's major axis after that clip, so it is
-bounded by `bw` or `bh`; everything else is straight-line arithmetic. -/
-def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (cov : Array Nat) (p q : Pt) :
-    Array Nat := Id.run do
-  let ax := toFDot6 p.x
-  let ay := toFDot6 p.y
-  let bx := toFDot6 q.x
-  let by_ := toFDot6 q.y
+bounded by `bw` or `bh`; everything else is straight-line arithmetic.
+
+`vx`/`vy` say where the canvas' pixel `(0, 0)` sits in the whole zoomed image —
+`(0, 0)` for an ordinary render, the tile's origin for a `--viewport` tile or a
+parallel band.  The two clamps below are the reason they have to be passed in
+rather than assumed zero: `do_anti_hairline` pins a sample that falls above the
+*image* to its top row, and a tile that starts at row `y0` would otherwise pin
+to its own first row instead, which is a different pixel.  Worse, the pin is
+written back into the running `fy`, so every later step of that segment is
+displaced too — one segment entering a band from above used to differ for the
+whole of its length.  `Grad.build` solves the same problem the same way (T18);
+with `vx = vy = 0` this is the code it always was. -/
+def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (vx vy : Int) (cov : Array Nat)
+    (p q : Pt) : Array Nat := Id.run do
+  -- `toFDot6` truncates *toward zero*, which is what `fdot6::from_f32` does but
+  -- is not invariant under the tile's translation: a coordinate that is
+  -- negative in this canvas and positive in the whole image rounds the other
+  -- way, which moves the segment by up to 1/64 px and with it every sample it
+  -- lays down.  Truncating the whole-image coordinate and shifting the result
+  -- back by the exact integer `v·64` gives the full render's `FDot6` on the
+  -- nose, and is the identity when `vx = vy = 0`.
+  let ax := toFDot6 (p.x + vx * 256) - vx * 64
+  let ay := toFDot6 (p.y + vy * 256) - vy * 64
+  let bx := toFDot6 (q.x + vx * 256) - vx * 64
+  let by_ := toFDot6 (q.y + vy * 256) - vy * 64
   let horiz := (bx - ax).natAbs > (by_ - ay).natAbs
   -- orient along the major axis `u`; `v` is the minor one
   let (u0, v0, u1, v1) :=
@@ -446,6 +464,10 @@ def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (cov : Array Nat) (p q : Pt)
     sStop := 0
   if istart ≥ istop then return cov
   let n := (istop - istart).toNat
+  -- where the canvas' minor axis starts in the whole image: the clamps below
+  -- are the image's top (or left) edge, not this canvas'
+  let off : Int := if horiz then vy else vx
+  let fyMin : Int := -(off * 65536)
   let mut fy : Int := fstart + 32768
   let mut cov := cov
   for k in [0:n] do
@@ -453,13 +475,15 @@ def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (cov : Array Nat) (p q : Pt)
       if k == 0 then sStart
       else if k + 1 == n && sStop > 0 then sStop
       else 64
-    if fy < 0 then fy := 0
+    if fy < fyMin then fy := fyMin
     let ly := Int.ediv fy 65536
     let a := Int.emod (Int.ediv fy 256) 256
     let aLo := (Int.ediv (a * m64) 64).toNat
     let aHi := (Int.ediv ((255 - a) * m64) 64).toNat
     -- index of the "upper" minor pixel: `HLine` drops a -1, the others clamp
-    let hiI := if flat && horiz then ly - 1 else (if ly < 1 then 0 else ly - 1)
+    -- (to the image's first row/column, `-off` in canvas coordinates)
+    let hiI := if flat && horiz then ly - 1
+      else (if ly + off < 1 then -off else ly - 1)
     let loI := if flat then ly else hiI + 1
     let i := istart + k
     if horiz then
@@ -495,8 +519,8 @@ mask clipped to a `W × H` canvas.  `a8` is the final paint alpha the mask will
 be filled with (it is what makes the src-over accumulation exact) and
 `covScale ∈ [0, 255]` is `treat_as_hairline`'s width factor.  Returns `none` if
 nothing is visible. -/
-def hairline (W H : Nat) (polys : Array Poly) (cap : Cap) (a8 covScale : Nat) :
-    Option Mask := Id.run do
+def hairline (W H : Nat) (polys : Array Poly) (cap : Cap) (a8 covScale : Nat)
+    (vx vy : Int) : Option Mask := Id.run do
   if a8 == 0 || covScale == 0 then return none
   -- flatten to segments, applying the cap extension where tiny-skia does
   let mut segs : Array (Pt × Pt) := #[]
@@ -539,7 +563,7 @@ def hairline (W H : Nat) (polys : Array Poly) (cap : Cap) (a8 covScale : Nat) :
   let bh := y1i - y0i
   let mut cov : Array Nat := Array.replicate (bw * bh) 0
   for s in segs do
-    cov := hairSeg bw bh a8 covScale x0i y0i cov s.1 s.2
+    cov := hairSeg bw bh a8 covScale x0i y0i vx vy cov s.1 s.2
   return some ⟨x0i, y0i, bw, bh, cov⟩
 
 end Raster
