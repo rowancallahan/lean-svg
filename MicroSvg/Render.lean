@@ -91,17 +91,14 @@ geometry relative to a whole-pixel mask origin, so a tile's pixels are bit for
 bit the whole image's pixels. -/
 def canvasSetup (root : RootInfo) (opts : Options) :
     Except String (Nat × Nat × Mat × Clip) := do
-  let (wFx, hFx) ← match root.width, root.height, root.viewBox with
-    | some w, some h, _ => pure (w, h)
-    | some w, none, some (_, _, vw, vh) => pure (w, if vw > 0 then Int.ediv (w * vh) vw else w)
-    | none, some h, some (_, _, vw, vh) => pure (if vh > 0 then Int.ediv (h * vw) vh else h, h)
-    | none, none, some (_, _, vw, vh) => pure (vw, vh)
-    -- No width/height and no viewBox at all: resvg falls back to its default
-    -- document size rather than failing (usvg `resolve_svg_size`, whose
-    -- `state.view_box` and `Options::default_size` both default to
-    -- `Size::from_wh(100.0, 100.0)`).  A negative/zero size still fails below.
-    | none, none, none => pure (Fx.ofNat 100, Fx.ofNat 100)
-    | _, _, _ => throw "cannot determine image size: need width and height, or a viewBox"
+  -- `resolveRootSize` (Svg.lean) resolves `width`/`height` against the
+  -- `viewBox` when present (percentages included) or the 100×100 default
+  -- otherwise (usvg `resolve_svg_size`; no width/height/viewBox at all also
+  -- falls back to that default rather than failing).  A negative/zero size
+  -- still fails below.
+  let (wFx, hFx) ← match resolveRootSize root with
+    | some sz => pure sz
+    | none => throw "cannot determine image size: need width and height, or a viewBox"
   if wFx ≤ 0 || hFx ≤ 0 then throw "image size must be positive"
   let vbMat : Mat := match root.viewBox with
     | some (vx, vy, vw, vh) =>
