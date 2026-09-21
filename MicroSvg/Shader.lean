@@ -25,9 +25,15 @@ attributes as `Option`s (absent means "inherit through `href`") and its direct
 `url(#id)` into a `Svg.Paint.gradient i` at parse time, and `Render.drawShape`
 can turn that index into a device-space `Rt` shader.  The shape of the table
 — an id-indexed array of resolved definitions plus a bucket index — is meant
-to grow: T19 (`use`/`symbol`) and T20/T21 (`clipPath`/`mask`) can add their
-own entry kinds beside `RawDef` and reuse `hashId`/`lookup` unchanged, since
-nothing below is specific to gradients except `resolve` itself.
+to grow, and nothing below is specific to gradients except `resolve` itself,
+so another *self-contained* definition (one the pre-pass can finish on its
+own, from its element's own attributes) can add its entry kind beside
+`RawDef` and reuse `hashId`/`lookup` unchanged.
+
+T20's `clipPath` is the other case: its contents come out of the CSS cascade,
+which only the main walk runs, so the same pre-pass reserves a slot for it and
+the walk fills it in.  `Svg.lean`'s "the shape of a defs table" writes both
+halves down, and T19's `use` and T21's `mask` should follow whichever fits.
 
 ## What is matched
 

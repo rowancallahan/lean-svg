@@ -64,7 +64,8 @@ ByteArray ──Xml.parse──▶ Array Event ──Svg.interpret──▶ Doc 
    │        Render.canvasSetup: size, viewBox transform, zoom
    ▼                                                       ▼
  for each Node: groupBegin ──▶ push a layer canvas (§3.9)
-                groupEnd   ──▶ Canvas.compositeLayer (opacity, blend mode)
+                groupEnd   ──▶ Clip.applyToCanvas (§3.10) ──▶ Canvas.compositeLayer
+                               (opacity, blend mode)
                 shape: flatten (user space) ──▶ [fill] map ctm ──▶ Raster.rasterize ──▶ Canvas.fillMask
                                        └▶ [stroke] strokePoly ──▶ map ctm ──▶ rasterize ──▶ fillMask
                                                                                    │
@@ -94,9 +95,10 @@ Text content is never interpreted.
 
 ### 3.3 SVG subset
 
-Elements: `svg g path rect circle ellipse line polygon polyline`. Unknown
-elements and `defs`, `use`, `text`, `image`, `style`, gradients, clip paths,
-masks, filters are skipped with their subtrees. Attributes: `fill stroke
+Elements: `svg g path rect circle ellipse line polygon polyline`, plus
+`defs`, `clipPath`, `switch`, `text`/`tspan`, `style` and the two gradient
+elements. Unknown elements and `use`, `image`, `mask`, `marker`, `pattern`,
+filters are skipped with their subtrees. Attributes: `fill stroke
 fill-opacity stroke-opacity opacity fill-rule stroke-width stroke-linecap
 stroke-linejoin stroke-miterlimit transform visibility display style`.
 Paint: `none`, `#rgb[a]`, `#rrggbb[aa]`, `rgb()`/`rgba()`, ~70 named colours,
@@ -109,7 +111,8 @@ This is a superset of usvg's *micro SVG* output (`svg g path` with absolute
 with `usvg` and rendered here; text becomes paths on the way.
 
 Also `opacity`, `mix-blend-mode` and `isolation`, which make an element a
-compositing layer (§3.9).
+compositing layer (§3.9), and `clip-path`/`clip-rule`/`clipPathUnits`
+(§3.10).
 
 Known deviations: nested `<svg>` skipped; `color-dodge` and `color-burn` are
 within two levels of resvg rather than exact (§3.9).
@@ -237,6 +240,9 @@ the resulting mask is clipped to the layer and shifted into it, the coverage of
 a shape does not depend on which layer it lands in, and a band's layers are its
 own: `--threads N` stays byte-identical (§3.8), as do tiles.
 
+A `clip-path` on a container is the fourth reason to open one (§3.10); it is
+`should_isolate`'s first case.
+
 Bounds: nesting is capped at `Svg.maxLayerDepth` (10) — deeper groups degrade to
 the old fold, never an error — and live layer area at `Render.maxLayerPixels`
 (4 × `maxPixels`), past which the render is rejected with `layer budget`.
@@ -259,6 +265,52 @@ the one bitwise operation with no scalar fast path in the runtime (it always
 goes through GMP). So `F32` keeps every constant under `2^32` — hence the sign
 bit at the *bottom* of the packed word — and multiplies by a tabulated power of
 two instead of shifting left.
+
+### 3.10 `clipPath`
+
+A `clipPath` is rasterised into a device-space `Clip.Mask` — the union of its
+children's fills, each with its own `clip-rule`, transform and `clip-path`,
+built with tiny-skia's `Clear`/`Xor` arithmetic on a black pixmap and then
+inverted, exactly as resvg's `clip.rs` does. `clipPathUnits`, a `transform` on
+the `clipPath`, a `clip-path` on the `clipPath` itself, `<text>` children and
+usvg's validity rules (a clip with no valid child, a zero-scale transform or a
+zero-area `objectBoundingBox` drops the referencing element; an unresolvable
+`url(#id)` is ignored; a cycle drops the link) all follow usvg's
+`parser/clippath.rs`. Nesting fuel is 8 and the table is capped at
+`Svg.maxClipPaths`. Masks are cached per canvas, keyed on the clip, its device
+matrix and — only when some entry in the chain uses `objectBoundingBox` — the
+referencing element's box, so one clip shared by many shapes costs one mask.
+
+**Where the mask is applied.** resvg renders a clipped element into a layer and
+multiplies the *finished layer* by the mask once (`clip::apply`, tiny-skia's
+`DestinationIn`, `div255` per premultiplied channel). Two routes exist here and
+the element decides:
+
+* **Container** — the root `svg`, a `g`, a `switch`, a `text` — takes the resvg
+  route. The `clip-path` makes the element a layer (§3.9), the use is kept off
+  the inherited chain, and `Clip.applyToCanvas` multiplies the layer just
+  before `compositeLayer`. This is what makes two clipped children that overlap
+  on the clip's anti-aliased boundary correct: the coverage is applied to the
+  composite, not to each of them.
+* **Leaf shape** with no other reason for a layer keeps the cheaper route:
+  `Clip.applyChain` multiplies the shape's own coverage mask
+  (`cov8 → div255 → cov16`) before it is painted. A single shape has nothing to
+  overlap with, so the only difference from resvg is the colour rounding on the
+  clip edge — at most one level — and it saves a canvas allocation and a
+  composite per clipped shape (a document with a clip on each of 100 000 shapes
+  renders in 2.6 s rather than allocating 100 000 layers).
+
+Past `maxLayerDepth` a degraded group keeps its clip on the inherited chain, so
+it still clips, per shape.
+
+Masks are built in absolute band-device coordinates with the ordinary
+rasterizer, so §3.5's whole-pixel shift invariance carries over unchanged:
+tiles and `--threads N` stay byte-identical.
+
+Known gaps: `use` children of a `clipPath` (needs `use` support), the legacy
+`clip` property on `<image>`, and a text bounding box under
+`clipPathUnits="objectBoundingBox"`, whose glyph outlines are already on the
+`Fx` grid when the box is taken.
 
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
@@ -301,7 +353,10 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `MicroSvg/Canvas.lean` | premultiplied canvas, blending, `F32`, blend modes, layer composite, RGBA export |
 | `MicroSvg/Png.lean` | CRC-32, Adler-32, stored zlib, PNG chunks |
 | `MicroSvg/Xml.lean` | event-based XML subset parser with caps |
-| `MicroSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo` |
+| `MicroSvg/Shader.lean` | gradient paint servers, defs table, device-space shaders |
+| `MicroSvg/Text.lean` | text layout: runs, glyph outlines, anchoring |
+| `MicroSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo`, defs pre-pass |
+| `MicroSvg/Clip.lean` | `clipPath` → device masks, cache, coverage and layer application |
 | `MicroSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |
