@@ -1,3 +1,12 @@
+Copyright 2015 Google Inc. All Rights Reserved.
+Noto is a trademark of Google Inc.
+
+Noto Sans, Version 2.000 (GOOG). Latin subsets of the Regular, Bold and
+Italic faces are embedded in this project as LeanSvg/Fonts/*.lean. The font
+data is subsetted, which the licence below permits; Noto declares no Reserved
+Font Name. The trademark is not licensed by the OFL and is noted only for
+accuracy.
+
 This Font Software is licensed under the SIL Open Font License,
 Version 1.1.
 

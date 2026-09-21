@@ -500,6 +500,29 @@ tested by 1 920 identical renders and `run_tiles.py`.
 
 ## M7 — Verified DEFLATE via lean-zip  [Opus after checking the API]
 
+**Promoted to a requirement 2026-09-21, with measured evidence.** The PNG
+encoder emits *stored* (uncompressed) deflate blocks, so our output is several
+times larger than resvg's for the same pixels. Measured at `--width 800` by
+`docs/readme/render.py`:
+
+| image | lean-svg PNG | resvg PNG | ratio |
+|---|---|---|---|
+| icons (mostly flat colour) | 1626 KB | 30 KB | 55× |
+| confetti | 1626 KB | 48 KB | 34× |
+| stress (1500 shapes) | 2501 KB | 687 KB | 3.6× |
+
+Flat images are the worst case, because that is exactly what DEFLATE is good
+at. The README's committed PNGs are losslessly recompressed for this reason,
+which is a workaround, not a fix. This is the largest remaining gap between
+"correct" and "usable", and it is the one place a verified dependency exists
+and would settle it.
+
+Note for whoever does it: this is also the first dependency the project would
+take, so it widens the trusted computing base from "Lean core only". That is
+a real trade and should be stated in `SPEC.md` when it lands. A verified
+compressor is still far better than an unverified one, and better than
+shipping 55× files.
+
 - Add `kim-em/lean-zip` as a Lake dependency; replace `Png.zlibStored` with
   its compressor (zlib framing may or may not be provided; Adler-32 is).
   Keep the stored-block encoder as the default until the size theorem in M3

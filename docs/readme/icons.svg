@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260">
+  <!-- Original artwork for the lean-svg README. Apache-2.0, same as the project.
+       Six small marks, each exercising a different part of the renderer. -->
+  <style>
+    .lbl  { font-family: "Noto Sans"; font-size: 11px; fill: #5b6b73; text-anchor: middle; }
+    .mark { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e63946"/>
+      <stop offset="1" stop-color="#ffb703"/>
+    </linearGradient>
+    <clipPath id="half"><rect x="0" y="0" width="34" height="68"/></clipPath>
+  </defs>
+
+  <rect width="400" height="260" fill="#ffffff"/>
+
+  <!-- 1. arcs: a rounded pin, all A commands -->
+  <g transform="translate(46 42)">
+    <path class="mark" stroke="#457b9d"
+          d="M 0 34 A 24 24 0 1 1 0 34.01 M -34 34 A 34 34 0 0 1 34 34"/>
+    <circle cx="0" cy="34" r="6" fill="#457b9d"/>
+  </g>
+  <text class="lbl" x="46" y="126">arcs</text>
+
+  <!-- 2. dashes with round caps -->
+  <g transform="translate(160 42)">
+    <circle class="mark" cx="0" cy="34" r="30" stroke="#2a9d8f" stroke-dasharray="1 12"/>
+    <circle class="mark" cx="0" cy="34" r="18" stroke="#2a9d8f" stroke-dasharray="14 8" stroke-opacity="0.7"/>
+  </g>
+  <text class="lbl" x="160" y="126">dashes</text>
+
+  <!-- 3. gradient fill with even-odd -->
+  <g transform="translate(274 42)">
+    <path fill="url(#g1)" fill-rule="evenodd"
+          d="M 0 4 L 30 56 L -30 56 Z M 0 22 L 15 50 L -15 50 Z"/>
+  </g>
+  <text class="lbl" x="274" y="126">gradients</text>
+
+  <!-- 4. clipPath: only the left half of the ring is kept -->
+  <g transform="translate(46 150)">
+    <g clip-path="url(#half)" transform="translate(-34 0)">
+      <circle class="mark" cx="34" cy="34" r="26" stroke="#e76f51"/>
+      <circle cx="34" cy="34" r="10" fill="#e76f51" fill-opacity="0.6"/>
+    </g>
+    <path class="mark" stroke="#e76f51" stroke-opacity="0.35" d="M 0 4 L 0 64"/>
+  </g>
+  <text class="lbl" x="46" y="240">clipping</text>
+
+  <!-- 5. group opacity over overlapping shapes -->
+  <g transform="translate(160 150)" opacity="0.6">
+    <circle cx="-12" cy="34" r="22" fill="#457b9d"/>
+    <circle cx="12" cy="34" r="22" fill="#e63946"/>
+  </g>
+  <text class="lbl" x="160" y="240">layers</text>
+
+  <!-- 6. text with the embedded face, stroked and filled -->
+  <g transform="translate(274 150)">
+    <text x="0" y="46" text-anchor="middle" font-family="Noto Sans" font-size="38"
+          font-weight="bold" fill="#023047" stroke="#8ecae6" stroke-width="1.2">Ag</text>
+  </g>
+  <text class="lbl" x="274" y="240">text</text>
+</svg>

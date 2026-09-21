@@ -3,56 +3,65 @@ Copyright 2026 Rowan Callahan
 
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-This project contains ports of algorithms from, and was verified against,
-the following works. Their licences and notices apply to the corresponding
-material.
+Licences verified against upstream licence files and package manifests on
+2026-09-21. README.md carries the same credits with links.
 
-tiny-skia — https://github.com/linebender/tiny-skia
-  Copyright (c) 2020 Yevhenii Reizner. BSD-3-Clause.
-  Itself a port of parts of Skia, Copyright (c) 2011 Google Inc., BSD-3-Clause.
-  The anti-aliased scan converter (supersampling, coverage accumulation),
-  hairline stroking, cubic and quadratic subdivision counts, the dash
-  splitting rules, the lowp blend arithmetic and the gradient evaluation in
-  this project are fixed-point Lean re-implementations of tiny-skia's
-  algorithms (LeanSvg/Raster.lean, Geom.lean, Canvas.lean, Shader.lean).
-
-resvg and usvg — https://github.com/linebender/resvg
-  Copyright (c) 2017 Yevhenii Reizner. MPL-2.0.
-  Used as the rendering oracle in the test harness and as the reference for
-  SVG semantics (parsing defaults, conditional processing, CSS cascade,
-  paint servers, text layout). No resvg or usvg source code is included in
-  this project; behaviour was matched by reading it. The resvg test suite is
-  used locally for fidelity measurement and is not distributed here.
-
-simplecss — https://github.com/linebender/simplecss
-  Copyright (c) 2019 Yevhenii Reizner. MIT/Apache-2.0.
-  The supported CSS selector subset in LeanSvg/Css.lean follows its grammar.
-
-Lean 4 and Lake — https://github.com/leanprover/lean4
-  Apache-2.0. The language, standard library and build tool. No other
-  dependency is used: the trusted computing base is Lean core only.
-
-svgtypes — https://github.com/linebender/svgtypes
-  Copyright (c) 2018 Yevhenii Reizner. MIT/Apache-2.0.
-  Colour, length and transform parsing rules follow its behaviour.
+REDISTRIBUTED BY THIS PROJECT
 
 Noto Sans — https://github.com/notofonts/latin-greek-cyrillic
-  Copyright 2022 The Noto Project Authors. SIL Open Font License 1.1
-  (LeanSvg/Fonts/LICENSE-OFL.txt). Latin subsets of Noto Sans Regular,
-  Bold and Italic are embedded in the binary as LeanSvg/Fonts/*.lean.
+  Copyright 2015 Google Inc. All Rights Reserved.
+  Noto is a trademark of Google Inc.; trademarks are not licensed under the
+  SIL Open Font License. Version 2.000 (GOOG). Latin subsets of the Regular,
+  Bold and Italic faces are embedded in the binary as LeanSvg/Fonts/*.lean.
+  SIL Open Font License 1.1; full text and copyright notice in
+  LeanSvg/Fonts/LICENSE-OFL.txt. The faces are subsetted, which the OFL
+  permits; Noto declares no Reserved Font Name.
+
+Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
+  README.md. Apache-2.0, authored for this project.
+
+ALGORITHMS RE-IMPLEMENTED
+
+tiny-skia — https://github.com/linebender/tiny-skia
+  BSD-3-Clause. Copyright (c) 2011 Google Inc.; Copyright (c) 2020 Yevhenii
+  Reizner. tiny-skia is a port of Skia and its licence carries both notices.
+  The anti-aliased scan converter, hairline stroking, cubic and quadratic
+  subdivision counts, dash-splitting rules, lowp blend arithmetic, f32
+  layer-compositing pipeline and gradient evaluation in
+  LeanSvg/{Raster,Geom,Canvas,Shader}.lean are fixed-point Lean
+  re-implementations of its algorithms. No Rust or C++ source is included.
+
+BEHAVIOURAL REFERENCES
+
+resvg and usvg — https://github.com/linebender/resvg
+  Apache-2.0 OR MIT, as declared in the workspace manifest at tag v0.48.1 and
+  on main. Releases prior to the relicensing were MPL-2.0. Used as the
+  rendering oracle and as the reference for SVG semantics. No source included.
+
+simplecss — https://github.com/linebender/simplecss
+  Apache-2.0 OR MIT. The CSS selector subset in LeanSvg/Css.lean follows its
+  grammar.
+
+svgtypes — https://github.com/linebender/svgtypes
+  Apache-2.0 OR MIT. Colour, length and transform parsing follow its
+  behaviour.
+
+LANGUAGE AND TOOLCHAIN
+
+Lean 4 and Lake — https://github.com/leanprover/lean4
+  Apache-2.0. The project has no other build dependencies.
+
+NOT REDISTRIBUTED
+
+Cloned locally by the test harnesses, excluded by .gitignore, and included in
+no release artifact: the resvg test suite (MIT, Copyright (c) 2018 Reizner
+Evgeniy), simple-icons (CC0-1.0), Feather icons (MIT, Copyright (c) 2013-2023
+Cole Bemis), the resvg binary used as the oracle (Apache-2.0 OR MIT), and the
+Python test dependencies Pillow (MIT-CMU), NumPy (BSD-3-Clause) and fontTools
+(MIT).
+
+PRIOR ART
 
 lean-zip — https://github.com/kim-em/lean-zip
-  Copyright Kim Morrison. Apache-2.0. The "one input, one output, proven
-  effect boundary" project shape follows its example; no code is shared.
-
-Used only when running the tests, cloned locally and not distributed with
-this project: the resvg binary as the rendering oracle (MPL-2.0), the resvg
-test suite (MPL-2.0), simple-icons (CC0-1.0), Feather icons (MIT), Pillow
-(MIT-CMU), NumPy (BSD-3-Clause), fontTools (MIT). If a published page or
-release ever includes renders derived from the resvg test suite, that
-material is MPL-2.0 and must carry the suite's licence and state that the
-files are unmodified.
-
-README.md has the same credits in full, with links.
-
-Lean 4 and Lake — https://github.com/leanprover/lean4, Apache-2.0.
+  Apache-2.0. The single-input, single-output effect-boundary structure of
+  this project follows its design. No code is shared.
