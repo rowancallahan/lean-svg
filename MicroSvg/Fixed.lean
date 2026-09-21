@@ -265,4 +265,39 @@ def parseNumberList16 (bs : ByteArray) : Array Int := Id.run do
     | none => break
   return out
 
+open Bytes in
+/-- `parseLength` on the 16.16 grid (see `parseNumber16`), unit conversions
+and all.  Every branch is `parseLength`'s with the same factor: the unit
+arithmetic is a ratio, so it does not care which grid the number landed on.
+
+For a coordinate that is a *fraction of a bounding box* — a `clipPath`
+child's under `clipPathUnits="objectBoundingBox"` — the 1/256 grid is as
+wrong as it is for a transform coefficient, and for the same reason: the
+value is multiplied by the box before it becomes a position, so its
+quantization is amplified by the box's size (T20's finding, T31's cause).
+`Fx.maxVal * 256` is the same real-world range `Fx` allows, on this grid. -/
+def parseLength16 (bs : ByteArray) (i : Nat) : Option (Int × Nat) :=
+  match parseNumber16 bs i with
+  | none => none
+  | some (v, j) =>
+    let v := if v > Fx.maxVal * 256 then Fx.maxVal * 256
+             else if v < -(Fx.maxVal * 256) then -(Fx.maxVal * 256) else v
+    if startsWith bs j "px" then some (v, j + 2)
+    else if startsWith bs j "pt" then some (Int.ediv (v * 4) 3, j + 2)
+    else if startsWith bs j "pc" then some (v * 16, j + 2)
+    else if startsWith bs j "mm" then some (Int.ediv (v * 960) 254, j + 2)
+    else if startsWith bs j "cm" then some (Int.ediv (v * 9600) 254, j + 2)
+    else if startsWith bs j "in" then some (v * 96, j + 2)
+    else if startsWith bs j "em" then some (v * 16, j + 2)
+    else if startsWith bs j "ex" then some (v * 8, j + 2)
+    else if at' bs j == 37 then none
+    else some (v, j)
+
+/-- Parse a whole attribute value as a single 16.16 length. -/
+def parseLengthAll16 (bs : ByteArray) : Option Int :=
+  let t := Bytes.trim bs
+  match parseLength16 t 0 with
+  | some (v, j) => if j == t.size then some v else none
+  | none => none
+
 end MicroSvg

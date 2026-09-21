@@ -1,4 +1,4 @@
-import MicroSvg.Svg
+import MicroSvg.Clip
 import MicroSvg.Png
 
 /-!
@@ -192,12 +192,20 @@ transforming of every off-tile shape goes away.  The output does not change.
 the culling box contains and returns `none` — leaving the canvas alone — as
 soon as that box misses `[0, W) × [0, H)` in whole pixels, so every shape
 culled here is one that `rasterize` would have thrown away anyway. -/
-def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :=
+def drawShape (rootMat : Mat) (clip : Clip) (doc : Svg.Doc) (cv : Canvas) (cache : Clip.Cache)
+    (s : Shape) : Canvas × Clip.Cache :=
   let st := s.style
   let ctm := rootMat.mul st.ctm
   let W := cv.w
   let H := cv.h
-  if !(shapeOnCanvas ctm s W H) then cv else
+  if !(shapeOnCanvas ctm s W H) then (cv, cache) else
+  -- T20: the shape's `clip-path` chain (its own and its ancestors'), built in
+  -- device space and cached; an invalid clip drops the shape, as usvg does.
+  -- With no clips `chain` is empty and `Clip.applyChain` is the identity.
+  let (chain?, cache) := Clip.resolve doc W H rootMat cache st.clips
+  match chain? with
+  | none => (cv, cache)
+  | some chain =>
   let polys := flatten ctm s.cmds
   -- T18: a `Paint` is a colour, a gradient, or nothing.  A gradient is turned
   -- into a device-space shader here, against this shape's own bounding box and
@@ -216,7 +224,8 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
     | .none => cv
     | _ =>
       let dev := polys.map fun p => p.pts.map ctm.apply
-      match (Raster.rasterize W H dev st.evenOdd).bind (clipMask clip) with
+      match ((Raster.rasterize W H dev st.evenOdd).bind (clipMask clip)).map
+          (Clip.applyChain chain) with
       | some m => paintMask cv st.fill m st.fillOpacity
       | none => cv
   let drawStroke := fun (cv : Canvas) => match st.stroke with
@@ -241,19 +250,23 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
           let scale := Int.ediv cov16 256
           let covScale := (Int.ediv (255 * scale) 256).toNat
           let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
-          match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
+          match ((Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip)).map
+              (Clip.applyChain chain) with
           | some m => paintMask cv st.stroke m st.strokeOpacity
           | none => cv
         | none =>
           let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
           let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
           let dev := outline.map fun p => p.map ctm.apply
-          match (Raster.rasterize W H dev false).bind (clipMask clip) with
+          match ((Raster.rasterize W H dev false).bind (clipMask clip)).map
+              (Clip.applyChain chain) with
           | some m => paintMask cv st.stroke m st.strokeOpacity
           | none => cv
   -- `paint-order`: normally fill then stroke; `st.strokeFirst` (set when
   -- `stroke` precedes `fill` in the property's resolved order) swaps them.
-  if st.strokeFirst then drawFill (drawStroke cv) else drawStroke (drawFill cv)
+  -- T20's clip multiplies each coverage mask above, so it applies to whichever
+  -- order they are painted in.
+  ((if st.strokeFirst then drawFill (drawStroke cv) else drawStroke (drawFill cv)), cache)
 
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.
@@ -269,7 +282,16 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
   if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
-  let canvas := doc.shapes.foldl (drawShape rootMat clip) (Canvas.new w h opts.background)
+  -- T20: the clip-mask cache lives for one canvas, so a clip shared by many
+  -- shapes (or by every child of a clipped group) is rasterized once.
+  let canvas := Id.run do
+    let mut cv := Canvas.new w h opts.background
+    let mut cache : Clip.Cache := {}
+    for s in doc.shapes do
+      let (cv', cache') := drawShape rootMat clip doc cv cache s
+      cv := cv'
+      cache := cache'
+    return cv
   return (w, h, canvas.toRgbaBytes)
 
 /-- How many bands to cut `h` output rows into for `threads` threads.
