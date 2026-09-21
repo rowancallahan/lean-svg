@@ -8,7 +8,7 @@ bands in parallel with Lean's pure `Task` API, then concatenating rows. See
 `render`'s type and `Effect.lean` do not change.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T14` (branch
-`t14-parallel`). Files: `MicroSvg/Render.lean` (`Options.threads`, the band
+`t14-parallel`). Files: `LeanSvg/Render.lean` (`Options.threads`, the band
 split in `render`), `Main.lean` (`--threads N`). Do not touch `drawShape`
 (T12 is editing it) beyond calling it, nor `Geom.lean` (T11), `Raster.lean`,
 `Canvas.lean`, `Png.lean`.
@@ -49,8 +49,8 @@ split in `render`), `Main.lean` (`--threads N`). Do not touch `drawShape`
   machine's core count (`sysctl -n hw.ncpu`). If the Lean runtime needs a
   thread-pool setting for tasks to run in parallel in a compiled executable,
   find it (`LEAN_NUM_THREADS`? check `lean.h` / the runtime docs) and report.
-- Confirm `git diff main -- MicroSvg/Effect.lean` empty and that
-  `#print axioms MicroSvg.Prog.renderProgram_spec` still prints `propext`.
+- Confirm `git diff main -- LeanSvg/Effect.lean` empty and that
+  `#print axioms LeanSvg.Prog.renderProgram_spec` still prints `propext`.
 
 ## Done when
 
@@ -63,7 +63,7 @@ clean. Append `## Report`. Commit on the branch.
 
 ### What changed
 
-- `MicroSvg/Render.lean`
+- `LeanSvg/Render.lean`
   - `Options.threads : Nat := 0` (0 or 1 = serial, the reference path).
   - `Render.renderRgba (opts) (doc) : Except String (Nat × Nat × ByteArray)` —
     the old body of `render` between `Svg.interpret` and `Png.encode`, lifted
@@ -78,7 +78,7 @@ clean. Append `## Report`. Commit on the branch.
     the banded path and calls `Png.encode w h rgba` once.
 - `Main.lean`: `--threads N` and the usage text.
 
-Nothing else. `MicroSvg/Effect.lean`, `Geom.lean`, `Raster.lean`, `Canvas.lean`,
+Nothing else. `LeanSvg/Effect.lean`, `Geom.lean`, `Raster.lean`, `Canvas.lean`,
 `Png.lean` and `drawShape` untouched. No `partial`, `unsafe`, `@[extern]`,
 `panic!`, `!`-indexing, `Float` or `IO` added; the band loop is a `for` over
 `[0:k]`. `lake build` clean, no new warnings.
@@ -183,17 +183,17 @@ not a T14 one; the bytes are correct either way.
 ### Theorems, type, `Effect.lean`
 
 ```
-$ git diff main -- MicroSvg/Effect.lean | wc -c
+$ git diff main -- LeanSvg/Effect.lean | wc -c
 0
 
 $ lake env lean check.lean
-MicroSvg.render : MicroSvg.Options → ByteArray → Except String ByteArray
-'MicroSvg.Prog.renderProgram_spec' depends on axioms: [propext]
-'MicroSvg.Prog.runFS_frame' depends on axioms: [propext]
-'MicroSvg.Prog.runFS_input_only' depends on axioms: [propext]
-'MicroSvg.Prog.renderProgram_error_no_write' depends on axioms: [propext]
-'MicroSvg.Prog.renderProgram_ok_output' depends on axioms: [propext]
-'MicroSvg.Prog.renderProgram_ok_frame' depends on axioms: [propext]
+LeanSvg.render : LeanSvg.Options → ByteArray → Except String ByteArray
+'LeanSvg.Prog.renderProgram_spec' depends on axioms: [propext]
+'LeanSvg.Prog.runFS_frame' depends on axioms: [propext]
+'LeanSvg.Prog.runFS_input_only' depends on axioms: [propext]
+'LeanSvg.Prog.renderProgram_error_no_write' depends on axioms: [propext]
+'LeanSvg.Prog.renderProgram_ok_output' depends on axioms: [propext]
+'LeanSvg.Prog.renderProgram_ok_frame' depends on axioms: [propext]
 ```
 
 The scratch file also checks, and Lean accepts, `example (f : Unit → Nat) :

@@ -2,9 +2,9 @@
 
 Three mechanical items from FEATURES F8, each checkable by the build and a
 script. Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T24a`
-(branch `t24a-basics`). Files: `MicroSvg/Svg.lean` (only the `namedColors`
+(branch `t24a-basics`). Files: `LeanSvg/Svg.lean` (only the `namedColors`
 list, `parsePaint`, the `color` property in `applyProp`/`Style`) and
-`MicroSvg/Render.lean` (only `canvasSetup`'s size fallback). Other agents
+`LeanSvg/Render.lean` (only `canvasSetup`'s size fallback). Other agents
 are editing `parsePathData` (T16) and `drawShape` (T23): do not touch
 those functions. Invariants in `tasks/README.md`.
 
@@ -35,13 +35,13 @@ those functions. Invariants in `tasks/README.md`.
 - `lake build` clean.
 - `python3 tests/check_colors.py` passes.
 - `python3 tests/run_tests.py`: all 21 files byte-identical to main's
-  binary (`/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg`),
+  binary (`/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg`),
   except none should change at all; report.
 - Corpora: `python3 tests/run_corpora.py --corpus resvg --route direct
   --dir painting/color --dir structure/svg` before/after (copy the script
   with an output-dir override if `--out/--dir` are missing); report pass
   counts. `painting/color` should go from 1/4 to 4/4.
-- `python3 tests/run_adversarial.py` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+- `python3 tests/run_adversarial.py` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
@@ -50,7 +50,7 @@ those functions. Invariants in `tasks/README.md`.
 
 Files changed:
 
-- `MicroSvg/Svg.lean` — `namedColors` replaced with the full 148-entry CSS
+- `LeanSvg/Svg.lean` — `namedColors` replaced with the full 148-entry CSS
   Color Level 4 table (extended keywords + `rebeccapurple`, no
   `transparent`); added `PaintSpec` (`none | solid c | currentColor`) as
   `parsePaint`'s return type, with `currentcolor` now a distinct marker
@@ -61,7 +61,7 @@ Files changed:
   attribute, matching the existing CSS-wins rule) *before* folding in every
   other property, so `currentColor` always sees the element's own final
   `color` regardless of attribute order.
-- `MicroSvg/Render.lean` — `canvasSetup` gained a `none, none, none => pure
+- `LeanSvg/Render.lean` — `canvasSetup` gained a `none, none, none => pure
   (Fx.ofNat 100, Fx.ofNat 100)` arm (100×100 px default, matching usvg's
   `Size::from_wh(100.0, 100.0)` in `resolve_svg_size`/`Options::default_size`);
   the non-positive-size check right after is unchanged, so negative/zero
@@ -88,8 +88,8 @@ Verification:
 3. **Byte-identity vs main** — no built-in script does a binary-vs-binary
    byte diff, so I wrote one (ad hoc, `run` from the worktree, not
    committed) that renders all 21 `tests/svg/*.svg` with both
-   `.lake/build/bin/microsvg` (this worktree) and
-   `/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg` (main) and
+   `.lake/build/bin/lean-svg` (this worktree) and
+   `/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg` (main) and
    compares PNG bytes:
    - natural size: **21/21 identical**
    - `--width 800`: **21/21 identical**
@@ -143,7 +143,7 @@ Verification:
 5. **Adversarial** — `python3 tests/run_adversarial.py`: **38/38 clean, 0
    violations**.
 
-6. **`git diff main -- MicroSvg/Effect.lean`** — empty.
+6. **`git diff main -- LeanSvg/Effect.lean`** — empty.
 
 What I could not do:
 

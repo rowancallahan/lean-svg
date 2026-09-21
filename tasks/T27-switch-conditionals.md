@@ -1,7 +1,7 @@
 # T27 — `<switch>` and conditional processing attributes  [Sonnet]
 
 FEATURES F8 item. Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T27`
-(branch `t27-switch`). File: `MicroSvg/Svg.lean`, the `interpret` function
+(branch `t27-switch`). File: `LeanSvg/Svg.lean`, the `interpret` function
 and one new helper next to it. Do not touch `applyProp`, `Style`,
 `parsePaint`, `namedColors` (T24a is editing those), `parsePathData` (T16),
 or anything in other modules. Invariants in `tasks/README.md` (no
@@ -30,7 +30,7 @@ https://github.com/linebender/resvg)
 
 - `lake build` clean.
 - Before/after on the suite, fast sizes (run the *before* with the main
-  binary `/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg`, or by
+  binary `/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg`, or by
   running the harness once before you edit):
   ```
   python3 tests/run_corpora.py --fast --no-worst --corpus resvg --route direct \
@@ -44,17 +44,17 @@ https://github.com/linebender/resvg)
   (which feature it needs that we do not have).
 - `python3 tests/run_tests.py`: all 21 byte-identical to main's binary (none
   of them use these features).
-- `python3 tests/run_adversarial.py` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+- `python3 tests/run_adversarial.py` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
 
 ## Report
 
-**Files changed**: `MicroSvg/Svg.lean` only — added one new helper,
+**Files changed**: `LeanSvg/Svg.lean` only — added one new helper,
 `passesConditions`, immediately above `interpret`, and rewrote `interpret`.
-`MicroSvg/Effect.lean` is byte-identical to main (`git diff main --
-MicroSvg/Effect.lean` empty). No other module touched.
+`LeanSvg/Effect.lean` is byte-identical to main (`git diff main --
+LeanSvg/Effect.lean` empty). No other module touched.
 
 **What changed in `interpret`**: a parallel `switchSel : Array (Option
 (Option Nat))` tracks, per currently-open frame (pushed/popped alongside
@@ -147,7 +147,7 @@ the spec. Reproduced verbatim in `passesConditions`.
   "do not push or merge" I did not rebase). Comparing main's *current*
   binary against this worktree's edited one would conflate unrelated
   upstream drift with this change, so instead I built a same-worktree
-  reference binary from `MicroSvg/Svg.lean` at `aa0324f` (`git stash` /
+  reference binary from `LeanSvg/Svg.lean` at `aa0324f` (`git stash` /
   build / `git stash pop` / rebuild, never touching main), and diffed all
   21 fixtures byte-for-byte at natural size and `--width 800` against the
   post-edit binary: **all 21 identical** (none exercise `switch`,
@@ -157,4 +157,4 @@ the spec. Reproduced verbatim in `passesConditions`.
   (`12_badge`, `14_flower_transforms`, `15_spiral_stroke`, `16_stress_2000`
   — pre-existing, unrelated antialiasing/complex-path gaps).
 - `run_adversarial.py`: 38/38 clean, no violations.
-- `git diff main -- MicroSvg/Effect.lean`: empty.
+- `git diff main -- LeanSvg/Effect.lean`: empty.

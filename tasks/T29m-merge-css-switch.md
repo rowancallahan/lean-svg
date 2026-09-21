@@ -7,11 +7,11 @@ see `tasks/T27-switch-conditionals.md` `## Report`) is on `main`; **T29**
 (`<style>` CSS: a pre-pass collecting stylesheets, an `ElemInfo` ancestor
 stack, `Css.resolve` applied around `applyAttrs`, plus `Xml.Event.text` —
 see `tasks/T29-style-element-css.md` `## Report`) is on `t29-css`.
-`git merge main` on `t29-css` conflicts in five hunks of `MicroSvg/Svg.lean`
+`git merge main` on `t29-css` conflicts in five hunks of `LeanSvg/Svg.lean`
 (all inside `interpret`); everything else merges cleanly.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T29` (branch
-`t29-css`). Run `git merge main` there and resolve `MicroSvg/Svg.lean` so
+`t29-css`). Run `git merge main` there and resolve `LeanSvg/Svg.lean` so
 that **both behaviours are kept in full**: every element still goes through
 T27's condition checks and switch selection, and every element's attributes
 are still resolved through T29's CSS step (ancestor stack pushed/popped in
@@ -25,7 +25,7 @@ helpers except to fix a compile error the merge itself causes. Invariants in
 
 - `lake build` clean; `lake env lean tests/CssTests.lean` prints nothing.
 - Corpora, fast sizes, direct route (main's binary
-  `/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg` gives the
+  `/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg` gives the
   T27 numbers; the pre-merge `t29-css` binary gives the T29 numbers):
   ```
   python3 tests/run_corpora.py --fast --no-worst --corpus resvg --route direct \
@@ -39,7 +39,7 @@ helpers except to fix a compile error the merge itself causes. Invariants in
 - `python3 tests/run_tests.py`: all 23 files byte-identical to main's binary
   (compare PNG hashes).
 - `python3 tests/run_adversarial.py` clean (42 cases: T29 added two).
-- `git diff main -- MicroSvg/Effect.lean` empty.
+- `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit the merge on `t29-css` (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append a short `## Report` to this file (in the worktree, in the commit):
@@ -72,8 +72,8 @@ spec targets exactly.
 
 `lake build` clean (39 jobs); `lake env lean tests/CssTests.lean` prints
 nothing. `run_adversarial.py`: 42/42 clean. `git diff main --
-MicroSvg/Effect.lean`: empty. No conflict markers remain
-(`grep -n '^<<<<<<<\|^=======\|^>>>>>>>' MicroSvg/Svg.lean` empty).
+LeanSvg/Effect.lean`: empty. No conflict markers remain
+(`grep -n '^<<<<<<<\|^=======\|^>>>>>>>' LeanSvg/Svg.lean` empty).
 `run_tests.py` byte-identity across all 23 files was not run in this pass
 (skipped on explicit instruction to shorten the verification loop);
 recommend running it before treating this merge as fully verified.

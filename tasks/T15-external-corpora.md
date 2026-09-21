@@ -2,7 +2,7 @@
 
 ## Goal
 
-Measure microsvg against resvg on SVG files we did not write, with pass
+Measure lean-svg against resvg on SVG files we did not write, with pass
 rates by category, so the fidelity work is steered by real inputs. Python
 only; no Lean changes. Work in the main tree
 `/Users/rowancallahan/pdf_renderer`; do not touch `.worktrees/`.
@@ -26,12 +26,12 @@ If a clone fails (network), report it and continue with the others.
 
 ## Two render routes, both measured
 
-- **direct**: feed the original file to microsvg. Measures our own parser
+- **direct**: feed the original file to lean-svg. Measures our own parser
   and subset support. Errors (exit 1) are counted as "unsupported", not
   as failures of the renderer.
 - **via usvg**: pre-process with the usvg CLI into micro-SVG (text → paths,
   CSS resolved, `use` expanded, units resolved), then feed that to
-  microsvg. Install with `cargo install usvg` (Rust toolchain is at
+  lean-svg. Install with `cargo install usvg` (Rust toolchain is at
   /opt/homebrew/bin/cargo; this may take a few minutes) or check whether
   `brew install resvg` already provides `usvg` (`which usvg`). If usvg
   cannot be installed, report why and do the direct route only.
@@ -46,7 +46,7 @@ sets (they are 24 px and want a bit of area), with the same `-w` for resvg.
   {direct,usvg,both}`, `--limit N` (random sample with fixed seed, default
   all for the icon sets, all for the suite), `--tol 8`, `--threshold 0.99`,
   `--jobs N` (parallel subprocesses; default 4).
-- Per file: microsvg exit code and stderr (first line), resvg exit code,
+- Per file: lean-svg exit code and stderr (first line), resvg exit code,
   same-size check, metrics as in `tests/run_tests.py` (import them).
 - Output: `tests/out/corpora/<corpus>_<route>.csv` with every file, and a
   Markdown summary `tests/out/corpora/summary.md`:
@@ -98,7 +98,7 @@ T15b; see "Notes" below.)
 
 ### Run configuration
 
-Binary `.lake/build/bin/microsvg` as built by the main session, repo at
+Binary `.lake/build/bin/lean-svg` as built by the main session, repo at
 commit `f02dad9` at the start of the final run. `resvg`/`usvg` 0.48.1. tol
 8, threshold 0.99, jobs 4 - all defaults.
 
@@ -138,20 +138,20 @@ parser and element support, not the rasteriser.
 
 ### Top error messages, direct route
 
-Only **5 of 1679** suite files and **0 of 3748** icon files make microsvg
+Only **5 of 1679** suite files and **0 of 3748** icon files make lean-svg
 exit non-zero:
 
 | count | first stderr line |
 |---|---|
-| 4 | `microsvg: error: DTD internal subset is not allowed` |
-| 1 | `microsvg: error: cannot determine image size: need width and height, or a viewBox` |
+| 4 | `lean-svg: error: DTD internal subset is not allowed` |
+| 1 | `lean-svg: error: cannot determine image size: need width and height, or a viewBox` |
 
 This is the most important caveat in the report: "unsupported" is almost
-invisible as an exit code. microsvg parses filters, masks, gradients, text
+invisible as an exit code. lean-svg parses filters, masks, gradients, text
 and arcs without complaint and then silently omits them, so unsupported
 features surface as wrong pixels, not as errors. The `pass% (all)` column,
 not the error count, is the honest measure of coverage. The usvg route
-produces zero microsvg errors and zero usvg errors across all 5427 files.
+produces zero lean-svg errors and zero usvg errors across all 5427 files.
 
 ### Split by elliptical arcs in the source path data
 

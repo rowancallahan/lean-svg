@@ -1,4 +1,4 @@
-# microsvg
+# lean-svg
 ## Human Preamble
 An experiment in specification based programming.
 The overall goal here is to my understanding of theorems on programs, and how to use theorems on programs to allow for more unrestricted use of computer generated code.
@@ -26,10 +26,10 @@ Fidelity is checked against [resvg](https://github.com/linebender/resvg);
 
 ```bash
 lake build
-.lake/build/bin/microsvg tests/svg/01_triangle.svg out.png
-.lake/build/bin/microsvg in.svg out.png --width 800 --background white
+.lake/build/bin/lean-svg tests/svg/01_triangle.svg out.png
+.lake/build/bin/lean-svg in.svg out.png --width 800 --background white
 # one 512x512 tile of a 4000 px wide image, for a zoomable viewer
-.lake/build/bin/microsvg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
+.lake/build/bin/lean-svg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
 ```
 
 Exit codes: 0 success, 1 render error (message on stderr, no file written),
@@ -49,3 +49,83 @@ python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
 
 - `DESIGN.md` — what is proven, what is trusted, threat model, algorithms.
 - `PLAN.md` — milestones, settled decisions, what to delegate.
+
+## Licensing and credits
+
+lean-svg is licensed under the **Apache License 2.0** (`LICENSE`). `NOTICE`
+carries the same credits as this section and travels with any redistribution,
+as clause 4(d) of that licence requires.
+
+This project has no build dependencies: the trusted computing base is Lean
+core only. Everything below is either embedded in the binary, an algorithm
+this code re-implements, a behavioural reference that was read but not
+copied, or a tool used only when running the tests.
+
+### Embedded in the binary, and so redistributed
+
+| what | licence |
+|---|---|
+| **Noto Sans** Regular, Bold and Italic, Latin subsets, generated into `LeanSvg/Fonts/*.lean` | SIL Open Font License 1.1 — Copyright 2022 The Noto Project Authors, [notofonts/latin-greek-cyrillic](https://github.com/notofonts/latin-greek-cyrillic). Full text in `LeanSvg/Fonts/LICENSE-OFL.txt`. The fonts are subsetted, which the OFL permits; Noto declares no Reserved Font Name. |
+
+### Algorithms this code re-implements
+
+| what | licence |
+|---|---|
+| **tiny-skia** — [linebender/tiny-skia](https://github.com/linebender/tiny-skia) | BSD-3-Clause — Copyright (c) 2020 Yevhenii Reizner |
+| **Skia**, which tiny-skia is itself a port of | BSD-3-Clause — Copyright (c) 2011 Google Inc. |
+
+The anti-aliased scan converter, hairline stroking, the cubic and quadratic
+subdivision counts, the dash-splitting rules, the `lowp` blend arithmetic,
+the `f32` layer-compositing pipeline and the gradient evaluation in
+`LeanSvg/{Raster,Geom,Canvas,Shader}.lean` are fixed-point Lean
+re-implementations of tiny-skia's algorithms, written from reading its
+source. No Rust source is copied into this repository, but these are close
+enough to its work that its notice is carried here and in `NOTICE`
+regardless of how the derivative-work line is drawn.
+
+### Behavioural references, read but not copied
+
+| what | licence |
+|---|---|
+| **resvg** and **usvg** — [linebender/resvg](https://github.com/linebender/resvg) | MPL-2.0 — Copyright (c) 2017 Yevhenii Reizner |
+| **simplecss** — [linebender/simplecss](https://github.com/linebender/simplecss) | MIT or Apache-2.0 |
+| **svgtypes** — [linebender/svgtypes](https://github.com/linebender/svgtypes) | MIT or Apache-2.0 |
+
+resvg and usvg define what "correct" means here: parsing defaults,
+conditional processing, the CSS cascade, paint servers, clipping and text
+layout were all matched by reading them. The supported CSS selector subset in
+`LeanSvg/Css.lean` follows simplecss's grammar, and colour, length and
+transform parsing follow svgtypes' behaviour. No MPL-covered source is
+included in this repository.
+
+### Build and language
+
+| what | licence |
+|---|---|
+| **Lean 4** and **Lake** — [leanprover/lean4](https://github.com/leanprover/lean4) | Apache-2.0 |
+
+### Used only when running the tests, never distributed
+
+| what | licence |
+|---|---|
+| **resvg** binary, the rendering oracle | MPL-2.0 |
+| **resvg test suite** (`tests/corpora/resvg-test-suite`) | MPL-2.0 |
+| **simple-icons** (`tests/corpora/simple-icons`) | CC0-1.0 |
+| **Feather icons** (`tests/corpora/feather`) | MIT |
+| **Pillow** | MIT-CMU |
+| **NumPy** | BSD-3-Clause |
+| **fontTools** | MIT |
+
+The corpora are cloned locally by the harnesses and are listed in
+`.gitignore`; none of them is committed here or shipped in a release. If a
+published page or release ever includes renders derived from the resvg test
+suite, that material is MPL-2.0 and must carry the suite's licence and a note
+that the files are unmodified.
+
+### Prior art that shaped the project
+
+**lean-zip** — [kim-em/lean-zip](https://github.com/kim-em/lean-zip),
+Apache-2.0. The "one input, one output, proven effect boundary" shape of this
+project follows its example. No code is shared.
+
+If you believe something here is miscredited or missing, please open an issue.

@@ -1,6 +1,6 @@
-import MicroSvg.Bytes
-import MicroSvg.Fixed
-import MicroSvg.Geom
+import LeanSvg.Bytes
+import LeanSvg.Fixed
+import LeanSvg.Geom
 
 /-!
 # TrueType font parser: a pure, total function of bytes
@@ -9,7 +9,7 @@ A font is bytes; `Font.parse` is a **pure total function** from those bytes to
 a `Font` record of resolved table offsets, plus accessors that read glyph
 outlines, advances and kerning straight out of the original `ByteArray`. There
 is no `IO` anywhere in this module and no way to introduce any: it imports
-only `MicroSvg.Bytes`, `MicroSvg.Fixed` and `MicroSvg.Geom`.
+only `LeanSvg.Bytes`, `LeanSvg.Fixed` and `LeanSvg.Geom`.
 
 Every offset the parser trusts is validated against `bs.size` (via
 `Bytes.at'`, which reads `0` past the end instead of panicking), every loop
@@ -18,7 +18,7 @@ composite-glyph recursion is bounded by an explicit fuel parameter. A
 corrupt, truncated or adversarial byte string therefore cannot crash the
 parser or loop forever: `parse` returns `none`, or the accessors return `0`
 / empty arrays for whatever they cannot make sense of. Fonts ship as
-constants embedded in the binary (see `MicroSvg/Fonts/*.lean`), so this
+constants embedded in the binary (see `LeanSvg/Fonts/*.lean`), so this
 module adds no new effect: no system font is ever read.
 
 Tables read: `head`, `maxp`, `cmap` (formats 4 and 12, platform 3/encoding
@@ -29,15 +29,15 @@ a `kern`-tagged feature — horizontal advance of the first glyph only). Other
 tables (`GSUB`, `GDEF`, `CFF `, bitmap/colour tables, …) are ignored.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 
 /-! ## The font record
 
-Declared at the `MicroSvg` level (not inside `namespace Font` below), the
-same way `Pt`/`Mat`/`Box` are in `MicroSvg/Geom.lean`: this makes the type
-`MicroSvg.Font`, so that `open MicroSvg` gives both the type `Font` and its
+Declared at the `LeanSvg` level (not inside `namespace Font` below), the
+same way `Pt`/`Mat`/`Box` are in `LeanSvg/Geom.lean`: this makes the type
+`LeanSvg.Font`, so that `open LeanSvg` gives both the type `Font` and its
 functions `Font.parse`, `Font.glyphId`, … without a spurious extra
-`MicroSvg.Font.Font` nesting. -/
+`LeanSvg.Font.Font` nesting. -/
 
 structure Font where
   unitsPerEm : Nat
@@ -792,4 +792,4 @@ def hexDecodeChunks (chunks : Array String) : ByteArray := Id.run do
   return out
 
 end Font
-end MicroSvg
+end LeanSvg

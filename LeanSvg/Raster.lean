@@ -1,4 +1,4 @@
-import MicroSvg.Geom
+import LeanSvg.Geom
 
 /-!
 # Rasterizer
@@ -58,7 +58,7 @@ clamps to 0); parts above or below it are discarded.
 here at all.  See its own comment.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Raster
 
 /-- Coverage mask for a rectangular region of the canvas. -/
@@ -543,4 +543,4 @@ def hairline (W H : Nat) (polys : Array Poly) (cap : Cap) (a8 covScale : Nat) :
   return some ⟨x0i, y0i, bw, bh, cov⟩
 
 end Raster
-end MicroSvg
+end LeanSvg

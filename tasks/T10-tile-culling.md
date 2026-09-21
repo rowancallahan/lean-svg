@@ -10,8 +10,8 @@ canvas. Output must stay **byte-identical** (a culled shape contributes no
 pixels by construction), so this is pure speed.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T10` (branch
-`t10-cull`). Files: `MicroSvg/Render.lean` (`drawShape`), and a small helper
-in `MicroSvg/Geom.lean` if cleaner. Do not touch `Raster.lean`, `Canvas.lean`,
+`t10-cull`). Files: `LeanSvg/Render.lean` (`drawShape`), and a small helper
+in `LeanSvg/Geom.lean` if cleaner. Do not touch `Raster.lean`, `Canvas.lean`,
 `Png.lean` (other agents own them).
 
 ## What to change
@@ -59,8 +59,8 @@ commit.
 
 | file | change |
 |---|---|
-| `MicroSvg/Geom.lean` | `Box` (a closed device-space box), `Box.cover`, `Box.meets`, `strokeReach` (a stroke's user-space reach off its polyline), and `ctrlBoxMeets`, which walks `cmds` and answers whether the control points' device box meets a rectangle |
-| `MicroSvg/Render.lean` | `shapeOnCanvas`, which turns the stroke reach and the rounding slack into a widened canvas rectangle; `drawShape` returns the canvas untouched when it says no |
+| `LeanSvg/Geom.lean` | `Box` (a closed device-space box), `Box.cover`, `Box.meets`, `strokeReach` (a stroke's user-space reach off its polyline), and `ctrlBoxMeets`, which walks `cmds` and answers whether the control points' device box meets a rectangle |
+| `LeanSvg/Render.lean` | `shapeOnCanvas`, which turns the stroke reach and the rounding slack into a widened canvas rectangle; `drawShape` returns the canvas untouched when it says no |
 
 `Raster.lean`, `Canvas.lean`, `Png.lean`, `Effect.lean`, `Main.lean`, and every
 harness under `tests/` are untouched — `git diff main` is those two files and

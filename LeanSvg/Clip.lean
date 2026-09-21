@@ -1,4 +1,4 @@
-import MicroSvg.Svg
+import LeanSvg.Svg
 
 /-!
 # `clipPath` masks (T20)
@@ -74,7 +74,7 @@ boxes ∩ canvas; folding a child costs its own mask's area.  Applying a chain
 to a shape costs the shape's mask area times the chain length.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Clip
 
 open Svg
@@ -390,4 +390,4 @@ def resolve (doc : Doc) (W H : Nat) (base : Mat) (cache : Cache) (clips : Array 
   return (some out, cache)
 
 end Clip
-end MicroSvg
+end LeanSvg

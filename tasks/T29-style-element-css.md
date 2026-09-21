@@ -1,11 +1,11 @@
 # T29 — `<style>` element with simple CSS selectors  [Sonnet]
 
 FEATURES F8 item. Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T29`
-(branch `t29-css`). Files: new `MicroSvg/Css.lean` (the whole parser and
-matcher), `MicroSvg.lean` (import line), `MicroSvg/Xml.lean` **only if**
+(branch `t29-css`). Files: new `LeanSvg/Css.lean` (the whole parser and
+matcher), `LeanSvg.lean` (import line), `LeanSvg/Xml.lean` **only if**
 CDATA sections are not already delivered as text (check first; if you must
 add `<![CDATA[ ... ]]>` handling, it is a bounded scan for `]]>` that emits
-the bytes as a text event), and `MicroSvg/Svg.lean` **only** the
+the bytes as a text event), and `LeanSvg/Svg.lean` **only** the
 `interpret` function plus the call site where an element's attributes are
 applied (`applyAttrs` call). Do not touch `applyProp`, `Style`, `parsePaint`,
 `namedColors` (T24a), `parsePathData` (T16). Another Sonnet agent (T27) is
@@ -14,7 +14,7 @@ local (a pre-pass that collects stylesheets, an ancestor stack, and a
 resolution step before attributes are applied) so the merge is easy.
 Invariants in `tasks/README.md`.
 
-## `MicroSvg/Css.lean` — pure and total
+## `LeanSvg/Css.lean` — pure and total
 
 usvg uses the `simplecss` crate; match its supported subset
 (https://github.com/linebender/simplecss, `src/lib.rs` and `selector.rs`):
@@ -75,7 +75,7 @@ per-level child counter).
 - `python3 tests/run_tests.py`: all 21 byte-identical to main's binary.
 - Two new adversarial cases under `tests/adversarial/` (a `<style>` with 50 000
   nested `{`, and a 2 MB selector list) run through `run_adversarial.py`; the
-  whole harness clean. `git diff main -- MicroSvg/Effect.lean` empty.
+  whole harness clean. `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
@@ -89,7 +89,7 @@ files and `tests/corpora` (gitignored, symlinked to the shared clone for the
 corpora runs below) is intentionally left out of the commit.
 
 Files changed:
-- `MicroSvg/Css.lean` (new) — the whole `simplecss`-subset parser and
+- `LeanSvg/Css.lean` (new) — the whole `simplecss`-subset parser and
   matcher: `parseStylesheet`, `«matches»` (named with guillemets — `matches`
   is a reserved term-level keyword in Lean 4, `e matches pat`, so the spec's
   exact name can only be spelled that way), `resolve`, `matchingDeclsSplit`,
@@ -109,8 +109,8 @@ Files changed:
   never matches either. `class` splitting uses general whitespace
   (`Char.isWhitespace`) per the task's explicit instruction, not
   `simplecss`'s own narrower "split on literal space" quirk.
-- `MicroSvg.lean` — one import line for `MicroSvg.Css`.
-- `MicroSvg/Xml.lean` — **had to touch it, and for more than CDATA.**
+- `LeanSvg.lean` — one import line for `LeanSvg.Css`.
+- `LeanSvg/Xml.lean` — **had to touch it, and for more than CDATA.**
   Checked first as instructed: neither CDATA nor plain element text was
   delivered as an event at all (`Event` had only `open_`/`close`; the main
   scan loop jumped straight from one `<` to the next via `findByte`, never
@@ -133,7 +133,7 @@ Files changed:
   contain zero `<` bytes) now produces one `.text` event, so `events.isEmpty`
   stopped meaning "no elements"; caught by the direct binary diff below and
   fixed before it could count as a behaviour change.
-- `MicroSvg/Svg.lean` — only `interpret` (plus its `import`) touched, exactly
+- `LeanSvg/Svg.lean` — only `interpret` (plus its `import`) touched, exactly
   as scoped; `applyAttrs`, `applyProp`, `Style`, `parsePaint`, `namedColors`,
   `parsePathData` are all byte-identical to main. `interpret` now: (1) a
   pre-pass over `events` (`combinedCss`) collecting every `<style>`'s text —
@@ -186,7 +186,7 @@ mismatches** — confirmed byte-identical, not just equal-scoring.
 
 `python3 tests/run_adversarial.py`: 40/40 clean before, **42/42 clean**
 after adding the two new cases (both render in single-digit/tens of ms).
-`git diff main -- MicroSvg/Effect.lean`: empty.
+`git diff main -- LeanSvg/Effect.lean`: empty.
 
 `lake build`: clean, no errors, no new warnings (checked with `lake clean &&
 lake build` for a full recompile, not just an incremental one).

@@ -1,8 +1,8 @@
-import MicroSvg.Xml
-import MicroSvg.Css
-import MicroSvg.Shader
-import MicroSvg.Canvas
-import MicroSvg.Text
+import LeanSvg.Xml
+import LeanSvg.Css
+import LeanSvg.Shader
+import LeanSvg.Canvas
+import LeanSvg.Text
 import Std.Data.HashMap
 
 /-!
@@ -17,7 +17,7 @@ its subtree.  There is no code that follows a reference of any kind (`url()`,
 input bytes.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Svg
 
 open Bytes
@@ -189,7 +189,7 @@ and neither needs `Doc`'s type to grow a new lookup mechanism.
 
 An element that references a clip through `clip-path="url(#id)"` records a
 *use* in `Doc.uses` and carries its index in `Style.clips`;
-`MicroSvg/Clip.lean` turns an entry into a device-space mask at render
+`LeanSvg/Clip.lean` turns an entry into a device-space mask at render
 time. -/
 
 /-- One child of a `clipPath`: a shape whose fill (with `clip-rule`) is unioned
@@ -2068,7 +2068,7 @@ here) are dropped together with their character data, as usvg's tree builder
 does — that covers `textPath` and `tref`, which this task does not support.
 
 Only `Text.SpanProps` and an index into a local table of resolved styles cross
-into `MicroSvg/Text.lean`; the styles come back attached to whole runs of
+into `LeanSvg/Text.lean`; the styles come back attached to whole runs of
 glyphs, which become ordinary `Shape`s.  `evenOdd` is forced off because
 `fill-rule` does not apply to text (SVG 2 §text-rendering-order), and `ctm` is
 the `<text>` element's, because `transform` on a `tspan` is not a thing. -/
@@ -2651,4 +2651,4 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   | some r => return ⟨r, nodes, clipsResolved, usesResolved⟩
 
 end Svg
-end MicroSvg
+end LeanSvg

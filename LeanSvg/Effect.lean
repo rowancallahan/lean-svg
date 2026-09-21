@@ -21,7 +21,7 @@ operations onto real `IO` calls.  It is six lines long.  Everything else in the
 renderer is a pure function of a `ByteArray`.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 
 /-- The complete set of effects available to a renderer program. -/
 inductive Op where
@@ -157,4 +157,4 @@ def execIO (inp out : System.FilePath) : Prog α → IO α
     execIO inp out (k ())
 
 end Prog
-end MicroSvg
+end LeanSvg

@@ -16,8 +16,8 @@ property), remove the dead `applyAttrs`, and re-measure
 
 ## Report
 
-Files changed: `MicroSvg/Svg.lean` (plus this file). `git diff main --
-MicroSvg/Effect.lean` is empty.
+Files changed: `LeanSvg/Svg.lean` (plus this file). `git diff main --
+LeanSvg/Effect.lean` is empty.
 
 - `applyEffective` now (1) seeds `pctRefSet`/`pctRefW`/`pctRefH` from the
   root's own `viewBox`/`width`/`height` when `parent.pctRefSet` is false

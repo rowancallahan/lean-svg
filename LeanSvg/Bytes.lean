@@ -8,7 +8,7 @@ accepts, so a truncated input simply fails to parse instead of reading past
 the end.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Bytes
 
 /-- Byte at `i`, or `0` past the end.  Never panics. -/
@@ -108,4 +108,4 @@ def splitTrim (bs : ByteArray) (sep : UInt8) : Array ByteArray := Id.run do
 def toStr (bs : ByteArray) : String := (String.fromUTF8? bs).getD "<invalid utf-8>"
 
 end Bytes
-end MicroSvg
+end LeanSvg

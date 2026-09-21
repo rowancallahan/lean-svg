@@ -1,9 +1,9 @@
 # T24b — `transform-origin`, percent lengths on the root  [Sonnet]
 
 Two F8 items. Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T24b`
-(branch `t24b-transform-origin`). Files: `MicroSvg/Svg.lean` (`Style`,
+(branch `t24b-transform-origin`). Files: `LeanSvg/Svg.lean` (`Style`,
 `applyProp`, `applyAttrs`, and the place where an element's `transform` is
-composed into `ctm`), `MicroSvg/Render.lean` (`canvasSetup` only). Do not
+composed into `ctm`), `LeanSvg/Render.lean` (`canvasSetup` only). Do not
 touch `interpret` (T27/T29 are editing it), `parsePathData`, the flatten
 section of `Geom.lean` (T30), `drawShape` (T23). Invariants in
 `tasks/README.md`.
@@ -30,7 +30,7 @@ section of `Geom.lean` (T30), `drawShape` (T23). Invariants in
 
 - `lake build` clean.
 - Before/after at fast sizes with `--compare` (the *before* from the main
-  binary `/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg`,
+  binary `/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg`,
   copied to scratch first):
   ```
   python3 tests/run_corpora.py --fast --no-worst --corpus resvg --route direct \
@@ -41,15 +41,15 @@ section of `Geom.lean` (T30), `drawShape` (T23). Invariants in
   percent size (list them); `structure/transform` unchanged. One line per
   remaining failure in the first two directories.
 - `python3 tests/run_tests.py`: all 22 byte-identical to the main binary.
-- `python3 tests/run_adversarial.py` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+- `python3 tests/run_adversarial.py` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
 
 ## Report
 
-Files changed: `MicroSvg/Svg.lean`, `MicroSvg/Render.lean` (plus this task
-file). `git diff main -- MicroSvg/Effect.lean` is empty.
+Files changed: `LeanSvg/Svg.lean`, `LeanSvg/Render.lean` (plus this task
+file). `git diff main -- LeanSvg/Effect.lean` is empty.
 
 **`Svg.lean`**
 
@@ -164,7 +164,7 @@ measured effect on the graded corpus.
    regression, no improvement (none of the 23 use `transform-origin` or a
    root percent size).
 4. **`python3 tests/run_adversarial.py`** — 40/40 clean, 0 violations.
-5. **`git diff main -- MicroSvg/Effect.lean`** — empty (checked against the
+5. **`git diff main -- LeanSvg/Effect.lean`** — empty (checked against the
    `main` commit merged into this branch and again against `main`'s current
    tip; `main` moved twice more from concurrent tasks during this session —
    see "Branch note" below).

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>microsvg playground</title>
+<title>lean-svg playground</title>
 <style>
   :root {
     --bg: #f7f8fa;
@@ -326,7 +326,7 @@
 <body>
 
 <header>
-  <h1>microsvg playground</h1>
+  <h1>lean-svg playground</h1>
   <p>Lean 4 renderer · fixed-point · one file in, one file out · <a href="/drop.html">drop zone</a></p>
 </header>
 
@@ -405,7 +405,7 @@
           <div class="stage" id="stageRef"><div class="empty">—</div></div>
         </div>
         <div class="tile" id="tileOurs">
-          <div class="cap">microsvg (ours) <span class="sub" id="capOurs"></span></div>
+          <div class="cap">lean-svg (ours) <span class="sub" id="capOurs"></span></div>
           <div class="stage" id="stageOurs"><div class="empty">—</div></div>
         </div>
         <div class="tile">
@@ -423,7 +423,7 @@
       <div class="metric"><div class="k">within 8</div><div class="v" id="mW8">—</div></div>
       <div class="metric"><div class="k">within 32</div><div class="v" id="mW32">—</div></div>
       <div class="metric"><div class="k">mean abs</div><div class="v" id="mMean">—</div></div>
-      <div class="metric"><div class="k">microsvg</div><div class="v" id="mOursMs">—</div></div>
+      <div class="metric"><div class="k">lean-svg</div><div class="v" id="mOursMs">—</div></div>
       <div class="metric"><div class="k">resvg</div><div class="v" id="mRefMs">—</div></div>
     </div>
 
@@ -448,7 +448,7 @@
   var errbox = $("errbox");
 
   var zoomOn = false;
-  var renderWidth = 0;      // px width the microsvg stage can show 1:1
+  var renderWidth = 0;      // px width the lean-svg stage can show 1:1
   var lastSentWidth = null; // width of the most recently issued request
   var renderCount = 0;
   var hist = [];
@@ -514,7 +514,7 @@
     return Math.max(MIN_W, Math.min(MAX_W, Math.floor(w)));
   }
 
-  // Usable width inside the microsvg tile's stage (content box).
+  // Usable width inside the lean-svg tile's stage (content box).
   function stageWidth() {
     var stage = $("stageOurs");
     var pad = 0;
@@ -702,14 +702,14 @@
     $("mRefMs").textContent = ms(data.ref_ms);
   }
 
-  // "microsvg N ms · resvg M ms · size WxH" plus the last HIST_MAX renders.
+  // "lean-svg N ms · resvg M ms · size WxH" plus the last HIST_MAX renders.
   function showTiming(data, w, h) {
     var size = (w && h) ? (w + "×" + h) : "—";
     $("timing").textContent =
-      "microsvg " + ms(data.ours_ms) + " · resvg " + ms(data.ref_ms) + " · size " + size;
+      "lean-svg " + ms(data.ours_ms) + " · resvg " + ms(data.ref_ms) + " · size " + size;
     $("capOurs").textContent = size + " · " + ms(data.ours_ms);
 
-    hist.unshift(size + "  microsvg " + ms(data.ours_ms) + "  resvg " + ms(data.ref_ms));
+    hist.unshift(size + "  lean-svg " + ms(data.ours_ms) + "  resvg " + ms(data.ref_ms));
     while (hist.length > HIST_MAX) hist.pop();
     var list = $("hist");
     list.textContent = "";
@@ -722,7 +722,7 @@
 
   function showErrors(data) {
     var parts = [];
-    if (data.ours_error) parts.push("microsvg: " + data.ours_error);
+    if (data.ours_error) parts.push("lean-svg: " + data.ours_error);
     if (data.ref_error) parts.push("resvg: " + data.ref_error);
     if (data.metrics && data.metrics.same_size === false) {
       parts.push("note: the two renderers produced different image sizes; metrics cover the overlap.");

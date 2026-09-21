@@ -3,9 +3,9 @@
 PLAN C26 (C27 optional). Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T20`
 (branch `t20-clippath`). Builds on the defs table from T18 (merge main first
 if T18 has landed; if not, add a minimal `clipPath` entry to the same table
-shape and expect a merge task). Files: `MicroSvg/Svg.lean` (defs entry for
+shape and expect a merge task). Files: `LeanSvg/Svg.lean` (defs entry for
 `clipPath` and its children; `clip-path` property on `Style`), new
-`MicroSvg/Clip.lean` (build a coverage mask from a clipPath), `MicroSvg/Render.lean`
+`LeanSvg/Clip.lean` (build a coverage mask from a clipPath), `LeanSvg/Render.lean`
 (multiply the shape's coverage by the clip mask before painting; group
 `clip-path` applies to each descendant shape — note the AA-edge divergence
 from resvg's layer clip in the report; T22's layers will fix that later).
@@ -29,7 +29,7 @@ Invariants in `tasks/README.md`; `Effect.lean` untouched; no `Float`.
 
 ## Verify
 
-- `lake build` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+- `lake build` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - New `tests/svg/27_clip.svg` ≥ 99% within 8 vs resvg.
 - Corpora fast sizes, direct route, `--compare`: `--dir masking/clipPath
   --dir masking/clip-rule --dir masking/clip`. Target clipPath ≥ 30/52; one
@@ -49,20 +49,20 @@ Branch `t20-clippath`, rebased onto `origin/main` at `a932752`. T18 had **not** 
 table the spec describes: `Doc.clips` / `Doc.uses`, filled by a `clipPath`
 branch in `interpret` and resolved by id after the walk. The shape is meant for
 T18/T21 to extend with their own entry kinds; the module comment in
-`MicroSvg/Svg.lean` says so, and a merge with T18's table will have to fold the
+`LeanSvg/Svg.lean` says so, and a merge with T18's table will have to fold the
 two collections into one pre-pass.
 
 ### Files
 
 | file | change |
 |---|---|
-| `MicroSvg/Svg.lean` | `ClipChild`/`ClipEntry`/`ClipUse` + `Doc.clips`/`Doc.uses`; `clip-path`, `clip-rule` on `Style` (plus `clips`, `ownMat`); `parseClipRef`; bbox helpers on `Box`; a `Frame` stack in `interpret` tracking clip mode and object bounding boxes; `clipPath` and `defs` branches |
-| `MicroSvg/Clip.lean` | new: builds a device-space `Mask` per clip, folds children with tiny-skia's `Clear`/`Xor` arithmetic, multiplies a shape's coverage by the chain |
-| `MicroSvg/Render.lean` | `drawShape` resolves the shape's clip chain and multiplies every coverage mask by it; `renderRgba` carries a per-canvas mask cache |
-| `MicroSvg.lean` | imports `MicroSvg.Clip` |
+| `LeanSvg/Svg.lean` | `ClipChild`/`ClipEntry`/`ClipUse` + `Doc.clips`/`Doc.uses`; `clip-path`, `clip-rule` on `Style` (plus `clips`, `ownMat`); `parseClipRef`; bbox helpers on `Box`; a `Frame` stack in `interpret` tracking clip mode and object bounding boxes; `clipPath` and `defs` branches |
+| `LeanSvg/Clip.lean` | new: builds a device-space `Mask` per clip, folds children with tiny-skia's `Clear`/`Xor` arithmetic, multiplies a shape's coverage by the chain |
+| `LeanSvg/Render.lean` | `drawShape` resolves the shape's clip chain and multiplies every coverage mask by it; `renderRgba` carries a per-canvas mask cache |
+| `LeanSvg.lean` | imports `LeanSvg.Clip` |
 | `tests/svg/27_clip.svg` | new fidelity case |
 
-`git diff origin/main -- MicroSvg/Effect.lean` is empty. `render`'s type is
+`git diff origin/main -- LeanSvg/Effect.lean` is empty. `render`'s type is
 unchanged. No `partial`, `unsafe`, `@[extern]`, `panic!`, `!`-indexing or
 `Float` in the new code; every loop is bounded by the input or by a constant
 (`maxClipPaths` 4096, `maxIdBytes` 256, nesting fuel 8).
@@ -212,13 +212,13 @@ rebased tree against a binary freshly built from `a932752`: clipPath still
 `--width 800`, `run_tiles` 24/24, `run_adversarial` 44/44 clean, the four named
 clip cases still exit 0 with no strays (100 000 clipped shapes 2.4 s),
 `--threads 4` still byte-identical to `--threads 1`, and
-`git diff origin/main -- MicroSvg/Effect.lean` still empty.
+`git diff origin/main -- LeanSvg/Effect.lean` still empty.
 
 ## Report 2 — merge with main (T18 gradients, T36 text), one defs pre-pass
 
 `origin/main` at `ff06548` (T18 gradients, T36 text, on top of the T34/T37/T38
 that Report 1 rebased onto) merged into `t20-clippath`.  Eight conflict hunks,
-five in `MicroSvg/Svg.lean` and three in `MicroSvg/Render.lean`.  Everything
+five in `LeanSvg/Svg.lean` and three in `LeanSvg/Render.lean`.  Everything
 Report 1 measured still holds, and the two follow-ups it deferred to "their own
 task" are both done here, because T36 and T31 made them cheap.
 
@@ -227,7 +227,7 @@ task" are both done here, because T36 and T31 made them cheap.
 | file | hunk | resolution |
 |---|---|---|
 | `Render.lean` | `drawShape`'s fill and the two stroke arms (×3) | T18's `paintMask` closure is kept as the painter — so a `.gradient` still reaches `Grad.build`, and T34's `drawFill`/`drawStroke` split with the `st.strokeFirst` swap is untouched — and T20's `.map (Clip.applyChain chain)` is applied to each of the three coverage masks before it gets there.  One line each. |
-| `Svg.lean` | imports | both (`MicroSvg.Text`, `Std.Data.HashMap`). |
+| `Svg.lean` | imports | both (`LeanSvg.Text`, `Std.Data.HashMap`). |
 | `Svg.lean` | `Style` fields | T36's nine text fields and T20's four clip fields, side by side. |
 | `Svg.lean` | the block before `interpret` | T18's gradient parsers and T36's `textShapes` kept verbatim, then T20's `ClipMode`/`Frame`. |
 | `Svg.lean` | `interpret`'s root branch | `addClipUse (applyEffective { (default : Style) with defs := gradTable } …)`: T18's gradient table still reaches every element by inheritance from the root `Style`, and the root `<svg>`'s own `clip-path` still registers a use. |
@@ -236,7 +236,7 @@ task" are both done here, because T36 and T31 made them cheap.
 `applyEffective` remains the only cascade entry point (`applyAttrs` does not
 exist); T38's per-element reset of `originDx`/`originDy` and T20's of
 `clipRef`/`ownMat` sit on consecutive lines.  `render`'s type is unchanged,
-`git diff origin/main -- MicroSvg/Effect.lean` is empty, and the invariants of
+`git diff origin/main -- LeanSvg/Effect.lean` is empty, and the invariants of
 `tasks/README.md` hold in the new code (no `partial`, `unsafe`, `@[extern]`,
 `panic!`, `!`-indexing or `Float`; every loop bounded by the input or by
 `maxClipPaths` / `maxIdBytes` / fuel 8 / `Grad.maxDefs`).
@@ -335,7 +335,7 @@ Neither shows up in the suite.
 | `python3 tests/run_tiles.py` | **26/26** quadrant tiles stitch byte-identically, `27_clip` included |
 | `--threads 4` vs `--threads 1`, `27_clip` at 800 px | byte-identical |
 | `python3 tests/run_adversarial.py` | **56/56 clean, 0 violations** |
-| `git diff origin/main -- MicroSvg/Effect.lean` | empty |
+| `git diff origin/main -- LeanSvg/Effect.lean` | empty |
 
 Corpora, `--fast` (width 100), direct route, `--dir masking --dir paint-servers
 --dir text --dir painting/fill --dir structure/style --dir structure/switch
@@ -402,8 +402,8 @@ the extra pre-pass work is one `name == "clipPath"` test per element.
 `origin/main` at `1985f99` (T22: group opacity as a compositing layer,
 `mix-blend-mode`, `isolation`) merged with `claude/awesome-edison-bbwegn`
 (T20 clipPath already folded together with T18 gradients and T36 text).
-Thirteen conflict hunks — eleven in `MicroSvg/Svg.lean`, two in
-`MicroSvg/Render.lean`, all inside `interpret`'s walk loop and `renderRgba`,
+Thirteen conflict hunks — eleven in `LeanSvg/Svg.lean`, two in
+`LeanSvg/Render.lean`, all inside `interpret`'s walk loop and `renderRgba`,
 because T20 adds a `Frame` stack and a mask cache to the two loops T22
 restructured. Every behaviour on both sides is kept, and the deviation
 Report 1 recorded as "T22's layers remove it" is now removed.
@@ -421,7 +421,7 @@ Report 1 recorded as "T22's layers remove it" is now removed.
 | `Render.lean` | `drawShape`'s signature and head | T22's `Target` (the band canvas `w`/`h`, the destination window, the layer origin) is the parameter, not T20's `clip` + `cv.w`/`cv.h`, so a shape's coverage still does not depend on which layer it lands in; T20's `doc`/`cache` are threaded through and the clip chain resolves before `flatten`. The body had already auto-merged: T18's `paintMask`, T22's `shiftMask`/`gctm` and T20's `.map (Clip.applyChain chain)` on each of the three coverage masks. |
 | `Render.lean` | `renderRgba` | T22's node walk (layer stack, `nodeBox`, budget, skip depth) with T20's mask cache threaded through it, and the group clip resolved at `groupBegin` / applied at `groupEnd`. |
 
-`render`'s type is unchanged, `git diff origin/main -- MicroSvg/Effect.lean`
+`render`'s type is unchanged, `git diff origin/main -- LeanSvg/Effect.lean`
 is empty, and the invariants of `tasks/README.md` hold over the whole diff: no
 `partial`, `unsafe`, `@[extern]`, `panic!`, `!`-indexing or `Float`; every new
 loop is a `for` over a range bounded by the input or by a constant
@@ -498,7 +498,7 @@ as described, for a leaf shape on the coverage route.
 | check | result |
 |---|---|
 | `lake build` (from a cleaned `.lake/build/lib`) | clean, 45 jobs, **no errors, no warnings** |
-| `git diff origin/main -- MicroSvg/Effect.lean` | empty |
+| `git diff origin/main -- LeanSvg/Effect.lean` | empty |
 | `python3 tests/run_tests.py` | 27 files, **23 pass**; the 4 failures (`12_badge`, `14_flower_transforms`, `15_spiral_stroke`, `16_stress_2000`) are main's own |
 | `27_clip` | **99.759% within 8** (98.641% exact, max d 53) — the ≥ 99% bar |
 | `24_gradients` / `25_text` / `26_layers` / `07_opacity` | 99.993% / 99.530% / 99.996% / 100.000% within 8, all still passing |

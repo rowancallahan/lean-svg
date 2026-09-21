@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Totality fuzzer for MicroSvg/Font.lean (T25).
+"""Totality fuzzer for LeanSvg/Font.lean (T25).
 
 `Font.parse` and its accessors must be total: a random, truncated, or
 adversarially corrupted byte string can never crash `fontdump` or make it

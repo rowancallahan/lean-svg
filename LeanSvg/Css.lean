@@ -1,4 +1,4 @@
-import MicroSvg.Bytes
+import LeanSvg.Bytes
 
 /-!
 # A `simplecss`-subset CSS parser and selector matcher
@@ -34,7 +34,7 @@ dynamic-programming scan (component count × chain length, ≤ 32 × 64) rather
 than the backtracking recursion `simplecss` itself uses, for the same reason.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Css
 
 open Bytes
@@ -572,4 +572,4 @@ def buildElemInfo (tag : String) (attrs : Array (String × String)) (isFirstChil
   { tag, id, classes, attrs, isFirstChild }
 
 end Css
-end MicroSvg
+end LeanSvg

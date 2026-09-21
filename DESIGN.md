@@ -1,8 +1,8 @@
-# microsvg — design
+# lean-svg — design
 
 ## 1. What is claimed, and what is not
 
-**Claimed and machine-checked** (see `MicroSvg/Effect.lean`):
+**Claimed and machine-checked** (see `LeanSvg/Effect.lean`):
 
 - The top-level program is a value of `Prog (Except String Unit)`. `Prog` is a
   free monad with exactly two operations, `readInput` and `writeOutput`.
@@ -250,7 +250,7 @@ the old fold, never an error — and live layer area at `Render.maxLayerPixels`
 **Which pipeline, and the one inexact mode.** resvg composites a layer with
 `Pixmap::draw_pixmap`, whose `Pattern` shader has no lowp implementation, so
 tiny-skia compiles the *highp* (f32) pipeline for every layer composite
-whatever the blend mode. `MicroSvg.F32` therefore emulates IEEE binary32 —
+whatever the blend mode. `LeanSvg.F32` therefore emulates IEEE binary32 —
 round-to-nearest-even, exactly, in `Nat` — and ports those stages. Checked
 against resvg 0.48.1 on strip images covering all 65 536 `(source, backdrop)`
 byte pairs per mode: 14 of the 16 modes are bit-exact, and `color-dodge` and
@@ -345,18 +345,18 @@ Render time per 200×200 file: 28–43 ms including process start.
 
 | file | role |
 |---|---|
-| `MicroSvg/Effect.lean` | `Op`, `Prog`, model FS, theorems, `execIO` (trusted) |
-| `MicroSvg/Bytes.lean` | byte scanning helpers, all bounded |
-| `MicroSvg/Fixed.lean` | `Fx`, number and length parsing with cost bounds |
-| `MicroSvg/Geom.lean` | `Pt`, `Mat`, trig, `PathCmd`, `flatten`, stroker |
-| `MicroSvg/Raster.lean` | accumulation rasterizer → coverage mask |
-| `MicroSvg/Canvas.lean` | premultiplied canvas, blending, `F32`, blend modes, layer composite, RGBA export |
-| `MicroSvg/Png.lean` | CRC-32, Adler-32, stored zlib, PNG chunks |
-| `MicroSvg/Xml.lean` | event-based XML subset parser with caps |
-| `MicroSvg/Shader.lean` | gradient paint servers, defs table, device-space shaders |
-| `MicroSvg/Text.lean` | text layout: runs, glyph outlines, anchoring |
-| `MicroSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo`, defs pre-pass |
-| `MicroSvg/Clip.lean` | `clipPath` → device masks, cache, coverage and layer application |
-| `MicroSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
+| `LeanSvg/Effect.lean` | `Op`, `Prog`, model FS, theorems, `execIO` (trusted) |
+| `LeanSvg/Bytes.lean` | byte scanning helpers, all bounded |
+| `LeanSvg/Fixed.lean` | `Fx`, number and length parsing with cost bounds |
+| `LeanSvg/Geom.lean` | `Pt`, `Mat`, trig, `PathCmd`, `flatten`, stroker |
+| `LeanSvg/Raster.lean` | accumulation rasterizer → coverage mask |
+| `LeanSvg/Canvas.lean` | premultiplied canvas, blending, `F32`, blend modes, layer composite, RGBA export |
+| `LeanSvg/Png.lean` | CRC-32, Adler-32, stored zlib, PNG chunks |
+| `LeanSvg/Xml.lean` | event-based XML subset parser with caps |
+| `LeanSvg/Shader.lean` | gradient paint servers, defs table, device-space shaders |
+| `LeanSvg/Text.lean` | text layout: runs, glyph outlines, anchoring |
+| `LeanSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo`, defs pre-pass |
+| `LeanSvg/Clip.lean` | `clipPath` → device masks, cache, coverage and layer application |
+| `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |

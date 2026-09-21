@@ -250,7 +250,7 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>microsvg corpus gallery</title>
+<title>lean-svg corpus gallery</title>
 <style>
   :root { --thumb: %(thumb_width)dpx; }
   body { font-family: -apple-system, system-ui, sans-serif; margin: 1.5rem; color: #222; background: #fff; }
@@ -302,7 +302,7 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>microsvg corpus gallery — resvg-test-suite</h1>
+<h1>lean-svg corpus gallery — resvg-test-suite</h1>
 <div class="meta" id="metaLine">%(meta_line)s</div>
 <div class="dirtables">%(dir_tables)s</div>
 <div class="controls">
@@ -328,7 +328,7 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
 <div class="overlay hidden" id="overlay">
   <span class="overlay-close" id="overlayClose">&times;</span>
   <figure><img id="ovRef"><figcaption>reference (resvg)</figcaption></figure>
-  <figure><img id="ovOurs"><figcaption>ours (microsvg)</figcaption></figure>
+  <figure><img id="ovOurs"><figcaption>ours (lean-svg)</figcaption></figure>
   <figure><img id="ovDiff"><figcaption>diff (&times;%(diff_gain)d)</figcaption></figure>
 </div>
 <script>
@@ -480,7 +480,7 @@ def main():
     ap.add_argument("--reuse", action="store_true",
                      help="reuse an existing run/renders under --out instead "
                           "of re-running run_corpora.py")
-    ap.add_argument("--bin", default=str(RC.DEFAULT_BIN), help="microsvg binary")
+    ap.add_argument("--bin", default=str(RC.DEFAULT_BIN), help="lean-svg binary")
     ap.add_argument("--tol", type=int, default=8)
     ap.add_argument("--threshold", type=float, default=0.99)
     ap.add_argument("--diff-gain", type=int, default=8,

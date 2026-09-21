@@ -15,7 +15,7 @@ Python only. Do not change any Lean source. Work in the main tree
 
 For every `tests/svg/*.svg` and every width in `[100, 200, 400, 800, 1600, 3200]`:
 
-- ours: `.lake/build/bin/microsvg in.svg out.png --width W`
+- ours: `.lake/build/bin/lean-svg in.svg out.png --width W`
 - resvg: `resvg -w W in.svg ref.png`
 - If the two outputs differ in size, report it and skip metrics for that cell.
 - Metrics as in `tests/run_tests.py` (exact, within 8, within 32, mean abs).
@@ -36,8 +36,8 @@ Outputs:
 - Flags: `--widths`, `--filter`, `--runs`.
 
 Write into your report: the three slowest (file, width) cells and, from
-reading `MicroSvg/Raster.lean`, `MicroSvg/Canvas.lean` and
-`MicroSvg/Render.lean` (read only), your best diagnosis of where the time
+reading `LeanSvg/Raster.lean`, `LeanSvg/Canvas.lean` and
+`LeanSvg/Render.lean` (read only), your best diagnosis of where the time
 goes at large sizes (per-shape mask allocation `Array.replicate` over the
 bbox, per-pixel `fillMask` loop, edge accumulation, PNG encoding of
 uncompressed rows, `toRgbaBytes`). Rank the likely wins. Do not implement

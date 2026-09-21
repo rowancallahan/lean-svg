@@ -2,7 +2,7 @@
 
 ## Goal
 
-`strokePoly` in `MicroSvg/Geom.lean` emits one quad per segment plus a wedge
+`strokePoly` in `LeanSvg/Geom.lean` emits one quad per segment plus a wedge
 per join and a shape per cap, all filled together with nonzero winding. Where
 those pieces abut, the winding passes through zero along internal seams, and
 the rasterizer (a faithful port of tiny-skia's scan converter) renders those
@@ -13,7 +13,7 @@ there are no seams. Do the same. This removes T6's small regression
 stroke-heavy file.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T11` (branch
-`t11-stroker`). Only `MicroSvg/Geom.lean` may change (the stroking section).
+`t11-stroker`). Only `LeanSvg/Geom.lean` may change (the stroking section).
 Keep the `strokePoly (st : StrokeStyle) (poly : Poly) (out : Array (Array Pt))
 : Array (Array Pt)` signature so `Render.drawShape` is untouched.
 
@@ -88,7 +88,7 @@ Not byte-identical (geometry changes). Required:
   against resvg (within-8 and exact), all at natural size and `--width 800`.
 - `python3 tests/run_tiles.py` 20/20, `python3 tests/run_adversarial.py`
   clean, `huge_path.svg` timing within 10% of before.
-- Confirm `MicroSvg/Effect.lean` untouched.
+- Confirm `LeanSvg/Effect.lean` untouched.
 
 ## Done when
 
@@ -170,8 +170,8 @@ single point keeps today's dot (circle / square / nothing).
 
 ### What changed
 
-`MicroSvg/Geom.lean` only, plus the new `tests/gen_strokes.py`.
-`MicroSvg/Effect.lean` is untouched (`git diff --stat main -- MicroSvg/Effect.lean`
+`LeanSvg/Geom.lean` only, plus the new `tests/gen_strokes.py`.
+`LeanSvg/Effect.lean` is untouched (`git diff --stat main -- LeanSvg/Effect.lean`
 is empty); `git status --short` shows exactly those two files and this report.
 `strokePoly`'s signature is unchanged, so `Render.drawShape` needed no edit.
 
@@ -262,7 +262,7 @@ eight gained; 12 is the exception.  11_style_attr and 13 gained too.
 natural size and `--width 800`:
 
 ```
-python3 tests/gen_strokes.py --compare <old-bin> .lake/build/bin/microsvg
+python3 tests/gen_strokes.py --compare <old-bin> .lake/build/bin/lean-svg
 ```
 
 **62 of 120 cells better on within8, 47 unchanged, 11 worse; mean within8

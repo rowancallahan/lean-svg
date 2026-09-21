@@ -5,26 +5,26 @@
 Milestone M11 step A. A font is bytes; the parser is a **pure total
 function** from those bytes to glyph outlines, advances and kerning. It
 cannot read, write, or affect anything else: it lives in its own module,
-imports only `MicroSvg.Bytes`/`Fixed`/`Geom`, and returns data
+imports only `LeanSvg.Bytes`/`Fixed`/`Geom`, and returns data
 (`Array PathCmd` in font units, `Nat` advances). Fonts ship *inside* the
 binary as constants, so `Effect.lean` and its theorems are untouched. No
 system font is read (that is a separate future item, PLAN M11).
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T25` (branch
 `t25-fonts`). New files only, plus `lakefile.toml` (a second executable)
-and `MicroSvg.lean` (import lines). Do not modify any existing module.
+and `LeanSvg.lean` (import lines). Do not modify any existing module.
 Invariants in `tasks/README.md` apply: no `partial`, no `unsafe`, no
 `panic!`, no `!`-indexing, no `Float`, every loop a bounded `for`.
 
 ## Files
 
-- `MicroSvg/Font.lean` — the parser (see below).
-- `MicroSvg/Fonts/NotoSans.lean` (and `NotoSansBold.lean`,
+- `LeanSvg/Font.lean` — the parser (see below).
+- `LeanSvg/Fonts/NotoSans.lean` (and `NotoSansBold.lean`,
   `NotoSansItalic.lean` if the suite ships them) — generated: a hex string
   constant plus `def bytes : ByteArray := Font.hexDecode hexData` (decode
   is total: two hex chars per byte, invalid chars → stop). Keep each
   module under ~300 KB of source by subsetting (below).
-- `MicroSvg/Fonts/LICENSE-OFL.txt` — the licence text of the embedded fonts.
+- `LeanSvg/Fonts/LICENSE-OFL.txt` — the licence text of the embedded fonts.
 - `tests/gen_font_module.py` — `.ttf` → Lean module generator (also runs
   the subsetter).
 - `FontDump.lean` + `[[lean_exe]] name = "fontdump"` — a debug tool:
@@ -33,7 +33,7 @@ Invariants in `tasks/README.md` apply: no `partial`, no `unsafe`, no
   units), and the pair kerning to the next character. `fontdump --embedded
   NotoSans <text>` uses the constant. This is the only `IO` (it reads the
   font path given on the command line) and it is a separate executable;
-  `microsvg` does not link it.
+  `lean-svg` does not link it.
 - `tests/check_font.py` — the oracle check (below).
 - `tests/fuzz_font.py` — totality check (below).
 
@@ -49,7 +49,7 @@ Record the exact command and the resulting sizes in the report. If the
 suite has no fonts directory, download Noto Sans from
 https://github.com/notofonts/latin-greek-cyrillic/releases (OFL) and say so.
 
-## Parser (`MicroSvg/Font.lean`)
+## Parser (`LeanSvg/Font.lean`)
 
 ```
 structure Font where
@@ -114,7 +114,7 @@ over 8 MiB.
    huge `numGlyphs`; run `fontdump` on each mutant with a 20 s timeout and
    assert exit code 0 or 1, no signal, no timeout, no `PANIC`/`Stack
    overflow` in stderr. Report the counts.
-3. `lake build` clean (both executables); `git diff main -- MicroSvg/`
+3. `lake build` clean (both executables); `git diff main -- LeanSvg/`
    shows only new files plus the import lines; `run_tests.py` byte-identical
    (the renderer is unchanged); `run_adversarial.py` clean.
 
@@ -127,14 +127,14 @@ fuzz counts, any table or feature you skipped.
 
 ### Files
 
-New: `MicroSvg/Font.lean` (parser, ~34 KB source), `MicroSvg/Fonts/{NotoSans,
-NotoSansBold, NotoSansItalic}.lean` (generated), `MicroSvg/Fonts/LICENSE-OFL.txt`
+New: `LeanSvg/Font.lean` (parser, ~34 KB source), `LeanSvg/Fonts/{NotoSans,
+NotoSansBold, NotoSansItalic}.lean` (generated), `LeanSvg/Fonts/LICENSE-OFL.txt`
 (copy of `Noto-LICENSE-OFL.txt`), `FontDump.lean`, `tests/gen_font_module.py`,
-`tests/check_font.py`, `tests/fuzz_font.py`. Changed: `MicroSvg.lean` (+1 import
+`tests/check_font.py`, `tests/fuzz_font.py`. Changed: `LeanSvg.lean` (+1 import
 line), `lakefile.toml` (+1 `[[lean_exe]]` for `fontdump`, `fontdump` added to
-`defaultTargets`). `MicroSvg/Effect.lean` untouched (`git diff <merge-base> --
-MicroSvg/Effect.lean` empty). No existing module's logic was edited — confirmed
-via `git diff <merge-base> -- MicroSvg/`, which is empty except for the one
+`defaultTargets`). `LeanSvg/Effect.lean` untouched (`git diff <merge-base> --
+LeanSvg/Effect.lean` empty). No existing module's logic was edited — confirmed
+via `git diff <merge-base> -- LeanSvg/`, which is empty except for the one
 import line (the `Font.lean`/`Fonts/` files are new and untracked, so they don't
 show in a diff of tracked content; `git status` lists them all as `??`).
 
@@ -171,9 +171,9 @@ generator's default was needed. Each module's hex data is still emitted as an
 than one giant string literal, as the spec suggests trying — cheap insurance
 even though these subsets (~32 KB decoded, ~64 KB hex) never came close to
 the "~2 minute" concern. **Timings**: a full clean `lake build` of both
-executables (37 jobs: the `MicroSvg` library incl. `Font.lean` and the three
-`Fonts.*` modules, `microsvg`, and `fontdump`) took **4.5–5.1 s** wall clock
-across several from-scratch runs; `MicroSvg.Font` alone built in 0.7–0.9 s,
+executables (37 jobs: the `LeanSvg` library incl. `Font.lean` and the three
+`Fonts.*` modules, `lean-svg`, and `fontdump`) took **4.5–5.1 s** wall clock
+across several from-scratch runs; `LeanSvg.Font` alone built in 0.7–0.9 s,
 each `Fonts.*` module in ~0.25–0.28 s. No part of this project's build is
 anywhere near a bottleneck from font embedding.
 
@@ -202,7 +202,7 @@ fonts; it was sanity-checked by hand against a synthetic table during
 development, not by the oracle.
 
 Two bugs surfaced and fixed *in this oracle script* while chasing
-mismatches (neither was a bug in `MicroSvg/Font.lean`):
+mismatches (neither was a bug in `LeanSvg/Font.lean`):
 1. `--all`'s text built from `sorted(cmap.keys())` included U+0000, which
    crashed `subprocess.run` with "embedded null byte" — fixed by excluding
    C0/C1 control codepoints.
@@ -216,7 +216,7 @@ mismatches (neither was a bug in `MicroSvg/Font.lean`):
    past that to avoid compounding error). Truncating those with plain
    `int()` produced 231 false-positive mismatches, all off by exactly 1 in
    the truncating direction; switching to fontTools' own `otRound` on the
-   final per-point result fixed all 231. `MicroSvg/Font.lean`'s own
+   final per-point result fixed all 231. `LeanSvg/Font.lean`'s own
    composite handling rounds to whole font units after every transform
    level (`Font.roundDiv14`, `Int.ediv (n + 8192) 16384` — the OpenType
    "round half towards +Infinity" rule, the same idiom as `Fx.round`), a
@@ -244,8 +244,8 @@ marker.
 ### `lake build` / renderer regression
 
 Clean `lake build`: 37/37 jobs, **no errors, no warnings**, ~4.5–5.1 s wall.
-`git diff <merge-base> -- MicroSvg/` is empty (no existing module edited);
-`git diff <merge-base> -- MicroSvg.lean lakefile.toml` is exactly the one
+`git diff <merge-base> -- LeanSvg/` is empty (no existing module edited);
+`git diff <merge-base> -- LeanSvg.lean lakefile.toml` is exactly the one
 import line and the one new `[[lean_exe]]` block plus `defaultTargets`.
 `python3 tests/run_tests.py`: **17/21 passed** — identical to the
 pre-T25 baseline (`SESSION_SUMMARY.md`), confirming the renderer itself is

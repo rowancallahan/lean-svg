@@ -1,4 +1,4 @@
-import MicroSvg.Bytes
+import LeanSvg.Bytes
 
 /-!
 # Fixed-point arithmetic
@@ -11,7 +11,7 @@ expensive.  Lean's `Int` is arbitrary precision, so overflow is impossible by
 construction; the clamp is purely a cost bound.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 
 /-- Fixed-point number with 8 fractional bits. -/
 abbrev Fx := Int
@@ -300,4 +300,4 @@ def parseLengthAll16 (bs : ByteArray) : Option Int :=
   | some (v, j) => if j == t.size then some v else none
   | none => none
 
-end MicroSvg
+end LeanSvg

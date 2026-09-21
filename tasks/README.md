@@ -5,7 +5,7 @@ doing exactly what it says, and appending a `## Report` section at the bottom
 with: what changed (files), before/after numbers from the named commands, and
 anything it could not do. Reports are the paper trail; keep them factual.
 
-Invariants that apply to every task touching `MicroSvg/*.lean`:
+Invariants that apply to every task touching `LeanSvg/*.lean`:
 
 1. No `partial`, no `unsafe`, no `@[extern]`, no `panic!`, no `!`-indexing
    (`arr[i]!`, `get!`, `set!`). Use `getD` / `setIfInBounds` or carry proofs.
@@ -14,7 +14,7 @@ Invariants that apply to every task touching `MicroSvg/*.lean`:
    constant. If you need recursion, use fuel that is structurally decreasing.
 4. Hot loops in `Nat` (Lean's unboxed `Int` is 31-bit; `Nat` is 63-bit).
 5. `lake build` must finish with no errors and no new warnings.
-6. `MicroSvg/Effect.lean` is off limits unless the task is about it.
+6. `LeanSvg/Effect.lean` is off limits unless the task is about it.
 7. Do not commit. Do not touch `tests/out/`.
 8. Shell commands: one step per line with `&& \` continuations, never a long
    single-line `&&` chain (the user reads them in the tool display).

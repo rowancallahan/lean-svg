@@ -3,7 +3,7 @@
 ## Goal
 
 Raise the `within` (≤ 8 levels) agreement with resvg on every corpus file by
-making `MicroSvg/Raster.lean` produce the same coverage values tiny-skia does.
+making `LeanSvg/Raster.lean` produce the same coverage values tiny-skia does.
 Today we compute exact signed area per pixel; tiny-skia (resvg's rasterizer)
 uses Skia's supersampling scan converter. The seams along every edge differ
 by a few levels, and on stroke-heavy files that costs 3–9% of pixels.
@@ -36,7 +36,7 @@ fully-covered interior pixels are handled.
 
 ## What to change
 
-`MicroSvg/Raster.lean` only (you may add a helper module if it is cleaner).
+`LeanSvg/Raster.lean` only (you may add a helper module if it is cleaner).
 Replace the accumulation scheme with a port of the supersampling scheme:
 
 - 4 sub-scanlines per pixel row, edges walked in supersampled space
@@ -151,7 +151,7 @@ different (Skia `AntiHairLineRgn`) converter.
 
 ### What changed
 
-Only `MicroSvg/Raster.lean` (175 insertions, 93 deletions); `DESIGN.md` §3.5
+Only `LeanSvg/Raster.lean` (175 insertions, 93 deletions); `DESIGN.md` §3.5
 rewritten to describe the new scheme. `r2`, `accumPiece` and `accumEdge` are
 gone, replaced by `addAlpha`, `blitSpan`, `mkEdge` and a rewritten `rasterize`.
 `Mask` and the `rasterize` signature are unchanged, so `Canvas.fillMask` and

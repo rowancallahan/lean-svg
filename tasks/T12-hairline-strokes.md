@@ -11,8 +11,8 @@ our geometrically correct ~200 px², and that is most of `17_koch_snowflake`'s
 miss and part of `16_stress_2000`'s. Port the hairline path.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T12` (branch
-`t12-hairline`). Files: `MicroSvg/Raster.lean` (add a `hairline` function
-producing a `Mask`; do not change `rasterize`), `MicroSvg/Render.lean`
+`t12-hairline`). Files: `LeanSvg/Raster.lean` (add a `hairline` function
+producing a `Mask`; do not change `rasterize`), `LeanSvg/Render.lean`
 (`drawShape`: route strokes to it). Do not touch `Geom.lean` (T11 owns the
 stroker).
 
@@ -157,12 +157,12 @@ bits of it rather than 8.
 
 ### What changed
 
-* `MicroSvg/Raster.lean` — new only, `rasterize` untouched: `toFDot6`,
+* `LeanSvg/Raster.lean` — new only, `rasterize` untouched: `toFDot6`,
   `divRound`, `hairPx` (the src-over accumulator), `hairSeg`
   (`do_anti_hairline` for one segment) `capExtend` (`extend_pts` for one end)
   and `hairline` (segment building, bounding box, mask), plus a module section
   describing the scheme.
-* `MicroSvg/Render.lean` — `hairCoverage` (`treat_as_hairline`) and a two-way
+* `LeanSvg/Render.lean` — `hairCoverage` (`treat_as_hairline`) and a two-way
   branch in `drawShape`'s stroke arm.  The fill arm, the culling and `clipMask`
   are unchanged, and the non-hairline stroke is the same code as before.
 * `tests/svg/21_hairlines.svg` — new corpus file: three 12-line fans (one per
@@ -172,7 +172,7 @@ bits of it rather than 8.
   thin circles, a round and a square cap, a closed thin rect, and a
   `rotate(24) scale(2)` group whose 0.5 user-space width is exactly 1 device
   pixel.
-* `MicroSvg/Effect.lean` untouched.  No `partial`, `unsafe`, `panic!`,
+* `LeanSvg/Effect.lean` untouched.  No `partial`, `unsafe`, `panic!`,
   `!`-indexing or `Float`; every loop is a `for` over the segment list or over
   the segment's major axis *after* the clip, so it is bounded by the mask's
   width or height.  `lake build`: no errors, no new warnings.

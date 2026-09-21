@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Oracle check for MicroSvg/Font.lean (T25).
+"""Oracle check for LeanSvg/Font.lean (T25).
 
 Compares `fontdump`'s output against fontTools, character by character, for:
 glyph id (`getBestCmap`), advance (`hmtx`), raw quadratic contours
@@ -7,7 +7,7 @@ glyph id (`getBestCmap`), advance (`hmtx`), raw quadratic contours
 by `endPtsOfContours`), and pair kerning to the next character (from the
 legacy `kern` table if present, else `GPOS` pair positioning under a `kern`
 feature, computed here by walking fontTools' own decompiled GPOS tables --
-independently of, not by re-running, MicroSvg/Font.lean's `Font.kern`).
+independently of, not by re-running, LeanSvg/Font.lean's `Font.kern`).
 Exact integer equality throughout; any difference is reported as a mismatch.
 
     python3 tests/check_font.py <font.ttf> [text] [--all]
@@ -15,7 +15,7 @@ Exact integer equality throughout; any difference is reported as a mismatch.
 
 The second form runs `fontdump --embedded NAME <text>` (the constant baked
 into the binary) but still opens <subset.ttf> with fontTools as the oracle,
-which checks that `MicroSvg.Fonts.NAME.bytes` really is byte-identical to
+which checks that `LeanSvg.Fonts.NAME.bytes` really is byte-identical to
 what pyftsubset produced (any difference in the *parse* of the same bytes
 would show up as a normal mismatch above; a difference in the *bytes
 themselves* would tend to show up as wholesale wrong glyph ids/contours).
@@ -93,7 +93,7 @@ def raw_contours_oracle(font, glyph_name):
 # --------------------------------------------------------------------------
 # oracle: kerning (legacy 'kern' table, else GPOS pair adjustment under
 # a 'kern' feature -- reimplemented directly against fontTools' decompiled
-# tables, independently of MicroSvg/Font.lean's own GPOS walk)
+# tables, independently of LeanSvg/Font.lean's own GPOS walk)
 # --------------------------------------------------------------------------
 
 

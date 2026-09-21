@@ -1,4 +1,4 @@
-import MicroSvg.Raster
+import LeanSvg.Raster
 
 /-!
 # Canvas
@@ -11,7 +11,7 @@ which is the pipeline resvg uses for a solid-colour anti-aliased fill or
 stroke.  See `tasks/T2-blend-rounding.md` for where each formula comes from.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 
 structure Rgba where
   r : Nat
@@ -651,4 +651,4 @@ def compositeLayer (cv layer : Canvas) (ox oy : Nat) (opacity : F32) (mode : Ble
   return ⟨w, h, px⟩
 
 end Canvas
-end MicroSvg
+end LeanSvg

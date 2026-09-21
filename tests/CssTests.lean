@@ -1,4 +1,4 @@
-import MicroSvg.Css
+import LeanSvg.Css
 
 /-!
 # T29 — CSS parser/matcher tests
@@ -8,7 +8,7 @@ Plain `#guard` checks: this file must compile and print nothing under
 error, so "compiles cleanly" already means every check below held).
 -/
 
-open MicroSvg.Css
+open LeanSvg.Css
 
 def rulesOf (css : String) : Array Rule := parseStylesheet css.toUTF8
 

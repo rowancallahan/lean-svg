@@ -1,5 +1,5 @@
-import MicroSvg.Clip
-import MicroSvg.Png
+import LeanSvg.Clip
+import LeanSvg.Png
 
 /-!
 # The pure renderer
@@ -10,7 +10,7 @@ No I/O, no `partial`, no `unsafe`, no FFI, no floats.  Output dimensions are
 capped so memory is bounded by a constant times `maxPixels`.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 
 structure Options where
   /-- Output width in pixels (height follows the aspect ratio). -/
@@ -597,4 +597,4 @@ def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
       Render.renderBands opts doc w h k
   return Png.encode w h rgba
 
-end MicroSvg
+end LeanSvg

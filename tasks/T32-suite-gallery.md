@@ -85,7 +85,7 @@ main before appending this section, so the commit is self-contained.
 
 - Ran both routes on the full, unsampled resvg-test-suite (1679 files/route,
   no `--limit`): `python3 tests/gen_gallery.py --out tests/out/gallery
-  --route both --bin /Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg`.
+  --route both --bin /Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg`.
   Card count in `data.json` is 3358, exactly `1679 + 1679` CSV rows
   (`resvg_direct.csv` + `resvg_usvg.csv`). Status counts match exactly:
   CSV `{pass: 1384, fail: 1964, unsupported: 4, ref_failed: 6}` ==
@@ -132,7 +132,7 @@ python3 tests/gen_gallery.py --out tests/out/gallery
 ```
 
 (defaults: `--route both`, `--width 150`, `--bin
-.lake/build/bin/microsvg`; `tests/corpora` already exists as a real
+.lake/build/bin/lean-svg`; `tests/corpora` already exists as a real
 directory in the main tree, no symlink needed there). Serve with
 `python3 -m http.server 8767` from the repo root (the `reports` entry in
 `.claude/launch.json`) and open `http://localhost:8767/tests/out/gallery/`.

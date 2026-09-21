@@ -22,7 +22,7 @@ two-function change: `zlibStoredRows` writes the stream and `zlibLen` gives its
 length.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Png
 
 def crcTable : Array UInt32 :=
@@ -226,4 +226,4 @@ def encode (w h : Nat) (rgba : ByteArray) : ByteArray := Id.run do
   return out ++ chunk "IEND" ByteArray.empty
 
 end Png
-end MicroSvg
+end LeanSvg

@@ -2,9 +2,9 @@
 
 PLAN M11 step B, scope C37–C39 basics. Work ONLY in
 `/Users/rowancallahan/pdf_renderer/.worktrees/T36` (branch `t36-text`).
-Files: new `MicroSvg/Text.lean` (layout: chars → positioned glyph outlines,
-pure), `MicroSvg/Svg.lean` (a `text` branch in `interpret`; font properties
-on `Style`), `MicroSvg/Font.lean` only if a parser bug blocks you (report
+Files: new `LeanSvg/Text.lean` (layout: chars → positioned glyph outlines,
+pure), `LeanSvg/Svg.lean` (a `text` branch in `interpret`; font properties
+on `Style`), `LeanSvg/Font.lean` only if a parser bug blocks you (report
 it), `tests/run_corpora.py` and `tests/run_tests.py` (font pinning for the
 oracle, below). Another Opus agent (T18) is adding a defs pre-pass to
 `interpret` and a `Paint` constructor; a Sonnet agent (T34) edits
@@ -18,7 +18,7 @@ a Python/fontTools oracle for pen positions).
 
 ## Fonts and faces
 
-Only the embedded faces exist: `MicroSvg/Fonts/NotoSans*.lean` (Regular,
+Only the embedded faces exist: `LeanSvg/Fonts/NotoSans*.lean` (Regular,
 Bold, Italic; Latin subsets; see `tasks/T25-font-parser.md` `## Report` and
 the `Font` API: `parse`, `glyphId`, `advance`, `kern`, `outline`). Face
 selection: `font-weight` ≥ 600 (or `bold`/`bolder`) → Bold; `font-style`
@@ -77,7 +77,7 @@ byte-identical on the oracle side: hash the reference PNGs before/after).
 
 ## Verify
 
-- `lake build` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+- `lake build` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - New `tests/svg/25_text.svg` (several sizes, bold/italic, anchors,
   letter-spacing, dx/dy lists, a tspan chain, stroke text) ≥ 99% within 8
   vs resvg **and** ≥ 97% within 8 on the crop to the ink bounding box (write
@@ -107,11 +107,11 @@ Both were kept.
 
 ### Files
 
-- New `MicroSvg/Text.lean` (575 lines): pure layout, characters in and
+- New `LeanSvg/Text.lean` (575 lines): pure layout, characters in and
   positioned glyph outlines out. Knows nothing about XML/CSS/`Style`; takes a
   flat event list (`Ev.open_`/`close`/`text`) with `SpanProps` per run, returns
   `Placed` runs tagged with a style index.
-- `MicroSvg/Svg.lean` (+332): nine new `Style` fields (`fontSize`,
+- `LeanSvg/Svg.lean` (+332): nine new `Style` fields (`fontSize`,
   `fontWeight`, `fontItalic`, `letterSpacing`, `wordSpacing`, `textKerning`,
   `textAnchor`, `spacePreserve`), the text-property parsers, `applyProp` arms
   for them, `textShapes` (walks the `<text>` subtree, resolves `tspan`
@@ -122,13 +122,13 @@ Both were kept.
   branch now seeds `pctRefW/H` from the viewBox (or root size) so `%` on
   `x`/`dx`/`letter-spacing` has a reference; this changed no existing pixel
   (byte-identity below).
-- `MicroSvg/Fonts/*.lean`, `FontDump.lean`: `bytes` became `bytes (_ : Unit)`
+- `LeanSvg/Fonts/*.lean`, `FontDump.lean`: `bytes` became `bytes (_ : Unit)`
   so the three ~32 KB hex decodes are not module-initialisation constants
   paid by every render.
-- `MicroSvg.lean`: import. `tests/run_tests.py`, `tests/run_corpora.py`:
+- `LeanSvg.lean`: import. `tests/run_tests.py`, `tests/run_corpora.py`:
   `resvg_font_args` / `--no-font-pin`. `tests/run_adversarial.py`: four new
   cases. New `tests/svg/25_text.svg`.
-- `git diff main -- MicroSvg/Effect.lean` is empty; `Render.lean`/`Main.lean`
+- `git diff main -- LeanSvg/Effect.lean` is empty; `Render.lean`/`Main.lean`
   untouched, `render`'s type unchanged. No `partial`/`unsafe`/`Float`/`!`
   indexing in the new code; every loop is a `for` over an input- or
   constant-bounded range.
@@ -266,7 +266,7 @@ resvg 0.48.1 via `cargo install`. The resvg checkout keeps its suite at
 ## Merge with main (T38 + T34 + T37)
 
 `origin/main` at `a932752` merged into `t36-text`. One conflicted file,
-`MicroSvg/Svg.lean`, three hunks, all resolved by keeping both sides:
+`LeanSvg/Svg.lean`, three hunks, all resolved by keeping both sides:
 
 - The text-property parsers (T36) and `paintOrderKindOf`/`strokeBeforeFill`
   (T34) are independent top-level definitions; both kept.
@@ -290,7 +290,7 @@ text are unaffected (`text/letter-spacing` still 8/12, below).
 | check | result |
 |---|---|
 | `lake build` | clean, 41 jobs, no errors, no warnings |
-| `git diff origin/main -- MicroSvg/Effect.lean` | empty |
+| `git diff origin/main -- LeanSvg/Effect.lean` | empty |
 | `run_tests.py` | 20/24; `25_text` 99.530% within-8 (99.302% exact); the 4 failures (12, 14, 15, 16) are main's |
 | 23 pre-existing `tests/svg` files vs main's binary | 46/46 PNGs byte-identical (natural size and `--width 800`) |
 | `run_tiles.py --no-timing` | 24/24 stitch byte-identically |

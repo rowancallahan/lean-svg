@@ -2,8 +2,8 @@
 
 Two small painting items (PLAN C18, C03). Work ONLY in
 `/Users/rowancallahan/pdf_renderer/.worktrees/T34` (branch `t34-paint-order`).
-Files: `MicroSvg/Svg.lean` (`Style` one new field, `applyProp` one case, the
-colour parser used by `parsePaint`) and `MicroSvg/Render.lean` (`drawShape`
+Files: `LeanSvg/Svg.lean` (`Style` one new field, `applyProp` one case, the
+colour parser used by `parsePaint`) and `LeanSvg/Render.lean` (`drawShape`
 order only). Two Opus agents are editing `interpret`, `Paint`, `parsePaint`'s
 `url()` handling and `drawShape`'s paint plumbing in parallel: keep each edit
 to a few lines in place so merges are trivial. Invariants in `tasks/README.md`.
@@ -32,10 +32,10 @@ to a few lines in place so merges are trivial. Invariants in `tasks/README.md`.
   painting/fill: every file whose only issue was `hsl`/`rgba` notation now
   passes (list them); nothing regresses.
 - A Python check `tests/check_hsl.py`: 2 000 random `hsl()`/`rgba()` strings
-  rendered as a solid `<rect>` by both microsvg and resvg at 4×4 px, centre
+  rendered as a solid `<rect>` by both lean-svg and resvg at 4×4 px, centre
   pixel equal (exact); report the count.
 - `python3 tests/run_tests.py` all 23 byte-identical to main's binary;
-  `run_adversarial.py` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+  `run_adversarial.py` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
@@ -52,7 +52,7 @@ The corpus in current `linebender/resvg` lives at `crates/resvg/tests`, not `tes
 
 ### What changed
 
-- `MicroSvg/Svg.lean`
+- `LeanSvg/Svg.lean`
   - `Style.strokeFirst : Bool` (inherited like every other paint property).
   - `applyProp "paint-order"` → `strokeBeforeFill`, a transcription of svgtypes
     `PaintOrder::from_str` (`src/paint_order.rs`): up to three idents, `normal` and any
@@ -65,7 +65,7 @@ The corpus in current `linebender/resvg` lives at `crates/resvg/tests`, not `tes
     0.16.1 exactly instead of approximately.
   - `hslToRgb`: svgtypes `hsl_to_rgb`/`hue_to_rgb` in exact integer arithmetic on the
     grid `60 · opacityOne`.
-- `MicroSvg/Render.lean`: `drawShape` splits the fill and stroke passes into two closures
+- `LeanSvg/Render.lean`: `drawShape` splits the fill and stroke passes into two closures
   and runs them stroke-first when `st.strokeFirst`. No other change.
 - `tests/check_hsl.py`: new random oracle check (2 000 strings, 4×4 rect, centre pixel).
 
@@ -126,7 +126,7 @@ The corpus in current `linebender/resvg` lives at `crates/resvg/tests`, not `tes
 - `python3 tests/run_tests.py`: 19/23 vs resvg, same as main; all 23 outputs
   byte-identical to main's binary at natural size and at `--width 800` (46/46 PNGs `cmp`).
 - `python3 tests/run_adversarial.py`: 42/42 clean.
-- `git diff main -- MicroSvg/Effect.lean`: empty.
+- `git diff main -- LeanSvg/Effect.lean`: empty.
 
 ### Not done / caveats
 

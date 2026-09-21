@@ -10,7 +10,7 @@ corpus files.
     python3 tests/gen_strokes.py            # write the SVGs
     python3 tests/gen_strokes.py --compare BIN_OLD BIN_NEW
 
-`--compare` renders every probe with two microsvg binaries and with resvg, at
+`--compare` renders every probe with two lean-svg binaries and with resvg, at
 natural size and at --width 800, and prints exact%/within8% for each.
 """
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO / "tests" / "out" / "strokes"
-DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
 W = H = 200
 JOINS = ("miter", "round", "bevel")

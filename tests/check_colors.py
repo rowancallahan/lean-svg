@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check `namedColors` in MicroSvg/Svg.lean against Pillow's CSS colour map.
+"""Check `namedColors` in LeanSvg/Svg.lean against Pillow's CSS colour map.
 
 Pillow's `PIL.ImageColor.colormap` is the CSS Color Level 4 extended colour
 keyword table (147 names plus `rebeccapurple`, no `transparent`).  This
@@ -23,7 +23,7 @@ from pathlib import Path
 from PIL import ImageColor
 
 REPO = Path(__file__).resolve().parent.parent
-SVG_LEAN = REPO / "MicroSvg" / "Svg.lean"
+SVG_LEAN = REPO / "LeanSvg" / "Svg.lean"
 
 PAIR_RE = re.compile(r'\("([a-zA-Z]+)",\s*0x([0-9a-fA-F]{6})\)')
 

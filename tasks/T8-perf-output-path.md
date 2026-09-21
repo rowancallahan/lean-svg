@@ -8,7 +8,7 @@ CRC-32 over ~4 bytes/pixel). Make this several times faster with
 **byte-identical output**.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T8` (branch `t8-output`).
-Files allowed: `MicroSvg/Png.lean`, and in `MicroSvg/Canvas.lean` only
+Files allowed: `LeanSvg/Png.lean`, and in `LeanSvg/Canvas.lean` only
 `toRgbaBytes` and `new` (T7 is editing `fillMask` in parallel; do not touch it).
 
 ## Suspects (measure, then fix what matters)
@@ -51,17 +51,17 @@ the per-suspect breakdown. Append `## Report`. Do not commit.
 
 ### Files changed
 
-* `MicroSvg/Png.lean` — rewritten output path (all five suspects).
-* `MicroSvg/Canvas.lean` — `toRgbaBytes` only. `new` was already a single
+* `LeanSvg/Png.lean` — rewritten output path (all five suspects).
+* `LeanSvg/Canvas.lean` — `toRgbaBytes` only. `new` was already a single
   `Array.replicate`, so there was nothing to take off it; `fillMask` and its
   helpers are main's (T7's), untouched.
-* `git diff main -- MicroSvg/Effect.lean` is empty. `lake build` is clean, no
+* `git diff main -- LeanSvg/Effect.lean` is empty. `lake build` is clean, no
   errors and no new warnings.
 
 ### Method
 
 `main` was rebuilt from its own sources inside this worktree; the resulting
-binary is sha256-identical to the one at `.lake/build/bin/microsvg`
+binary is sha256-identical to the one at `.lake/build/bin/lean-svg`
 (`b7dd26e5e508fe15…`), so "before" really is main and the build is
 reproducible. Each suspect was then measured by *ablation*: one binary per
 suspect, reverting that suspect alone and keeping the other four, so each

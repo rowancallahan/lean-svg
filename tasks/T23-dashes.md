@@ -6,14 +6,14 @@
 before stroking.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T23` (branch
-`t23-dashes`). Files: `MicroSvg/Geom.lean` **stroking section** (append a
+`t23-dashes`). Files: `LeanSvg/Geom.lean` **stroking section** (append a
 new `dashPoly`; do not modify `segCount`/`cubicAt`/`flatten`, which another
-agent is editing), `MicroSvg/Svg.lean` (`Style` fields `dashes : Array Fx`,
+agent is editing), `LeanSvg/Svg.lean` (`Style` fields `dashes : Array Fx`,
 `dashOffset : Fx`; `applyProp` for `stroke-dasharray` (list of lengths,
 `none`, percentages rejected → none) and `stroke-dashoffset`; inheritance
 like the other stroke props) — keep the `Svg.lean` edits to those lines
 only, since T16 is editing `parsePathData` in the same file — and
-`MicroSvg/Render.lean` (`drawShape`: apply `dashPoly` to each flattened
+`LeanSvg/Render.lean` (`drawShape`: apply `dashPoly` to each flattened
 `Poly` before `strokePoly` when the pattern is non-empty).
 
 ## Algorithm (decided, SVG 1.1 §11.4)
@@ -59,18 +59,18 @@ Dash tests pass, no regressions, report appended, committed on the branch.
 
 ### What changed
 
-- `MicroSvg/Geom.lean` — new `## Dashing` section at the end (after `strokePoly`,
+- `LeanSvg/Geom.lean` — new `## Dashing` section at the end (after `strokePoly`,
   nothing above it touched): `maxDashes`, `dashPattern`, `dashPoly`, `dashPolys`.
-- `MicroSvg/Fixed.lean` — `parseAbsLength` / `parseAbsLengthAll` /
+- `LeanSvg/Fixed.lean` — `parseAbsLength` / `parseAbsLengthAll` /
   `parseAbsLengthList` next to `parseLength`.  Absolute units only: `%` was
   already rejected, `em`/`ex` now are too (`parseLength` resolves them against a
   fixed 16 px font that is not the document's).  The list parser is
   all-or-nothing, so one bad item means "not dashed".
-- `MicroSvg/Svg.lean` — `Style.dashes : Array Fx` and `Style.dashOffset : Fx`
+- `LeanSvg/Svg.lean` — `Style.dashes : Array Fx` and `Style.dashOffset : Fx`
   plus the two `applyProp` cases, and nothing else (8 added lines, 0 changed),
   so T16's `parsePathData` work merges cleanly.  Inheritance is the `Style`
   copy every other stroke property already gets.
-- `MicroSvg/Render.lean` — one line in `drawShape`, in the stroke branch only:
+- `LeanSvg/Render.lean` — one line in `drawShape`, in the stroke branch only:
   the flattened polys are dashed before both the hairline and the outline path,
   so a dashed hairline dashes too.  The fill still uses the undashed polys.
 - `tests/svg/23_dashes.svg` — new.

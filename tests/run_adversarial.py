@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safety harness: feed hostile inputs to microsvg and check that it never
+"""Safety harness: feed hostile inputs to lean-svg and check that it never
 crashes, never hangs, and never writes a file other than the requested output.
 
 Inputs are the checked-in corpus in tests/adversarial/ plus a set of generated
@@ -32,7 +32,7 @@ SVG_DIR = REPO / "tests" / "svg"
 ADV_DIR = REPO / "tests" / "adversarial"
 OUT_DIR = REPO / "tests" / "out"
 GEN_DIR = OUT_DIR / "adversarial_gen"
-DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
 RENDER_TIMEOUT = 120  # seconds
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -360,7 +360,7 @@ def run_case(path, binary, label):
         "stderr": "",
         "violations": [],
     }
-    tmpdir = Path(tempfile.mkdtemp(prefix="microsvg_adv_"))
+    tmpdir = Path(tempfile.mkdtemp(prefix="lean-svg_adv_"))
     out_png = tmpdir / "out.png"
     try:
         start = time.perf_counter()
@@ -486,13 +486,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--filter", help="only run cases whose name contains SUBSTR")
     parser.add_argument(
-        "--bin", default=str(DEFAULT_BIN), help="path to the microsvg binary"
+        "--bin", default=str(DEFAULT_BIN), help="path to the lean-svg binary"
     )
     args = parser.parse_args()
 
     binary = Path(args.bin).resolve()
     if not binary.is_file():
-        print("microsvg binary not found at %s" % binary, file=sys.stderr)
+        print("lean-svg binary not found at %s" % binary, file=sys.stderr)
         print("build it first:  lake build", file=sys.stderr)
         return 2
 

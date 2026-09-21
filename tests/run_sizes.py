@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fidelity and speed across render sizes.
 
-For every tests/svg/*.svg and every requested width, render with both microsvg
+For every tests/svg/*.svg and every requested width, render with both lean-svg
 and resvg, score our output against the reference, and time both renderers
 (median of N runs, wall clock).
 
@@ -141,7 +141,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
             cell["note"] = "a single run exceeded %d s" % RENDER_TIMEOUT
         else:
             cell["status"] = "error"
-            cell["note"] = "microsvg timed out after %d s" % RENDER_TIMEOUT
+            cell["note"] = "lean-svg timed out after %d s" % RENDER_TIMEOUT
         return cell
     cell["ours_ms"] = ms_ours
     # Not clamped: at small widths our render cost is below the process-start
@@ -149,7 +149,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
     cell["ours_net_ms"] = ms_ours - base_ours
     if rc_ours != 0:
         cell["status"] = "error"
-        cell["note"] = "microsvg failed: " + (err_ours or "rc=%s" % rc_ours)
+        cell["note"] = "lean-svg failed: " + (err_ours or "rc=%s" % rc_ours)
         return cell
 
     ms_resvg, rc_resvg, err_resvg, to_resvg = time_runs(
@@ -400,7 +400,7 @@ def write_csv(path, cells):
 
 def write_md(path, cells, summary_rows, meta, slowest):
     parts = [
-        "# microsvg: fidelity and speed across render sizes",
+        "# lean-svg: fidelity and speed across render sizes",
         "",
         "%s · widths %s · median of %d runs · tolerance %d"
         % (meta["generated"], meta["widths"], meta["runs"], TOL),
@@ -490,13 +490,13 @@ def main():
         "--runs", type=int, default=3, help="timing runs per cell, median (default 3)"
     )
     parser.add_argument(
-        "--bin", default=str(DEFAULT_BIN), help="path to the microsvg binary"
+        "--bin", default=str(DEFAULT_BIN), help="path to the lean-svg binary"
     )
     args = parser.parse_args()
 
     binary = Path(args.bin).resolve()
     if not binary.is_file():
-        print("microsvg binary not found at %s" % binary, file=sys.stderr)
+        print("lean-svg binary not found at %s" % binary, file=sys.stderr)
         print("build it first:  lake build", file=sys.stderr)
         return 2
     if shutil.which("resvg") is None:
@@ -526,7 +526,7 @@ def main():
 
     started = time.perf_counter()
     cells = []
-    with tempfile.TemporaryDirectory(prefix="microsvg-sizes-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="lean-svg-sizes-") as tmpdir:
         tmp = Path(tmpdir)
         base_ours, base_resvg = measure_baseline(binary, tmp, args.runs)
         print(

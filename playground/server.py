@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Local web playground for microsvg.
+"""Local web playground for lean-svg.
 
 Serves a single-page UI that renders an SVG three ways (browser, resvg,
-microsvg) and diffs the two rasterizers.
+lean-svg) and diffs the two rasterizers.
 
 Run:  python3 playground/server.py [--port 8765]
 Then open http://127.0.0.1:8765
@@ -39,7 +39,7 @@ REPO = os.path.dirname(HERE)
 INDEX_HTML = os.path.join(HERE, "index.html")
 DROP_HTML = os.path.join(HERE, "drop.html")
 SVG_DIR = os.path.join(REPO, "tests", "svg")
-OURS_BIN = os.path.join(REPO, ".lake", "build", "bin", "microsvg")
+OURS_BIN = os.path.join(REPO, ".lake", "build", "bin", "lean-svg")
 FONTS_DIR = os.path.join(REPO, "tests", "corpora", "resvg-test-suite", "fonts")
 
 MAX_BODY = 2 * 1024 * 1024  # 2 MB
@@ -146,7 +146,7 @@ def _metrics(ours_png, ref_png):
 
 
 def render_both(svg_text, width=None):
-    tmpdir = tempfile.mkdtemp(prefix="microsvg-playground-")
+    tmpdir = tempfile.mkdtemp(prefix="lean-svg-playground-")
     try:
         in_path = os.path.join(tmpdir, "input.svg")
         with open(in_path, "w", encoding="utf-8") as fh:
@@ -163,7 +163,7 @@ def render_both(svg_text, width=None):
         if not os.path.exists(OURS_BIN):
             ours_png, ours_err, ours_ms = (
                 None,
-                "microsvg binary not found at %s (run `lake build`)" % OURS_BIN,
+                "lean-svg binary not found at %s (run `lake build`)" % OURS_BIN,
                 0.0,
             )
         else:
@@ -334,7 +334,7 @@ def list_examples():
 # --------------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "microsvg-playground"
+    server_version = "lean-svg-playground"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
@@ -529,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             background = background_raw
 
-        tmpdir = tempfile.mkdtemp(prefix="microsvg-drop-")
+        tmpdir = tempfile.mkdtemp(prefix="lean-svg-drop-")
         try:
             # Fixed filenames under our own tmpdir: nothing from the client
             # ever reaches the filesystem as a path or filename.
@@ -548,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.exists(OURS_BIN):
                 ours = {
                     "png": None,
-                    "error": "microsvg binary not found at %s (run `lake build`)" % OURS_BIN,
+                    "error": "lean-svg binary not found at %s (run `lake build`)" % OURS_BIN,
                     "stderr": "",
                     "exit_code": None,
                     "ms": 0.0,
@@ -598,14 +598,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="microsvg playground server")
+    ap = argparse.ArgumentParser(description="lean-svg playground server")
     ap.add_argument("--port", type=int, default=8765, help="port (default 8765)")
     args = ap.parse_args()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     httpd.daemon_threads = True
     url = "http://127.0.0.1:%d" % args.port
-    print("microsvg playground -> %s" % url)
+    print("lean-svg playground -> %s" % url)
     print("  renderer: %s" % OURS_BIN)
     print("  reference: %s" % (shutil.which("resvg") or "resvg (NOT on PATH)"))
     print("  examples: %s" % SVG_DIR)

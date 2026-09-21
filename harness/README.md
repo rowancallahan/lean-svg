@@ -4,7 +4,7 @@ Idea: a single, never-changing program shell reads one file, calls a pure
 core, and writes one file. Cores are written in safe Rust, translated to Lean
 by Aeneas (via Charon), and proven to satisfy a pre-specified contract. The
 shell's file-system behaviour is proven once, generically, in
-`MicroSvg/Effect.lean`; every core inherits it.
+`LeanSvg/Effect.lean`; every core inherits it.
 
 ```
 argv ─▶ [ main.rs: read(in) ─▶ core::run(bytes, opts) ─▶ write(out) | exit 1 ]
@@ -38,7 +38,7 @@ per core, and they are the "extra work" that buys halting and no-panic.
 
 ## The harness theorems (proven once)
 
-From `MicroSvg/Effect.lean`, for any `render : ByteArray → Except ε ByteArray`:
+From `LeanSvg/Effect.lean`, for any `render : ByteArray → Except ε ByteArray`:
 
 - `runFS_frame`: no path other than `out` changes.
 - `runFS_input_only`: the result depends only on `fs inp`.
@@ -69,7 +69,7 @@ harness/
     cores/<tool>/      one library crate per core (C1–C2)
   lean/
     lakefile.toml      depends on the Aeneas Lean library
-    Harness/Effect.lean  copy of MicroSvg/Effect.lean (generic theorems)
+    Harness/Effect.lean  copy of LeanSvg/Effect.lean (generic theorems)
     Harness/Adapter.lean asRender + per-core contract statements
     Generated/<tool>/  Aeneas output (do not edit)
 ```

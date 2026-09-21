@@ -1,4 +1,4 @@
-# microsvg — work plan
+# lean-svg — work plan
 
 Goal: a micro-SVG → PNG rasterizer in Lean 4 whose *only* claim is safety.
 Bytes in, bytes out. It reads exactly one file, then either fails with a message
@@ -17,7 +17,7 @@ Legend: **[done]**, **[Opus]** = straightforward coding, spec below is complete,
 ## M0 — Scaffold, proofs, first renderer  [done]
 
 - Lake project, no dependencies (`lakefile.toml`, `lean-toolchain` = v4.34.0).
-- `MicroSvg/Effect.lean`: free monad `Prog` over two ops; theorems
+- `LeanSvg/Effect.lean`: free monad `Prog` over two ops; theorems
   `runFS_frame`, `runFS_input_only`, `renderProgram_spec`,
   `renderProgram_error_no_write`, `renderProgram_ok_output`,
   `renderProgram_ok_frame`. Axioms used: `propext` only.
@@ -43,7 +43,7 @@ alone would fail on thin strokes even when the render is right.
 ## M2 — Browser playground  [Opus, in progress]
 
 `playground/server.py` + `playground/index.html`: type or draw an SVG, see
-browser / resvg / microsvg / diff, with the metrics. `.claude/launch.json`
+browser / resvg / lean-svg / diff, with the metrics. `.claude/launch.json`
 entry `playground`.
 
 ## M3 — Output-shape theorem  [design → then Opus for the proof grind]
@@ -421,7 +421,7 @@ small human-labelled calibration set before choosing numeric thresholds.
 - `tests/run_suite.py`: for a checkout of `linebender/resvg-test-suite`
   (`tests/*.svg`, MIT), run `usvg in.svg micro.svg` (usvg ships with resvg;
   install `cargo install usvg` or `brew` if a formula exists), then render
-  `micro.svg` with microsvg and with resvg, compare with the M1 metric. Report
+  `micro.svg` with lean-svg and with resvg, compare with the M1 metric. Report
   pass rate per test-suite directory (structure, painting, shapes, ...).
   Text becomes paths through usvg, so `text/` tests become testable.
 - Feed failures back as items in M4.
@@ -429,7 +429,7 @@ small human-labelled calibration set before choosing numeric thresholds.
 ## M6 — Performance  [Opus]
 
 - Benchmark script: render each corpus file 20× with `--width 2000`, report
-  median ms for microsvg vs resvg. Also a 5 000-shape generated file.
+  median ms for lean-svg vs resvg. Also a 5 000-shape generated file.
 - Likely wins, in order: (1) skip rows of the mask that are all zero before
   blending; (2) in `accumPiece`, use `USize` indexing with proofs or keep
   `setIfInBounds` but hoist `base + c`; (3) avoid re-allocating the mask per
@@ -565,19 +565,19 @@ NOTICE, or COPYING file was tracked on main.
 
 ### Explain the actual relationship to resvg/usvg
 
-Public scope description: **microsvg reads a static SVG document and renders
+Public scope description: **lean-svg reads a static SVG document and renders
 it to PNG in Lean.** It performs the parsing, geometry, rasterization,
 compositing, and encoding needed for that conversion. It is not an SVG editor,
 diagram authoring system, web browser, or script/animation engine. Temporary
 group/layer state is only rendering machinery; an editing model is not a goal.
 
-- The ordinary `microsvg` executable renders the supplied SVG directly through
+- The ordinary `lean-svg` executable renders the supplied SVG directly through
   its own Lean XML/SVG/geometry/raster/PNG pipeline. `Main.lean` does not invoke
   usvg. `lake-manifest.json` currently lists no external Lake packages.
 - `tests/run_corpora.py` has **direct** and **usvg** routes. The latter invokes
-  the external usvg CLI to simplify the document before passing it to microsvg.
+  the external usvg CLI to simplify the document before passing it to lean-svg.
   Both routes compare against the external resvg CLI rendering the original.
-  The playground compares browser/resvg/microsvg directly; it does not invoke
+  The playground compares browser/resvg/lean-svg directly; it does not invoke
   usvg. These testing tools are not dependencies linked into the Lean renderer.
 - Credit resvg as the reference renderer, usvg as the optional preprocessing
   route, and the resvg test suite as a separate source of fixtures. Distinguish
@@ -617,7 +617,7 @@ and [OFL FAQ](https://openfontlicense.org/ofl-faq/).
 
 ### Compatible project license suggestion
 
-Recommend **Apache-2.0 for original microsvg code**, subject to completing the
+Recommend **Apache-2.0 for original lean-svg code**, subject to completing the
 source provenance review. It provides a permissive contribution path alongside
 the identified MIT/BSD material and Apache-licensed tooling/inspiration. Keep
 the upstream MIT/BSD/Apache obligations and asset licenses explicitly attached
@@ -715,7 +715,7 @@ not avoiding legitimate reuse of permissively licensed work.
 
 Suggested README acknowledgement wording (adapt to what actually ships):
 
-> microsvg is a static SVG renderer written in Lean. We thank the resvg and
+> lean-svg is a static SVG renderer written in Lean. We thank the resvg and
 > usvg authors and Linebender maintainers for the reference renderer, optional
 > preprocessing tools, and publicly available resvg test suite. Rendering
 > algorithms include adaptations of tiny-skia/Skia, with earlier inspiration

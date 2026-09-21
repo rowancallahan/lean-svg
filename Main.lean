@@ -1,4 +1,4 @@
-import MicroSvg
+import LeanSvg
 
 /-!
 # Command-line entry point (trusted shell)
@@ -8,10 +8,10 @@ arguments, builds the `Prog` program from the pure `render`, hands it to the
 interpreter, and prints an error message to stderr on failure.
 -/
 
-open MicroSvg
+open LeanSvg
 
 def usage : String :=
-  "usage: microsvg <input.svg> <output.png> [--width N] [--zoom Z] [--background COLOR]\n" ++
+  "usage: lean-svg <input.svg> <output.png> [--width N] [--zoom Z] [--background COLOR]\n" ++
   "                [--viewport X Y W H] [--threads N]\n" ++
   "  --viewport X Y W H  render only the W x H window whose top-left corner is\n" ++
   "                      at (X, Y) in the zoomed image; X and Y are integers and\n" ++
@@ -75,7 +75,7 @@ def main (args : List String) : IO UInt32 := do
     match result with
     | .ok () => return 0
     | .error e =>
-      IO.eprintln s!"microsvg: error: {e}"
+      IO.eprintln s!"lean-svg: error: {e}"
       return 1
   | none =>
     IO.eprintln usage

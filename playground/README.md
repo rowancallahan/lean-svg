@@ -1,6 +1,6 @@
-# microsvg playground
+# lean-svg playground
 
-A local, no-dependency web UI for comparing **microsvg** against **resvg** on any SVG
+A local, no-dependency web UI for comparing **lean-svg** against **resvg** on any SVG
 you type or draw.
 
 ## Run
@@ -17,15 +17,15 @@ still render and only the metrics are omitted).
 
 ## Prerequisites
 
-- `.lake/build/bin/microsvg` — build it with `lake build` if it is missing.
+- `.lake/build/bin/lean-svg` — build it with `lake build` if it is missing.
 - `resvg` on `PATH` — the reference renderer.
 
 ## What you see
 
 Four tiles: the **browser's** own rendering of the SVG source, **resvg (reference)**,
-**microsvg (ours)**, and a **diff** (white where the two rasterizers agree, red where
+**lean-svg (ours)**, and a **diff** (white where the two rasterizers agree, red where
 they do not, computed in the page from the two PNGs). Underneath: a timing strip
-(`microsvg N ms · resvg M ms · size W×H`), the last ten renders as plain text, and the
+(`lean-svg N ms · resvg M ms · size W×H`), the last ten renders as plain text, and the
 fraction of pixels that match exactly, within 8, and within 32 (max channel difference
 over RGBA), the mean absolute difference, and how long each renderer took. Any stderr
 from either renderer appears in a red box.
@@ -33,11 +33,11 @@ from either renderer appears in a red box.
 ## Render at the displayed size
 
 The four tiles sit in a dashed box you can **resize by dragging its bottom-right
-corner**; it also follows the window. A `ResizeObserver` watches the microsvg tile,
+corner**; it also follows the window. A `ResizeObserver` watches the lean-svg tile,
 and 150 ms after the size settles the page POSTs `/render` again with `width` set to
 that tile's pixel width (32-2048 px), so both rasterizers are re-run at exactly the
 size you are looking at. The current width is shown next to the buttons, and the
-microsvg caption carries `W×H · N ms` for the render on screen. **Reset size** drops
+lean-svg caption carries `W×H · N ms` for the render on screen. **Reset size** drops
 back to the full column width.
 
 Images are displayed 1:1. **Zoom 2×** doubles them with `image-rendering: pixelated`

@@ -12,7 +12,7 @@ Work ONLY in the worktree `/Users/rowancallahan/pdf_renderer/.worktrees/T4`
 ## CLI
 
 ```
-microsvg in.svg out.png --width 4000 --viewport X Y W H
+lean-svg in.svg out.png --width 4000 --viewport X Y W H
 ```
 
 - `--width N` (or `--zoom Z`) fixes the zoom exactly as today: the *virtual*
@@ -69,14 +69,14 @@ Do not commit.
 
 | file | change |
 |---|---|
-| `MicroSvg/Render.lean` | `Options.viewport : Option (Int × Int × Nat × Nat)`; `canvasSetup` returns the tile size, the tile transform and the document rectangle; `drawShape` passes that rectangle to `rasterize` |
-| `MicroSvg/Raster.lean` | `Rect`; `accumPiece` clips to the mask *exactly* instead of taking pre-clipped `Nat` coordinates; `accumEdge` clips to the document rectangle instead of the mask; `rasterize` takes the document rectangle |
+| `LeanSvg/Render.lean` | `Options.viewport : Option (Int × Int × Nat × Nat)`; `canvasSetup` returns the tile size, the tile transform and the document rectangle; `drawShape` passes that rectangle to `rasterize` |
+| `LeanSvg/Raster.lean` | `Rect`; `accumPiece` clips to the mask *exactly* instead of taking pre-clipped `Nat` coordinates; `accumEdge` clips to the document rectangle instead of the mask; `rasterize` takes the document rectangle |
 | `Main.lean` | `--viewport X Y W H` (`parseIntArg` allows a leading `-`), usage text incl. the 4096× zoom ceiling |
 | `tests/run_tiles.py` | new harness (stitching, off-document tile, partial tile, tile timings) |
 | `DESIGN.md`, `README.md`, `Makefile` | §3.5 rewritten, new §3.8 "Viewport (tiles)"; CLI example; `make tiles` |
 
 `tests/run_tests.py` and `tests/run_adversarial.py` are untouched.
-`MicroSvg/Effect.lean` is untouched — the CLI still builds the same one-read /
+`LeanSvg/Effect.lean` is untouched — the CLI still builds the same one-read /
 one-write `Prog`, so the effect theorems still cover it. No `partial`, no
 `unsafe`, no `panic!`, no `!`-indexing, no `Float`; every new loop is a `for`
 over a range bounded by the tile (`bh` rows, `bw + 2` columns) or by 2.
@@ -84,7 +84,7 @@ over a range bounded by the tile (`bh` rows, `bw + 2` columns) or by 2.
 ### CLI
 
 ```
-microsvg in.svg out.png --width 4000 --viewport 1744 1744 512 512
+lean-svg in.svg out.png --width 4000 --viewport 1744 1744 512 512
 ```
 
 `X`, `Y` may be negative or past the edge; `W`, `H` ≥ 1. `--width` / `--zoom`

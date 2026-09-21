@@ -1,14 +1,14 @@
-import MicroSvg.Geom
-import MicroSvg.Font
-import MicroSvg.Fonts.NotoSans
-import MicroSvg.Fonts.NotoSansBold
-import MicroSvg.Fonts.NotoSansItalic
+import LeanSvg.Geom
+import LeanSvg.Font
+import LeanSvg.Fonts.NotoSans
+import LeanSvg.Fonts.NotoSansBold
+import LeanSvg.Fonts.NotoSansItalic
 
 /-!
 # Text layout
 
 Characters in, positioned glyph outlines out.  Pure, total, fixed point, and
-deliberately independent of `MicroSvg/Svg.lean`: this module knows nothing
+deliberately independent of `LeanSvg/Svg.lean`: this module knows nothing
 about XML, CSS or `Style`.  `Svg.lean` resolves the cascade, hands us a flat
 event list (`Ev`) carrying only the properties layout needs plus an opaque
 `styleIdx` per run, and gets back `Placed` shapes — glyph outlines already in
@@ -33,7 +33,7 @@ are written out, so a long line does not accumulate 1/256 px of drift per
 character.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Text
 
 open Bytes
@@ -572,4 +572,4 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   return (placed, used)
 
 end Text
-end MicroSvg
+end LeanSvg

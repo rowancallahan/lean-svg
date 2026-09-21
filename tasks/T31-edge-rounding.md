@@ -16,9 +16,9 @@ background rect, black shape):
 ```
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T31` (branch
-`t31-edge-rounding`). Files: `MicroSvg/Raster.lean` (`mkEdge`, the
+`t31-edge-rounding`). Files: `LeanSvg/Raster.lean` (`mkEdge`, the
 scan-converter's edge setup and the row/column rounding), and
-`MicroSvg/Geom.lean` **only** if the device-space point rounding
+`LeanSvg/Geom.lean` **only** if the device-space point rounding
 (`Mat.apply` / flatten output) turns out to be the cause. Nothing else.
 Invariants in `tasks/README.md`; `Effect.lean` untouched; no `Float`.
 
@@ -61,7 +61,7 @@ Invariants in `tasks/README.md`; `Effect.lean` untouched; no `Float`.
   `--corpus resvg --dir shapes --dir painting/stroke-linejoin --dir structure/transform`
   and `--corpus simple-icons --limit 400`; medians must not fall.
 - `run_tiles.py` byte-identical (23 files); `run_adversarial.py` clean;
-  `git diff main -- MicroSvg/Effect.lean` empty.
+  `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`. If after ~40 minutes you have not found the discrepancy,
@@ -125,13 +125,13 @@ means `mkEdge`, `rasterize`'s scanline walk, `blitSpan`'s coverage
 accumulation, and `Mat.apply`'s point rounding are **already exact** —
 there is no "off by one supersample" bug in the scan converter itself.
 
-**Root cause.** `parseTransform` (`MicroSvg/Svg.lean:283`) parses every
+**Root cause.** `parseTransform` (`LeanSvg/Svg.lean:283`) parses every
 `scale()`/`matrix()`/`skewX()`/`skewY()` argument with `parseNumberList`
-(`MicroSvg/Fixed.lean:221`), which lexes onto the coordinate grid of 1/256
+(`LeanSvg/Fixed.lean:221`), which lexes onto the coordinate grid of 1/256
 px (`parseNumber` → `scaleDecimal mant exp10 256 …`, appropriate for a
-*position*). `Mat.scale`/`Mat.mk'` (`MicroSvg/Geom.lean:96-100`) then simply
+*position*). `Mat.scale`/`Mat.mk'` (`LeanSvg/Geom.lean:96-100`) then simply
 promote that already-quantized `Fx` value to 16.16 by `sx * 256`
-(`MicroSvg/Svg.lean:300,304`), so a scale/matrix **coefficient** can only
+(`LeanSvg/Svg.lean:300,304`), so a scale/matrix **coefficient** can only
 ever land on a multiple of `256/65536 = 1/256` — a 1/256-relative-to-1
 quantization step being applied to a *multiplicative factor*, not an
 additive position, so its error is amplified by whatever the factor
@@ -188,21 +188,21 @@ attributed by the T1 report to curve-flattening/stroker residuals, not to
 straight-edge AA. No corpus or adversarial file was re-run past this
 baseline check since no source changed; `run_tiles.py`/`run_adversarial.py`
 are byte-identical to main by construction (nothing was edited).
-`git diff main -- MicroSvg/Effect.lean` is empty (never touched).
+`git diff main -- LeanSvg/Effect.lean` is empty (never touched).
 
 ### What changed (files)
 
 Only `tasks/T31-edge-rounding.md` (this file — it did not exist yet on this
 branch, which was cut before the spec was added to main; copied over from
 main, then this `## Report` appended). **No `.lean` file was touched**:
-`git diff main -- MicroSvg/` is empty. `lake build` was run once, unmodified,
+`git diff main -- LeanSvg/` is empty. `lake build` was run once, unmodified,
 to produce the worktree's binary for the isolation experiments above; it is
-identical to main's `.lake/build/bin/microsvg`.
+identical to main's `.lake/build/bin/lean-svg`.
 
 ### Recommendation
 
-The real fix belongs in `MicroSvg/Fixed.lean` (`parseNumber`/`scaleDecimal`,
-or a new sibling parsed onto the 16.16 grid) and `MicroSvg/Svg.lean`
+The real fix belongs in `LeanSvg/Fixed.lean` (`parseNumber`/`scaleDecimal`,
+or a new sibling parsed onto the 16.16 grid) and `LeanSvg/Svg.lean`
 (`parseTransform`, to use that parser for `scale()`'s and `matrix()`'s
 linear coefficients and `skewX()`/`skewY()`'s tangent, not for `translate()`
 or `matrix()`'s `e`/`f`, which are positions and are fine at `Fx`
@@ -220,16 +220,16 @@ This section is the fix and its numbers.
 
 ### What changed (files)
 
-* **`MicroSvg/Fixed.lean`**, +34/−0, purely additive: `parseNumber16`
+* **`LeanSvg/Fixed.lean`**, +34/−0, purely additive: `parseNumber16`
   (mirrors `parseNumber` but calls `scaleDecimal mant exp10 65536 …` instead
   of `… 256 …` — the same lexer, the same rounding-halves-away-from-zero
   rule inside `scaleDecimal`, just landed on the 16.16 grid) and
   `parseNumberList16` (mirrors `parseNumberList` byte for byte, calling
   `parseNumber16`). `parseNumber`/`parseNumberList`/`scaleDecimal`/
-  `parseDecimal` are untouched — `git diff main -- MicroSvg/Fixed.lean`
+  `parseDecimal` are untouched — `git diff main -- LeanSvg/Fixed.lean`
   shows only two new function bodies added after their existing 1/256
   siblings, nothing else moved or edited.
-* **`MicroSvg/Svg.lean`**, `parseTransform` only, +13/−3: the argument bytes
+* **`LeanSvg/Svg.lean`**, `parseTransform` only, +13/−3: the argument bytes
   are now lexed twice, once by the existing `parseNumberList` (`Fx`, for
   positions: `translate`'s offsets, `matrix`'s `e f`, and — unchanged —
   `rotate`/`skewX`/`skewY`'s angle) and once by the new `parseNumberList16`
@@ -262,7 +262,7 @@ This section is the fix and its numbers.
 * `lake build`: clean, no new warnings. No `partial`/`unsafe`/`panic!`/
   `!`-indexing introduced (`git diff` grepped for all four — none). Every
   loop in the new code is the same bounded `for _ in [0:bs.size+1]` shape
-  the existing parsers already use. `git diff main -- MicroSvg/Effect.lean`
+  the existing parsers already use. `git diff main -- LeanSvg/Effect.lean`
   is empty.
 * Also added `tests/adversarial/extreme_matrix_scale.svg` (checked in,
   static, matching the existing style of `tests/adversarial/huge_numbers.svg`
@@ -382,6 +382,6 @@ verify condition holds regardless.
       (medians held, 0 change — explained above).
 - [x] `run_tiles.py` byte-identical (23/23).
 - [x] `run_adversarial.py` clean (43/43, including the new extreme case).
-- [x] `git diff main -- MicroSvg/Effect.lean` empty.
+- [x] `git diff main -- LeanSvg/Effect.lean` empty.
 - [x] Repro set: 0/30000 on all four straight cases; quad cases down to
       1–2 px, each the known ±16 flattening residual.

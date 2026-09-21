@@ -1,10 +1,10 @@
 # T22 — Group opacity as a compositing layer; `mix-blend-mode`; `isolation`  [Opus]
 
 PLAN C12, C29. Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T22`
-(branch `t22-layers`). Files: `MicroSvg/Svg.lean` (`Doc` gains group
+(branch `t22-layers`). Files: `LeanSvg/Svg.lean` (`Doc` gains group
 begin/end nodes carrying opacity, blend mode and isolation instead of folding
-group `opacity` into children — `interpret` emits them), `MicroSvg/Render.lean`
-(`renderRgba`/`renderBands`: a bounded layer stack), `MicroSvg/Canvas.lean`
+group `opacity` into children — `interpret` emits them), `LeanSvg/Render.lean`
+(`renderRgba`/`renderBands`: a bounded layer stack), `LeanSvg/Canvas.lean`
 (layer allocation, composite-with-opacity, blend modes). Invariants in
 `tasks/README.md`; `Effect.lean` untouched; `render`'s type unchanged.
 
@@ -37,7 +37,7 @@ pipeline blend stages)
 
 ## Verify
 
-- `lake build` clean; `git diff main -- MicroSvg/Effect.lean` empty.
+- `lake build` clean; `git diff main -- LeanSvg/Effect.lean` empty.
 - New `tests/svg/26_layers.svg` (overlapping shapes under group opacity,
   nested groups, each blend mode on a coloured backdrop, isolation) ≥ 99%
   within 8 vs resvg.
@@ -65,15 +65,15 @@ T18 gradients and T36 text). The rebase touched `interpret`, `drawShape` and
 
 | file | change |
 |---|---|
-| `MicroSvg/Canvas.lean` | `F32` (integer binary32), `BlendMode`, the 16 blend stages, `compositeLayer` |
-| `MicroSvg/Svg.lean` | `Node`/`GroupInfo`/`Doc.nodes`, `maxLayerDepth`, `ownOpacity`/`blend`/`isolate` on `Style`, `mix-blend-mode`/`isolation` parsing, layer emission in `interpret`, `parseOpacity` unit rejection |
-| `MicroSvg/Render.lean` | `Target`, `shapeSlack`, `nodeBox`, `Layer`, `maxLayerPixels`, `opacityF32`, the layer stack in `renderRgba`, the gradient's layer frame |
-| `MicroSvg/Geom.lean` | `ctrlBox` (the device control-point box, for layer rectangles) |
+| `LeanSvg/Canvas.lean` | `F32` (integer binary32), `BlendMode`, the 16 blend stages, `compositeLayer` |
+| `LeanSvg/Svg.lean` | `Node`/`GroupInfo`/`Doc.nodes`, `maxLayerDepth`, `ownOpacity`/`blend`/`isolate` on `Style`, `mix-blend-mode`/`isolation` parsing, layer emission in `interpret`, `parseOpacity` unit rejection |
+| `LeanSvg/Render.lean` | `Target`, `shapeSlack`, `nodeBox`, `Layer`, `maxLayerPixels`, `opacityF32`, the layer stack in `renderRgba`, the gradient's layer frame |
+| `LeanSvg/Geom.lean` | `ctrlBox` (the device control-point box, for layer rectangles) |
 | `tests/svg/26_layers.svg` | new, 480×420 |
 | `tests/run_adversarial.py` | four generated layer cases |
 | `DESIGN.md` | new §3.9, pipeline diagram, deviations, file map, `07_opacity` note |
 
-`git diff main -- MicroSvg/Effect.lean` is empty. `render`'s type is unchanged.
+`git diff main -- LeanSvg/Effect.lean` is empty. `render`'s type is unchanged.
 `lake build` finishes with no errors and no warnings. No `partial`, `unsafe`,
 `@[extern]`, `panic!`, `!`-indexing or `Float` was added; every new loop is a
 `for` over a range bounded by the input or a constant.
@@ -90,7 +90,7 @@ composite is f32 even for `multiply`, while an ordinary solid fill stays lowp �
 which is why `fillMask` is untouched and `F32` is new code rather than a change
 to the existing blend.
 
-`MicroSvg.F32` emulates IEEE binary32 exactly in `Nat`: a 24-bit mantissa, a
+`LeanSvg.F32` emulates IEEE binary32 exactly in `Nat`: a 24-bit mantissa, a
 biased exponent and a sign bit in one word, every result rounded once to
 nearest-even with an exact sticky bit. The ported stages are `load_8888`
 (`c8 · f32(1/255)`), `scale_1_float` (the group opacity), `source_over_rgba` or

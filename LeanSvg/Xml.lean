@@ -1,4 +1,4 @@
-import MicroSvg.Bytes
+import LeanSvg.Bytes
 
 /-!
 # Micro XML parser
@@ -17,7 +17,7 @@ It is *not* a conforming XML parser, and that is the point:
 * Every loop is bounded by the input size.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Xml
 
 open Bytes
@@ -243,4 +243,4 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
   return events
 
 end Xml
-end MicroSvg
+end LeanSvg

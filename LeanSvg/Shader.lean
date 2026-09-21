@@ -1,4 +1,4 @@
-import MicroSvg.Canvas
+import LeanSvg.Canvas
 
 /-!
 # Gradient paint servers
@@ -89,7 +89,7 @@ offset for — a tile evaluates the very same parameter at the very same pixel
 as the full render, so tiles stay byte-identical (DESIGN §3.8).
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 namespace Grad
 
 /-! ## Caps
@@ -940,4 +940,4 @@ def fillMaskShader (cv : Canvas) (m : Raster.Mask) (sh : Grad.Rt) : Canvas := Id
   return ⟨w, h, px⟩
 
 end Canvas
-end MicroSvg
+end LeanSvg

@@ -1,4 +1,4 @@
-import MicroSvg.Fixed
+import LeanSvg.Fixed
 
 /-!
 # Geometry: points, affine transforms, paths, flattening, stroking
@@ -7,7 +7,7 @@ Everything is integer fixed point.  Curves are flattened with a fixed,
 bounded subdivision count so every loop here is a `for` over a finite range.
 -/
 
-namespace MicroSvg
+namespace LeanSvg
 
 structure Pt where
   x : Fx
@@ -906,4 +906,4 @@ def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Arra
 def dashPolys (pat : Array Fx) (off : Fx) (polys : Array Poly) : Array Poly :=
   polys.foldl (fun out p => dashPoly pat off p out) (Array.emptyWithCapacity polys.size)
 
-end MicroSvg
+end LeanSvg

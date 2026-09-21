@@ -2,10 +2,10 @@
 
 FEATURES F3 + PLAN C20/C21/C22/C23/C24. Work ONLY in
 `/Users/rowancallahan/pdf_renderer/.worktrees/T18` (branch `t18-gradients`).
-Files: `MicroSvg/Svg.lean` (a defs pre-pass in `interpret`, `Paint`,
-`parsePaint`, `Style`), a new `MicroSvg/Shader.lean` (gradient evaluation,
-pure), `MicroSvg/Canvas.lean` (`fillMask` gains a per-pixel paint source; keep
-the solid-colour fast path byte-identical), `MicroSvg/Render.lean`
+Files: `LeanSvg/Svg.lean` (a defs pre-pass in `interpret`, `Paint`,
+`parsePaint`, `Style`), a new `LeanSvg/Shader.lean` (gradient evaluation,
+pure), `LeanSvg/Canvas.lean` (`fillMask` gains a per-pixel paint source; keep
+the solid-colour fast path byte-identical), `LeanSvg/Render.lean`
 (`drawShape` passes the paint). Another Opus agent (T36 text) is adding a
 `text` branch to `interpret` and font fields to `Style`; a Sonnet agent (T34)
 is adding `paint-order` to `drawShape` and `hsl()` to `parsePaint`. Keep your
@@ -54,7 +54,7 @@ and tiny-skia `src/shaders/{gradient,linear_gradient,radial_gradient}.rs`,
 
 ## Verify
 
-- `lake build` clean. `git diff main -- MicroSvg/Effect.lean` empty.
+- `lake build` clean. `git diff main -- LeanSvg/Effect.lean` empty.
 - New `tests/svg/24_gradients.svg` (linear + radial, both unit systems, a
   transform, all three spreads, stop-opacity, a focal radial, a `url()` with
   fallback, an unresolved reference) — target ≥ 99% within 8 vs resvg.
@@ -83,7 +83,7 @@ fixed nothing in the Lean, and ran every item under `## Verify`.
 
 ### What changed
 
-- `MicroSvg/Shader.lean` (new, 937 lines): the defs table (`Grad.RawDef`,
+- `LeanSvg/Shader.lean` (new, 937 lines): the defs table (`Grad.RawDef`,
   `Grad.Defs.build`, hashed id lookup, `href` chain with fuel 8 that stops at
   a revisited node), usvg's resolution rules (`Grad.resolve`: same-type
   coordinate inheritance, common-attribute inheritance, monotone stops,
@@ -96,21 +96,21 @@ fixed nothing in the Lean, and ran every item under `## Verify`.
   with tiny-skia's `lowp` order: unpremultiplied lerp, `round(c·255)`, then
   `div255` premultiply), and `Canvas.fillMaskShader`.  The module doc
   records how T19/T20/T21 can add entry kinds to the table.
-- `MicroSvg/Svg.lean`: `Paint.gradient idx`; `PaintSpec.url id fallback`;
+- `LeanSvg/Svg.lean`: `Paint.gradient idx`; `PaintSpec.url id fallback`;
   `parsePaint` split into `parseSolidColor` + `parseUrlPaint` (quoted ids,
   `none` / colour / `currentColor` fallbacks); `resolvePaint` looks the id
   up in `Style.defs`; a bounded pre-pass (`gradRawDefs`, `gradPctRef`) in
   `interpret` that builds the table once and hands it to the root `Style`.
   `interpret` itself changed by four lines.
-- `MicroSvg/Render.lean`: `Clip` carries the `--viewport` origin;
+- `LeanSvg/Render.lean`: `Clip` carries the `--viewport` origin;
   `drawShape` routes fill and stroke through one `paintMask` helper that
   calls `Grad.build` for `.gradient`; solid paints take the unchanged
   `fillMask` path.  `render`'s type is unchanged.
-- `MicroSvg/Canvas.lean` untouched: the shader blitter lives in
+- `LeanSvg/Canvas.lean` untouched: the shader blitter lives in
   `Shader.lean` as `Canvas.fillMaskShader`, so the solid fast path is
   byte-identical by construction and the file stays free for T22/T20.
 - `tests/svg/24_gradients.svg` (new), `tests/run_adversarial.py` (+6 cases).
-- `MicroSvg/Effect.lean`: `git diff main -- MicroSvg/Effect.lean` is empty.
+- `LeanSvg/Effect.lean`: `git diff main -- LeanSvg/Effect.lean` is empty.
 
 ### Verify
 
@@ -180,13 +180,13 @@ fixed nothing in the Lean, and ran every item under `## Verify`.
 
 `origin/main` at `a932752` merged into the branch.  Two files conflicted:
 
-- `MicroSvg/Render.lean`, `drawShape`: T34's `drawFill`/`drawStroke`
+- `LeanSvg/Render.lean`, `drawShape`: T34's `drawFill`/`drawStroke`
   closures and the `st.strokeFirst` swap are kept verbatim, with the bodies
   of both routed through T18's `paintMask`.  Each arm now matches
   `.none` / `_` instead of `.solid c` so a `.gradient` paint reaches
   `Grad.build`; the hairline arm keeps T18's `a8` (a gradient carries its
   stops' alphas in the shader and passes 255).
-- `MicroSvg/Svg.lean`: T34's `hueRound`/`hslFracOf`/`parseHueDeg`/
+- `LeanSvg/Svg.lean`: T34's `hueRound`/`hslFracOf`/`parseHueDeg`/
   `hslToRgb`/`parseHslFunc` are kept unchanged, and the two `hsl(`/`hsla(`
   branches moved into T18's `parseSolidColor`, which `parsePaint` and the
   `url(#id)` fallback of `parseUrlPaint` both call.  `Style` keeps both
@@ -205,7 +205,7 @@ Verification after the merge, resvg 0.48.1:
 | `run_tiles.py` | 24/24 stitch byte-identically |
 | `run_adversarial.py` | 50/50 clean |
 | `check_hsl.py 500` | 500/500 exact |
-| `git diff origin/main -- MicroSvg/Effect.lean` | empty |
+| `git diff origin/main -- LeanSvg/Effect.lean` | empty |
 
 Corpora, `--fast` (width 100), direct route, main's binary → merge:
 

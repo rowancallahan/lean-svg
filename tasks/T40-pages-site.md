@@ -14,7 +14,7 @@ Source lives in `site/` (templates, CSS, JS, the generator) plus
 
 Three renderings of the same file, side by side, in this order:
 
-1. **lean-svg** — `.lake/build/bin/microsvg` (this project).
+1. **lean-svg** — `.lake/build/bin/lean-svg` (this project).
 2. **resvg 0.48.1** — the oracle, `resvg --skip-system-fonts --use-fonts-dir <suite>/fonts`.
 3. **the browser** — the original `.svg` in an `<img>`, rendered live by
    whatever browser the visitor is using. Label it as such: it is the

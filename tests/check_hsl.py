@@ -2,12 +2,12 @@
 """Oracle check for `hsl()`/`hsla()`/`rgba()` colour notation (T34).
 
 Generates random colour strings across the forms `parseHslFunc`/`parseRgbFunc`
-in MicroSvg/Svg.lean support -- comma and CSS4 space-separated argument
+in LeanSvg/Svg.lean support -- comma and CSS4 space-separated argument
 lists, the `deg`/`grad`/`turn` hue units, percentage or raw-number
 saturation/lightness, percentage or fractional alpha, and out-of-range hue/
 saturation/lightness/alpha meant to exercise `hslToRgb`'s wraparound and
 `hslFracOf`/`alphaOf`'s clamping -- renders each as a single solid `<rect>`
-at 4x4 px with both microsvg and resvg, and compares the centre pixel for
+at 4x4 px with both lean-svg and resvg, and compares the centre pixel for
 exact equality.
 
     python3 tests/check_hsl.py [N] [--seed SEED] [--bin PATH]
@@ -26,7 +26,7 @@ from pathlib import Path
 from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
 RENDER_TIMEOUT = 10
 
@@ -165,7 +165,7 @@ def main():
             try:
                 ours, err = render_center_pixel([str(args.bin), str(svg_path), str(ours_png)], svg_path, ours_png)
                 if ours is None:
-                    errors.append((color, "microsvg: " + (err or "?")))
+                    errors.append((color, "lean-svg: " + (err or "?")))
                     continue
                 ref, err = render_center_pixel(["resvg", str(svg_path), str(ref_png)], svg_path, ref_png)
                 if ref is None:

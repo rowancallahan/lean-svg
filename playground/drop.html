@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>microsvg drop zone</title>
+<title>lean-svg drop zone</title>
 <style>
   :root {
     --bg: #f7f8fa; --panel: #fff; --ink: #1b1f24; --muted: #61686f; --line: #dfe3e8;
@@ -104,8 +104,8 @@
 <body>
 
 <header>
-  <h1>microsvg drop zone</h1>
-  <p>Drop an SVG, render it with <code>.lake/build/bin/microsvg</code>, resize, compare with resvg · <a href="/">back to the playground</a></p>
+  <h1>lean-svg drop zone</h1>
+  <p>Drop an SVG, render it with <code>.lake/build/bin/lean-svg</code>, resize, compare with resvg · <a href="/">back to the playground</a></p>
 </header>
 
 <main>
@@ -164,7 +164,7 @@
     <div id="pane">
       <div class="tiles">
         <div class="tile">
-          <div class="cap">microsvg (ours) <span class="sub" id="capOurs"></span></div>
+          <div class="cap">lean-svg (ours) <span class="sub" id="capOurs"></span></div>
           <div class="stage" id="stageOurs"><div class="empty">—</div></div>
         </div>
         <div class="tile cmp">
@@ -236,7 +236,7 @@
   }
   function fmtRendererError(name, r) {
     var e = r.error || "failed";
-    var s = e.indexOf(name + ":") === 0 ? e : name + ": " + e;   // microsvg already prefixes its errors
+    var s = e.indexOf(name + ":") === 0 ? e : name + ": " + e;   // lean-svg already prefixes its errors
     if (r.exit_code != null) s += " (exit " + r.exit_code + ")";
     if (r.stderr && r.stderr.trim() && r.stderr.trim() !== (r.error || "").trim()) s += "\n" + r.stderr.trim();
     return s;
@@ -332,7 +332,7 @@
   $("wNum").addEventListener("change", function () { setWidth(this.value); render(); });
   $("bg").addEventListener("change", render);
 
-  // Usable width inside the microsvg stage (content box).
+  // Usable width inside the lean-svg stage (content box).
   function paneWidth() {
     var stage = $("stageOurs");
     var cs = window.getComputedStyle(stage);
@@ -412,7 +412,7 @@
     $("capOurs").textContent = ""; $("capRef").textContent = ""; $("capDiff").textContent = "";
     if (j.exit_code != null) { $("mExit").textContent = j.exit_code; $("mExit").className = "v bad"; }
     var head = status ? "HTTP " + status : "request failed";
-    setErr(head + "\n" + fmtRendererError("microsvg", j));
+    setErr(head + "\n" + fmtRendererError("lean-svg", j));
   }
 
   // 200 JSON: {ours, resvg, diff, metrics} from a compare render.
@@ -421,7 +421,7 @@
     var errs = [];
     if (j.ours.png) {
       showImg("stageOurs", "capOurs", "data:image/png;base64," + j.ours.png, ms(j.ours.ms));
-    } else { emptyStage("stageOurs", "no output"); $("capOurs").textContent = ""; errs.push(fmtRendererError("microsvg", j.ours)); }
+    } else { emptyStage("stageOurs", "no output"); $("capOurs").textContent = ""; errs.push(fmtRendererError("lean-svg", j.ours)); }
     if (j.resvg.png) {
       showImg("stageRef", "capRef", "data:image/png;base64," + j.resvg.png, ms(j.resvg.ms));
     } else { emptyStage("stageRef", "no output"); $("capRef").textContent = ""; errs.push(fmtRendererError("resvg", j.resvg)); }

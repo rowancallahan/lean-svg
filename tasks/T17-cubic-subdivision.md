@@ -9,7 +9,7 @@ an explicit 2000-gon scores 99.955%). Port tiny-skia's cubic edge
 subdivision so curves land on the same sub-pixel samples as the oracle.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T17` (branch
-`t17-flatten`). Files: `MicroSvg/Geom.lean`, the **flatten section only**
+`t17-flatten`). Files: `LeanSvg/Geom.lean`, the **flatten section only**
 (`segCount`, `cubicAt`, `flatten`); do not touch the stroker section
 (another agent may be adding `dashPoly` below it) nor `Svg.lean`.
 
@@ -164,14 +164,14 @@ would buy is inside the noise on these corpora).
 
 ### What changes
 
-`MicroSvg/Geom.lean`, flatten section only: `cubicDeltaFromLine`,
+`LeanSvg/Geom.lean`, flatten section only: `cubicDeltaFromLine`,
 `cheapDistance` and `diffToShift` are added and `segCount` is rewritten to
 `2 ^ min 6 (diffToShift dx dy + 1)`. `cubicAt` and `flatten` keep their
 bodies; `n ≤ 64` now, down from the old cap of 100.
 
 ### What changed (files)
 
-`MicroSvg/Geom.lean`, flatten section only, +61/−5 lines. Added
+`LeanSvg/Geom.lean`, flatten section only, +61/−5 lines. Added
 `cubicDeltaFromLine`, `cheapDistance`, `bitLength`, `diffToShift`,
 `maxCoeffShift`; `segCount` rewritten. `cubicAt` and `flatten` are byte for
 byte what they were. Nothing else in the repo is touched — not the stroker
@@ -313,7 +313,7 @@ the tables above. The `2 ^ shift` cap at 64 is what keeps it bounded.
   before and after.
 * `python3 tests/run_tiles.py` — **21/21 files stitch byte-identically**, all
   `exact / clear / exact`, before and after.
-* `MicroSvg/Effect.lean` untouched; `MicroSvg/Svg.lean` untouched; the stroker
+* `LeanSvg/Effect.lean` untouched; `LeanSvg/Svg.lean` untouched; the stroker
   section of `Geom.lean` untouched.
 
 ### `Svg.ellipsePath`: no change needed (reported, not edited)

@@ -7,7 +7,7 @@ trivial core, so that porting the real renderer (later) is only "more of the
 same". Deliver working tooling, not an essay.
 
 Work in the main tree `/Users/rowancallahan/pdf_renderer` under `harness/`
-only (plus this task file). Do not touch `MicroSvg/` or `.worktrees/`.
+only (plus this task file). Do not touch `LeanSvg/` or `.worktrees/`.
 Do not commit.
 
 ## Steps
@@ -47,7 +47,7 @@ Do not commit.
 4. **Lean side** `harness/lean/`: a Lake project depending on the Aeneas
    Lean library (as their README prescribes, typically a git dependency on
    the `aeneas` repo's `backends/lean`). Files:
-   - `Harness/Effect.lean`: copy of `/Users/rowancallahan/pdf_renderer/MicroSvg/Effect.lean`
+   - `Harness/Effect.lean`: copy of `/Users/rowancallahan/pdf_renderer/LeanSvg/Effect.lean`
      with the namespace renamed to `Harness` (it has no other dependencies).
    - `Harness/Adapter.lean`: `asRender` mapping the translated
      `invert.run : ... → Result (core.result.Result (alloc.vec.Vec U8) Error)`

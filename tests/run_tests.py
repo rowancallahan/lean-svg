@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Oracle comparison harness: render every tests/svg/*.svg with both microsvg and
+"""Oracle comparison harness: render every tests/svg/*.svg with both lean-svg and
 resvg, then score our output against the reference pixel by pixel.
 
 Outputs per test go to tests/out/:
     <name>_ref.png   reference render (resvg)
-    <name>_ours.png  our render (microsvg)
+    <name>_ours.png  our render (lean-svg)
     <name>_cmp.png   reference | ours | diff, side by side
 plus results.json and report.html for the whole run.
 """
@@ -23,7 +23,7 @@ from PIL import Image
 REPO = Path(__file__).resolve().parent.parent
 SVG_DIR = REPO / "tests" / "svg"
 OUT_DIR = REPO / "tests" / "out"
-DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 RESVG_FONTS_DIR = REPO / "tests" / "corpora" / "resvg-test-suite" / "fonts"
 
 RENDER_TIMEOUT = 60  # seconds, per subprocess
@@ -185,7 +185,7 @@ def run_one(svg, binary, tol, threshold, resvg_args=None):
         result["error"] = "resvg failed: " + (err_ref or "rc=%s" % rc_ref)
         return result
     if to_ours or rc_ours != 0:
-        result["error"] = "microsvg failed: " + (err_ours or "rc=%s" % rc_ours)
+        result["error"] = "lean-svg failed: " + (err_ours or "rc=%s" % rc_ours)
         return result
 
     ref = load_rgba(ref_png)
@@ -283,7 +283,7 @@ HTML_HEAD = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>microsvg oracle report</title>
+<title>lean-svg oracle report</title>
 <style>
   body { font-family: -apple-system, system-ui, sans-serif; margin: 2rem; color: #222; }
   h1 { font-size: 1.4rem; }
@@ -319,7 +319,7 @@ def esc(text):
 
 
 def write_report(path, results, config, summary):
-    parts = [HTML_HEAD, "<h1>microsvg oracle report</h1>\n"]
+    parts = [HTML_HEAD, "<h1>lean-svg oracle report</h1>\n"]
     parts.append(
         '<div class="meta">%s &middot; tol %d &middot; threshold %.3f &middot; %s</div>\n'
         % (
@@ -356,7 +356,7 @@ def write_report(path, results, config, summary):
         parts.append('<div class="imgs">\n')
         for key, caption in (
             ("ref_png", "reference (resvg)"),
-            ("ours_png", "ours (microsvg)"),
+            ("ours_png", "ours (lean-svg)"),
             ("cmp_png", "ref | ours | diff"),
         ):
             if (OUT_DIR / r[key]).exists():
@@ -387,7 +387,7 @@ def main():
         help="minimum 'within' fraction to pass (default 0.99)",
     )
     parser.add_argument(
-        "--bin", default=str(DEFAULT_BIN), help="path to the microsvg binary"
+        "--bin", default=str(DEFAULT_BIN), help="path to the lean-svg binary"
     )
     parser.add_argument(
         "--keep-going",
@@ -405,7 +405,7 @@ def main():
 
     binary = Path(args.bin).resolve()
     if not binary.is_file():
-        print("microsvg binary not found at %s" % binary, file=sys.stderr)
+        print("lean-svg binary not found at %s" % binary, file=sys.stderr)
         print("build it first:  lake build", file=sys.stderr)
         return 2
     if shutil.which("resvg") is None:

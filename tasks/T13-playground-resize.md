@@ -4,16 +4,16 @@
 
 The playground (`playground/server.py`, `playground/index.html`) already
 lets the user pick an example, edit the SVG source, draw shapes, and see
-browser / resvg / microsvg / diff tiles with the match score. Make it a
+browser / resvg / lean-svg / diff tiles with the match score. Make it a
 live test bench for the renderer at arbitrary sizes:
 
 1. **Render at the displayed size and re-render on resize.** Put the four
    tiles in a wrapper the user can resize (CSS `resize: both` with a visible
-   corner grip, plus responding to window resizes). Observe the microsvg
+   corner grip, plus responding to window resizes). Observe the lean-svg
    tile's pixel width with `ResizeObserver`, debounce ~150 ms, and POST
    `/render` with `width` equal to that pixel width (the server already
    accepts `width`; resvg is invoked with `-w`). Show the current render
-   size and the microsvg render time in the caption. Images display 1:1
+   size and the lean-svg render time in the caption. Images display 1:1
    (no 2× upscale) in this mode; keep the `image-rendering: pixelated` zoom
    as a toggle ("Zoom 2×").
 2. **Click through the examples.** Turn the examples `<select>` into a
@@ -24,7 +24,7 @@ live test bench for the renderer at arbitrary sizes:
    source and re-rendering), but make the draw canvas the same aspect as the
    current SVG's `width`/`height` (parse them from the source; default
    200×200) so drawn coordinates map 1:1.
-4. **Timing strip**: after each render show `microsvg N ms · resvg M ms ·
+4. **Timing strip**: after each render show `lean-svg N ms · resvg M ms ·
    size W×H` under the tiles, and keep the last 10 render times in a tiny
    sparkline-free text list (no chart libraries).
 
@@ -56,7 +56,7 @@ timeout are untouched.
 1. **Render at the displayed size.** The four tiles now live in
    `div.tilesWrap` (`resize: both; overflow: auto`, dashed border, a grip drawn in
    the bottom-right corner with a non-scrolling `background-image` on top of the
-   native corner). A `ResizeObserver` on `#stageOurs` reports the microsvg tile's
+   native corner). A `ResizeObserver` on `#stageOurs` reports the lean-svg tile's
    content width, clamped to 32-2048 px and ignored below a 2 px delta; 150 ms after
    the last change the page POSTs `/render` with that `width`. A `window.resize`
    listener feeds the same path (and is the fallback where `ResizeObserver` is
@@ -65,7 +65,7 @@ timeout are untouched.
    re-scales the same images to 2x with `image-rendering: pixelated` and switches the
    stages to `overflow: auto` without re-fetching. In 1:1 mode the stages are
    `overflow: hidden`, so an inner scrollbar can never feed back into the observed
-   width. The microsvg caption reads `W×H · N ms`; the browser (vector) tile is
+   width. The lean-svg caption reads `W×H · N ms`; the browser (vector) tile is
    displayed at the same width the rasterizers were asked for.
 2. **Thumbnail strip.** `/examples` now also builds a horizontal strip of 64 px
    browser-rendered `<img>` thumbnails (inert `data:` URLs, same as the browser tile)
@@ -76,7 +76,7 @@ timeout are untouched.
    (percentages rejected, `viewBox` as fallback, 200x200 default) and
    `syncCanvasToSource()` sets the canvas buffer to exactly that, scaling only the CSS
    box to fit the column, so drawn coordinates go into the source unchanged.
-4. **Timing strip.** `microsvg N ms · resvg M ms · size W×H` under the tiles plus the
+4. **Timing strip.** `lean-svg N ms · resvg M ms · size W×H` under the tiles plus the
    last 10 renders as an `<ol>` of plain text. Every issued request logs
    `[playground] render #N (reason) width=W` and bumps `window.__playground.renders`.
 
@@ -86,7 +86,7 @@ Server on port 8765 (`python3 playground/server.py --port 8765`), page loaded in
 built-in browser; server stopped afterwards.
 
 * `POST /render` by script at three widths on `12_badge.svg`: ours/ref PNG sizes
-  `300x300 / 700x700 / 1200x1200`, microsvg 21.4 / 72.2 / 196.0 ms, resvg 6.0 / 10.8 /
+  `300x300 / 700x700 / 1200x1200`, lean-svg 21.4 / 72.2 / 196.0 ms, resvg 6.0 / 10.8 /
   21.4 ms, exact 92.8% / 94.5% / 94.9%.
 * **Resize → one re-render.** Driving `tilesWrap.style.width` through 12 steps 25 ms
   apart (a grip drag) moved `__playground.renders` 4 → 5: exactly one request, logged
@@ -100,7 +100,7 @@ built-in browser; server stopped afterwards.
   `<rect x="64" y="43" width="156" height="158" fill="#e63946"/>` — the 60 px drag
   mapped to 156/158 user units, i.e. 1:1 — and triggered exactly one render
   (`render #18 (draw) width=573`). Sampling the same pixel in all three tiles returned
-  `rgb(230,57,70)`, so browser, resvg and microsvg all picked the new element up;
+  `rgb(230,57,70)`, so browser, resvg and lean-svg all picked the new element up;
   within-32 stayed at 99.90%.
 * Server log: 22 `POST /render`, no tracebacks.
 

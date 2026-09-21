@@ -9,9 +9,9 @@ the stroked-curve icons pay for it. Fix: carry quadratics as their own
 `PathCmd` constructor and flatten them with tiny-skia's quadratic rule.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T30` (branch
-`t30-quads`). Files: `MicroSvg/Geom.lean` (the `PathCmd` type, `segCount`/
+`t30-quads`). Files: `LeanSvg/Geom.lean` (the `PathCmd` type, `segCount`/
 `flatten` section, and the bounding-box functions that match on `PathCmd`),
-`MicroSvg/Svg.lean` **only** `parsePathData`'s `Q`/`T` cases (emit the new
+`LeanSvg/Svg.lean` **only** `parsePathData`'s `Q`/`T` cases (emit the new
 constructor instead of elevating) and any other exhaustive `match` on
 `PathCmd` the compiler reports. Do not touch the stroker or `dashPoly`
 (T23 is editing that section of `Geom.lean`), `interpret` (T27/T29),
@@ -56,7 +56,7 @@ it could emit quadratics directly later (TrueType outlines are quadratic).
   Report pass% and median within-8 before/after; neither may fall. (usvg
   emits `Q` for quadratics, so these are the files that change.)
 - `python3 tests/run_tiles.py` all byte-identical; `python3 tests/run_adversarial.py` clean;
-  `git diff main -- MicroSvg/Effect.lean` empty.
+  `git diff main -- LeanSvg/Effect.lean` empty.
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report` with the tables above and the exact `diff_to_shift`
@@ -112,7 +112,7 @@ report already measured from resvg's real output for that file.
 
 ### What changed (files)
 
-`MicroSvg/Geom.lean` (+81/−5 lines, in the `PathCmd` type and the
+`LeanSvg/Geom.lean` (+81/−5 lines, in the `PathCmd` type and the
 `segCount`/`cubicAt`/`flatten` and `Box`/`ctrlBoxMeets` sections only):
 - `PathCmd` gets a new constructor `quadTo (c p : Pt)`.
 - Added `quadDeltaFromLine`, `segCountQuad`, `quadAt` (mirroring
@@ -125,7 +125,7 @@ report already measured from resvg's real output for that file.
 - The `ctrlBoxMeets` doc comment is reworded to say "cubic and quadratic
   control points" instead of "cubic control points"; no behavioural change.
 
-`MicroSvg/Svg.lean` (`parsePathData`'s `Q`/`T` case only, −5/+1 lines): the
+`LeanSvg/Svg.lean` (`parsePathData`'s `Q`/`T` case only, −5/+1 lines): the
 degree-elevation to `c1`/`c2` is deleted; the case now pushes `.quadTo qc q`
 directly, where `qc` is the already-computed reflection/absolute control
 point used for `T`'s "reflect the previous quadratic control point" rule
@@ -234,7 +234,7 @@ documented, not by flattening.
   (The task file's "must stay 28/28" is stale — this branch's harness already
   runs 39 cases, up from whatever count the task was written against; all 39
   passed clean.)
-- `git diff main -- MicroSvg/Effect.lean`: empty.
+- `git diff main -- LeanSvg/Effect.lean`: empty.
 
 ### Timing (median of 3, same machine, before → after)
 
@@ -258,6 +258,6 @@ degree elevation.
   failures; three files rise, nineteen are byte-identical.
 * `python3 tests/run_adversarial.py` — 39/39 clean, 0 violations.
 * `python3 tests/run_tiles.py` — 22/22 files stitch byte-identically.
-* `MicroSvg/Effect.lean` byte-identical to `main`; the stroker/`dashPoly`
+* `LeanSvg/Effect.lean` byte-identical to `main`; the stroker/`dashPoly`
   section of `Geom.lean`, `interpret`, `applyProp`/`Style`, and the arc code
   are untouched.

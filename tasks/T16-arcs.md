@@ -8,7 +8,7 @@ The single biggest defect on real files: 2 405 of 3 461 simple-icons and
 entirely in fixed point, with no `atan2`.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T16` (branch
-`t16-arcs`). Files: `MicroSvg/Svg.lean` (`parsePathData` and a new arc
+`t16-arcs`). Files: `LeanSvg/Svg.lean` (`parsePathData` and a new arc
 conversion section placed in this file, not in `Geom.lean`, which another
 agent is editing). Invariants in `tasks/README.md`.
 
@@ -79,7 +79,7 @@ appended, committed on the branch.
 
 ### What changed
 
-- `MicroSvg/Svg.lean`
+- `LeanSvg/Svg.lean`
   - new **“Elliptical arcs”** section before `## Path data`: `divRound`,
     `ArcDir`, `rot90`, `unit16`, `arcHiMax`/`clampHi`, `arcSegment`, `arcPath`.
     §F.6.5 endpoint-to-centre conversion, at most four cubic quarters, all

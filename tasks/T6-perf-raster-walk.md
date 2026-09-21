@@ -11,7 +11,7 @@ active edges. Do both: sorted walk when the active count is small, binned
 prefix sum otherwise.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T6` (branch `t6-raster-walk`).
-Only `MicroSvg/Raster.lean` may change.
+Only `LeanSvg/Raster.lean` may change.
 
 ## What to change
 
@@ -39,8 +39,8 @@ decrease for any file (the sorted walk is closer to tiny-skia, so a small
 `python3 tests/run_adversarial.py` must stay clean and `huge_path.svg` must
 not get slower than before by more than 10%.
 
-Finally confirm `git diff --stat main -- MicroSvg/Effect.lean` is empty and
-`lake env lean` on a scratch file with `#print axioms MicroSvg.Prog.renderProgram_spec`
+Finally confirm `git diff --stat main -- LeanSvg/Effect.lean` is empty and
+`lake env lean` on a scratch file with `#print axioms LeanSvg.Prog.renderProgram_spec`
 still prints only `propext`.
 
 ## Done when
@@ -54,7 +54,7 @@ Append `## Report`. Do not commit.
 
 ### What changed
 
-`MicroSvg/Raster.lean` only (108 insertions, 40 deletions; the binned block is
+`LeanSvg/Raster.lean` only (108 insertions, 40 deletions; the binned block is
 unchanged apart from being indented under the new `else`).  `Mask`, `blitSpan`,
 `addAlpha`, `mkEdge`, the `rasterize` signature and the alpha→cov mapping are
 all untouched, so `Canvas.fillMask` and `Render.drawShape` needed no edit.
@@ -293,10 +293,10 @@ by `i` so the sort is `≤ walkLimit² = 16384` steps; all hot indexing in `Nat`
 `lake build` from a cleaned `Raster` artifact completes with no errors and no
 warnings.
 
-`git diff --stat main -- MicroSvg/Effect.lean` is **empty**.
+`git diff --stat main -- LeanSvg/Effect.lean` is **empty**.
 `lake env lean` on a scratch file with
-`#print axioms MicroSvg.Prog.renderProgram_spec` prints
-`'MicroSvg.Prog.renderProgram_spec' depends on axioms: [propext]`.
+`#print axioms LeanSvg.Prog.renderProgram_spec` prints
+`'LeanSvg.Prog.renderProgram_spec' depends on axioms: [propext]`.
 
-`git status --short` shows exactly one modified file, `MicroSvg/Raster.lean`.
+`git status --short` shows exactly one modified file, `LeanSvg/Raster.lean`.
 Nothing was committed; `tests/out/` was written only by the three harnesses.

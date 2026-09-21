@@ -5,7 +5,7 @@
 Branch `t4-viewport` (see `tasks/T4-viewport-tiles.md` Report) adds
 `--viewport X Y W H` tile rendering and `tests/run_tiles.py`, and it fixed
 tile-border identity by changing the *old* accumulation rasterizer. Since
-then `main` replaced `MicroSvg/Raster.lean` entirely (T1: tiny-skia
+then `main` replaced `LeanSvg/Raster.lean` entirely (T1: tiny-skia
 supersampling port) and changed opacity plumbing (T5). A plain merge
 conflicts in `Raster.lean`, `Render.lean`, `DESIGN.md`.
 
@@ -17,10 +17,10 @@ committed on the branch (a commit on the branch is fine; do not touch `main`).
 ## Steps
 
 1. `git merge t4-viewport`. Resolve:
-   - `MicroSvg/Raster.lean`: take **main's version unchanged** (`git checkout
+   - `LeanSvg/Raster.lean`: take **main's version unchanged** (`git checkout
      --ours`). T4's `Rect`/`accumEdge`/`accumPiece` changes belong to the old
      rasterizer and must not be resurrected.
-   - `MicroSvg/Render.lean`: keep T4's `Options.viewport`, the tile size and
+   - `LeanSvg/Render.lean`: keep T4's `Options.viewport`, the tile size and
      `translate(−X·256, −Y·256)` composition in `canvasSetup`, but call
      main's `Raster.rasterize W H dev evenOdd` (no document-rectangle
      argument), and keep main's `opacityToU8` calls from T5 in `drawShape`.
@@ -29,7 +29,7 @@ committed on the branch (a commit on the branch is fine; do not touch `main`).
      viewport section. `README.md`, `Makefile`: T4's additions.
 2. `lake build` clean. `python3 tests/run_tests.py` must reproduce main's
    current table exactly (15/20, same metrics; compare against a render of
-   the corpus from main's binary at `/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg`
+   the corpus from main's binary at `/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg`
    by sha256 of the PNGs, all must be identical).
 3. `python3 tests/run_tiles.py`. Expected: byte-identical stitching, because
    the new rasterizer's edge setup rounds relative to whole-pixel mask
@@ -56,18 +56,18 @@ cleanly (T4's versions — `main` never touched them).
 
 | file | resolution |
 |---|---|
-| `MicroSvg/Raster.lean` | `git checkout --ours`: **main's file, unchanged**. `git diff main -- MicroSvg/Raster.lean` is empty. T4's `Rect` / `accumEdge` / `accumPiece` work belonged to the old accumulation rasterizer and is gone with it. |
-| `MicroSvg/Render.lean` | Hand-merged. Kept T4's `Options.viewport`, the tile canvas size and the `Mat.translate (−X·256) (−Y·256)` composition in `canvasSetup`; dropped the `Raster.Rect` argument so the calls are main's `Raster.rasterize W H dev evenOdd`; kept main's T5 `opacityToU8 c.a st.fillOpacity st.opacity` / `… st.strokeOpacity …` in `drawShape`. `canvasSetup`'s fourth result is now a `Clip` (see below), not a document rectangle for the rasterizer. |
+| `LeanSvg/Raster.lean` | `git checkout --ours`: **main's file, unchanged**. `git diff main -- LeanSvg/Raster.lean` is empty. T4's `Rect` / `accumEdge` / `accumPiece` work belonged to the old accumulation rasterizer and is gone with it. |
+| `LeanSvg/Render.lean` | Hand-merged. Kept T4's `Options.viewport`, the tile canvas size and the `Mat.translate (−X·256) (−Y·256)` composition in `canvasSetup`; dropped the `Raster.Rect` argument so the calls are main's `Raster.rasterize W H dev evenOdd`; kept main's T5 `opacityToU8 c.a st.fillOpacity st.opacity` / `… st.strokeOpacity …` in `drawShape`. `canvasSetup`'s fourth result is now a `Clip` (see below), not a document rectangle for the rasterizer. |
 | `DESIGN.md` | §3.5 is main's (T1's supersampling description) with a new closing paragraph on why the scheme is invariant under whole-pixel shifts; T4's §3.5 replacement (about `accumPiece` and document-rectangle clipping) was dropped entirely. §3.8 "Viewport (tiles)" kept from T4 and rewritten: the identity argument is now the whole-pixel-shift one, plus the `clipMask` paragraph. |
 
-`MicroSvg/Effect.lean` untouched; `tests/run_tests.py` and
+`LeanSvg/Effect.lean` untouched; `tests/run_tests.py` and
 `tests/run_adversarial.py` untouched.
 
 ### sha256 corpus check — 80/80 identical
 
 Every corpus file rendered four ways (default, `--width 800`,
 `--width 1600 --background white`, `--zoom 2.5`) with main's binary at
-`/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg` and with the merged
+`/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg` and with the merged
 binary: **80 renders compared, 0 mismatching**. Re-run after the `clipMask`
 change below: still 80/80. The no-viewport path is therefore byte-identical to
 main by measurement, and `python3 tests/run_tests.py` reproduces main's table —
@@ -115,7 +115,7 @@ that lies outside the document — where a full render shows nothing. Off-docume
 tiles further out still came back clear, which is why only the partial-tile
 check caught it.
 
-Fixed in `MicroSvg/Render.lean`: `canvasSetup` also returns `Clip`, the
+Fixed in `LeanSvg/Render.lean`: `canvasSetup` also returns `Clip`, the
 document's window in canvas pixels (`(0, 0, W, H)` normally, and
 `(max(0,−X), max(0,−Y), min(w, W−X), min(h, H−Y))` for a tile), and `drawShape`
 pipes every mask through `clipMask`, which crops it to that window. When the

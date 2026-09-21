@@ -1,10 +1,10 @@
-import MicroSvg.Font
-import MicroSvg.Fonts.NotoSans
-import MicroSvg.Fonts.NotoSansBold
-import MicroSvg.Fonts.NotoSansItalic
+import LeanSvg.Font
+import LeanSvg.Fonts.NotoSans
+import LeanSvg.Fonts.NotoSansBold
+import LeanSvg.Fonts.NotoSansItalic
 
 /-!
-# `fontdump`: a debug/oracle tool over `MicroSvg.Font`
+# `fontdump`: a debug/oracle tool over `LeanSvg.Font`
 
 Prints, as JSON, per character of `<text>`: the Unicode codepoint, the glyph
 id (`Font.glyphId`), the advance width (`Font.advance`), the raw quadratic
@@ -14,24 +14,24 @@ units), the number of `PathCmd`s the cubic outline (`Font.outline`) comes to
 the kerning to the next character (`Font.kern`, `null` for the last one).
 
 This is the **only** file in the project that performs `IO` besides
-`MicroSvg.Prog.execIO` and `Main.lean`: it reads the font path given on the
-command line (or uses one of the fonts embedded in `MicroSvg.Fonts.*`).
+`LeanSvg.Prog.execIO` and `Main.lean`: it reads the font path given on the
+command line (or uses one of the fonts embedded in `LeanSvg.Fonts.*`).
 Everything downstream of that read — `Font.parse` and every accessor — is
-the pure, total parser in `MicroSvg/Font.lean`. `fontdump` is its own
-executable (see `lakefile.toml`); `microsvg` does not link it or the
+the pure, total parser in `LeanSvg/Font.lean`. `fontdump` is its own
+executable (see `lakefile.toml`); `lean-svg` does not link it or the
 embedded font data.
 -/
 
-open MicroSvg
+open LeanSvg
 
 def usage : String :=
   "usage: fontdump <font.ttf> <text>\n" ++
   "       fontdump --embedded <NotoSans|NotoSansBold|NotoSansItalic> <text>\n"
 
 def embeddedBytes (name : String) : Option ByteArray :=
-  if name == "NotoSans" then some (MicroSvg.Fonts.NotoSans.bytes ())
-  else if name == "NotoSansBold" then some (MicroSvg.Fonts.NotoSansBold.bytes ())
-  else if name == "NotoSansItalic" then some (MicroSvg.Fonts.NotoSansItalic.bytes ())
+  if name == "NotoSans" then some (LeanSvg.Fonts.NotoSans.bytes ())
+  else if name == "NotoSansBold" then some (LeanSvg.Fonts.NotoSansBold.bytes ())
+  else if name == "NotoSansItalic" then some (LeanSvg.Fonts.NotoSansItalic.bytes ())
   else none
 
 /-! ## Minimal JSON writer (no library dependency) -/
@@ -72,13 +72,13 @@ def jsonContours (cs : Array (Array (Int × Int × Bool))) : String :=
 
 def charObj (f : Font) (c : Char) (next? : Option Char) : String :=
   let cp := c.toNat
-  let gid := MicroSvg.Font.glyphId f cp
-  let adv := MicroSvg.Font.advance f gid
-  let contours := MicroSvg.Font.rawContours f gid
-  let cubicCmdCount := (MicroSvg.Font.outline f gid).size
+  let gid := LeanSvg.Font.glyphId f cp
+  let adv := LeanSvg.Font.advance f gid
+  let contours := LeanSvg.Font.rawContours f gid
+  let cubicCmdCount := (LeanSvg.Font.outline f gid).size
   let kernStr :=
     match next? with
-    | some nc => toString (MicroSvg.Font.kern f gid (MicroSvg.Font.glyphId f nc.toNat))
+    | some nc => toString (LeanSvg.Font.kern f gid (LeanSvg.Font.glyphId f nc.toNat))
     | none => "null"
   "{" ++
     "\"char\":" ++ jsonString (String.ofList [c]) ++ "," ++
@@ -101,7 +101,7 @@ def dumpChars (f : Font) (text : String) : String := Id.run do
   return "[" ++ String.intercalate "," parts.toList ++ "]"
 
 def runOn (bytes : ByteArray) (text : String) : IO UInt32 := do
-  match MicroSvg.Font.parse bytes with
+  match LeanSvg.Font.parse bytes with
   | some f =>
     IO.println (dumpChars f text)
     return 0

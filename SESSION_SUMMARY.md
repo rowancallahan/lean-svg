@@ -34,11 +34,11 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   clipPath, gradients, text). Replicates usvg quirks: unknown tags are not
   switch candidates, `display:none` winner renders nothing, root `<svg>` is
   gated too. Corpus byte-identical.
-- **T25 fonts** (`MicroSvg/Font.lean`, pure total TrueType parser: cmap 4/12,
+- **T25 fonts** (`LeanSvg/Font.lean`, pure total TrueType parser: cmap 4/12,
   glyf simple+composite with fuel, hmtx, kern, GPOS pair adjustment;
-  `MicroSvg/Fonts/{NotoSans,NotoSansBold,NotoSansItalic}.lean` OFL Latin
+  `LeanSvg/Fonts/{NotoSans,NotoSansBold,NotoSansItalic}.lean` OFL Latin
   subsets ~32 KB each; `fontdump` debug exe, the only IO, not linked into
-  `microsvg`): exact match vs fontTools on 431/431 subset glyphs ×3 and
+  `lean-svg`): exact match vs fontTools on 431/431 subset glyphs ×3 and
   2791/2791 full-font glyphs; fuzz 2000/2000 clean. Renderer untouched.
 - **Font demo** (`tests/out/fontdemo/`, built by the scratch script
   `fontdemo.py`; served by `.claude/launch.json` config `reports` on port
@@ -53,7 +53,7 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   text); percentages resolve against the viewport in usvg, not the bbox.
   Corpus byte-identical. Gap: resvg's content-bbox size refit when a root
   dimension falls back to 100×100.
-- **T29 `<style>` CSS** (`MicroSvg/Css.lean` simplecss subset: comments,
+- **T29 `<style>` CSS** (`LeanSvg/Css.lean` simplecss subset: comments,
   @-rules skipped, type/class/id/attr/`:first-child`, descendant/child
   combinators, specificity + source order + `!important`; `Xml.Event.text`
   + total `decodeText` so element text and CDATA reach `interpret`;

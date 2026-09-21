@@ -4,7 +4,7 @@
 
 `07_opacity` is 62.6% exact / 99.8% within 8, and every file with translucent
 fills shows a uniform 1–3 level offset in flat areas. That is rounding in
-`MicroSvg/Canvas.lean` (`div255`, premultiply, source-over, unpremultiply on
+`LeanSvg/Canvas.lean` (`div255`, premultiply, source-over, unpremultiply on
 export), not geometry. Make ours bit-identical to tiny-skia's lowp pipeline
 for the case "solid colour × coverage mask, source-over".
 
@@ -29,7 +29,7 @@ Write the exact integer formulas in the report before coding.
 
 ## What to change
 
-`MicroSvg/Canvas.lean` only: `div255`, `blend`, `new` (background
+`LeanSvg/Canvas.lean` only: `div255`, `blend`, `new` (background
 premultiply), `toRgbaBytes` (demultiply). The mask value `cov ∈ [0, 65536]`
 must first be reduced to the 0..255 coverage tiny-skia would have (`cov / 257`
 or as coordinated with T1's report if it has landed; if unsure, use
@@ -120,12 +120,12 @@ translucent interior, translucent AA edge — is now bit-identical.
 
 ### Files changed
 
-* `MicroSvg/Canvas.lean` — only file changed. `div255` redefined to tiny-skia's
+* `LeanSvg/Canvas.lean` — only file changed. `div255` redefined to tiny-skia's
   `(v+255)>>>8`; new `premul` / `unpremul`; `blend` split into `blendLerp`
   (opaque) and `blendOver` (translucent); `fillMask` now quantises the opacity
   to `a8` and premultiplies the paint once outside the loop, then scales by a
   0..255 coverage; `new` uses `premul`; `toRgbaBytes` uses `unpremul`.
-* `MicroSvg/Render.lean` — **not changed**. The order-of-operations fix
+* `LeanSvg/Render.lean` — **not changed**. The order-of-operations fix
   (quantise opacity to u8 → premultiply → then apply coverage) lives entirely
   inside `fillMask`; `drawShape` still just hands over
   `fillOpacity * opacity / 256`, so no edit there was needed.

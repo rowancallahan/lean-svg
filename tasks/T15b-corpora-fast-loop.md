@@ -67,7 +67,7 @@ Two behaviours worth knowing:
 
 ### Verification runs
 
-All against `.lake/build/bin/microsvg` (commit `4ab8990`), resvg/usvg 0.48.1,
+All against `.lake/build/bin/lean-svg` (commit `4ab8990`), resvg/usvg 0.48.1,
 `--out` into a scratch dir (written `$S` below). Timings are the harness's
 own `total`, with wall clock from `time` in brackets.
 

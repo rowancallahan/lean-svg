@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""External-corpus fidelity harness: score microsvg against resvg on SVG files
+"""External-corpus fidelity harness: score lean-svg against resvg on SVG files
 we did not write.
 
 Three corpora are expected under tests/corpora/ (clone them with the commands
@@ -11,11 +11,11 @@ in tasks/T15-external-corpora.md; the directory is gitignored):
 
 Two render routes are measured:
 
-    direct   microsvg reads the original file.  Exercises our own parser and
+    direct   lean-svg reads the original file.  Exercises our own parser and
              subset support; a non-zero exit is counted as "unsupported",
              not as a rendering failure.
     usvg     the file is first simplified by the usvg CLI (text -> paths, CSS
-             resolved, `use` expanded, units resolved) and microsvg reads that.
+             resolved, `use` expanded, units resolved) and lean-svg reads that.
 
 The reference for BOTH routes is `resvg -w W` on the *original* file, so the
 two routes are directly comparable.
@@ -75,7 +75,7 @@ from run_tests import (  # noqa: E402  (path must be set up first)
 CORPORA_DIR = REPO / "tests" / "corpora"
 OUT_DIR = REPO / "tests" / "out" / "corpora"
 WORST_DIR = OUT_DIR / "worst"
-DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
 RENDER_TIMEOUT = 30  # seconds, per subprocess
 SAMPLE_SEED = 20240915  # fixed, so --limit runs are reproducible
@@ -229,7 +229,7 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
         cleanup()
         return row
 
-    # input for microsvg
+    # input for lean-svg
     src = svg
     if route == "usvg":
         rc_u, _, err_u, to_u = run_cmd(["usvg", str(svg), str(mid_svg)])
@@ -691,9 +691,9 @@ def error_table(rows):
 def build_summary(all_runs, config):
     """all_runs: list of (corpus, route, rows, elapsed, csv_path)."""
     parts = []
-    parts.append("# External corpora: microsvg vs resvg\n")
+    parts.append("# External corpora: lean-svg vs resvg\n")
     parts.append(
-        "generated %s &middot; microsvg `%s` &middot; commit `%s` &middot; "
+        "generated %s &middot; lean-svg `%s` &middot; commit `%s` &middot; "
         "resvg/usvg %s &middot; tol %d &middot; threshold %.2f &middot; jobs %d\n"
         % (
             time.strftime("%Y-%m-%d %H:%M:%S"), config["bin"], config["commit"],
@@ -741,7 +741,7 @@ def build_summary(all_runs, config):
     )
 
     # ---- error messages
-    parts.append("\n## microsvg error messages (exit != 0)\n")
+    parts.append("\n## lean-svg error messages (exit != 0)\n")
     for corpus, route, rrows, _, _ in all_runs:
         errs = error_table(rrows)
         if not errs:
@@ -865,7 +865,7 @@ def main():
     )
     parser.add_argument(
         "--route", default=None, choices=["direct", "usvg", "both"],
-        help="direct = original file into microsvg; usvg = usvg-simplified "
+        help="direct = original file into lean-svg; usvg = usvg-simplified "
              "first (default both, or the routes named by --failing-from's CSVs)",
     )
     parser.add_argument(
@@ -926,7 +926,7 @@ def main():
         "--jobs", type=int, default=None,
         help="parallel subprocesses (default 4; hw.ncpu with --fast)",
     )
-    parser.add_argument("--bin", default=str(DEFAULT_BIN), help="path to the microsvg binary")
+    parser.add_argument("--bin", default=str(DEFAULT_BIN), help="path to the lean-svg binary")
     parser.add_argument(
         "--no-worst", action="store_true", help="skip the worst-file composites"
     )
@@ -960,7 +960,7 @@ def main():
 
     binary = Path(args.bin).resolve()
     if not binary.is_file():
-        print("microsvg binary not found at %s (build it first)" % binary, file=sys.stderr)
+        print("lean-svg binary not found at %s (build it first)" % binary, file=sys.stderr)
         return 2
     if shutil.which("resvg") is None:
         print("resvg not found on PATH (needed as the oracle)", file=sys.stderr)

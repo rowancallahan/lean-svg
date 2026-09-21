@@ -7,7 +7,7 @@ per covering shape, the dominant cost at every large size (overdraw
 multiplies it). Make it several times faster with **byte-identical output**.
 
 Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T7` (branch `t7-blend`).
-Only `MicroSvg/Canvas.lean` may change (`fillMask` and helpers it needs).
+Only `LeanSvg/Canvas.lean` may change (`fillMask` and helpers it needs).
 
 ## What to change (in order of expected payoff; measure each)
 
@@ -35,7 +35,7 @@ size and `--width 1600` to a temp dir, sha256 each PNG; run
 After each step: bytes must be identical for every file (assert it in a small
 script and paste the result); report ms before/after per file at 1600 and the
 median speedup. Adversarial must stay clean. Confirm `Effect.lean` is untouched
-(`git diff --stat main -- MicroSvg/Effect.lean` empty).
+(`git diff --stat main -- LeanSvg/Effect.lean` empty).
 
 ## Done when
 
@@ -46,7 +46,7 @@ Byte-identical corpus, measurable speedup reported per step. Append
 
 ### What changed
 
-**`MicroSvg/Canvas.lean` only** (66 insertions, 14 deletions; `git diff --stat
+**`LeanSvg/Canvas.lean` only** (66 insertions, 14 deletions; `git diff --stat
 HEAD` lists no other file). `toRgbaBytes` and `new` are untouched, as are
 `div255`, `premul`, `unpremul`, `pack`, `blendLerp` and `blendOver` — the
 arithmetic T2 pinned down is byte-for-byte the same code. The edit is confined
@@ -248,13 +248,13 @@ T2's report also noted.)
 
 ### Effect.lean
 
-`git diff --stat main -- MicroSvg/Effect.lean` is **empty**, and so is
-`git diff --stat HEAD -- MicroSvg/Effect.lean`. Untouched.
+`git diff --stat main -- LeanSvg/Effect.lean` is **empty**, and so is
+`git diff --stat HEAD -- LeanSvg/Effect.lean`. Untouched.
 
 ## Merge report
 
 `t7-blend` merged into `t7m-merge` (branched from `main`). One conflict, in
-`MicroSvg/Canvas.lean`, and only in the hunk around `fillMask`'s header: both
+`LeanSvg/Canvas.lean`, and only in the hunk around `fillMask`'s header: both
 sides rewrote the doc comment and `t7-blend` predates T5's signature change.
 
 **Resolution.** Main's (T5's) signature and alpha semantics were kept exactly —
@@ -269,18 +269,18 @@ threshold constants with their derivation comment, the hoisted `solid` and
 classification. The merged doc comment is main's alpha paragraphs followed by
 T7's description of the row walk and the three coverage cases.
 
-`git diff main -- MicroSvg/Canvas.lean` is 66 insertions, 14 deletions — the
+`git diff main -- LeanSvg/Canvas.lean` is 66 insertions, 14 deletions — the
 same shape as T7's own diff against its base — and Canvas.lean is the only
-file under `MicroSvg/` that differs from main. `toRgbaBytes`, `new` and the T2
+file under `LeanSvg/` that differs from main. `toRgbaBytes`, `new` and the T2
 arithmetic helpers (`div255`, `premul`, `unpremul`, `pack`, `blendLerp`,
-`blendOver`) are untouched, as is `MicroSvg/Effect.lean`
-(`git diff main -- MicroSvg/Effect.lean` empty).
+`blendOver`) are untouched, as is `LeanSvg/Effect.lean`
+(`git diff main -- LeanSvg/Effect.lean` empty).
 
 **Verification on the merge commit.**
 
 * `lake build` from the merged tree: 26/26 jobs, no errors, no warnings.
 * **Byte identity, 100/100.** Main's binary
-  (`/Users/rowancallahan/pdf_renderer/.lake/build/bin/microsvg`) versus this
+  (`/Users/rowancallahan/pdf_renderer/.lake/build/bin/lean-svg`) versus this
   build, all 20 `tests/svg/*.svg` under five option sets — default,
   `--width 400`, `--width 1600`, `--background white`,
   `--width 800 --background #336699` — **0 sha256 mismatches, 0 render

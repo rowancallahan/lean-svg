@@ -13,8 +13,8 @@ Work ONLY in `/Users/rowancallahan/pdf_renderer/.worktrees/T5` (branch `t5-opaci
 
 ## What to change
 
-`MicroSvg/Svg.lean` (and the one line in `MicroSvg/Render.lean` /
-`MicroSvg/Canvas.lean` that consumes the value, if the scale changes):
+`LeanSvg/Svg.lean` (and the one line in `LeanSvg/Render.lean` /
+`LeanSvg/Canvas.lean` that consumes the value, if the scale changes):
 
 - Parse opacity to a value with enough precision that rounding to 255ths is
   exact for any decimal input with up to 18 significant digits. Suggested:
@@ -125,17 +125,17 @@ nested groups — gives **253 exact**. The four misses are all group opacity
 
 ### Files changed
 
-* `MicroSvg/Fixed.lean` — `parseNumber` split into `parseDecimal` (lexes to the
+* `LeanSvg/Fixed.lean` — `parseNumber` split into `parseDecimal` (lexes to the
   exact `±mant * 10^exp10`, loop bodies unchanged) and `scaleDecimal` (lands a
   decimal on any grid, halves away from zero, saturating). `parseNumber` is
   `scaleDecimal ... 256 Fx.maxVal`, bit-identical to before — every corpus file
   without opacity renders byte-identically, and the old and new binaries agree
   on `1e999999999`, `1e60`, `1e-60`, `-`, `abc` and friends.
-* `MicroSvg/Svg.lean` — `opacityOne`, `Style.{fillOpacity,strokeOpacity,opacity}`
+* `LeanSvg/Svg.lean` — `opacityOne`, `Style.{fillOpacity,strokeOpacity,opacity}`
   on the 10^18 grid, `parseOpacity` / `alphaOf` off `parseDecimal`,
   `mulOpacity`, `opacityToU8`.
-* `MicroSvg/Render.lean` — two call sites pass `opacityToU8 c.a ...`.
-* `MicroSvg/Canvas.lean` — `fillMask`'s `opacity256` becomes `alpha8 : Nat` in
+* `LeanSvg/Render.lean` — two call sites pass `opacityToU8 c.a ...`.
+* `LeanSvg/Canvas.lean` — `fillMask`'s `opacity256` becomes `alpha8 : Nat` in
   `[0,255]`; the blend arithmetic from T2 is untouched.
 
 Invariants hold: no `partial` / `unsafe` / `@[extern]` / `panic!` / `!`-indexing,

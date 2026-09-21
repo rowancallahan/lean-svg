@@ -29,7 +29,7 @@ from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent
 SVG_DIR = REPO / "tests" / "svg"
-DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
 RENDER_TIMEOUT = 120  # seconds, per subprocess
 
@@ -193,13 +193,13 @@ def time_tile(binary, svg, tmp, full_height_800):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--filter", help="only run tests whose name contains SUBSTR")
-    parser.add_argument("--bin", default=str(DEFAULT_BIN), help="path to the microsvg binary")
+    parser.add_argument("--bin", default=str(DEFAULT_BIN), help="path to the lean-svg binary")
     parser.add_argument("--no-timing", action="store_true", help="skip the timing section")
     args = parser.parse_args()
 
     binary = Path(args.bin).resolve()
     if not binary.is_file():
-        print("microsvg binary not found at %s" % binary, file=sys.stderr)
+        print("lean-svg binary not found at %s" % binary, file=sys.stderr)
         print("build it first:  lake build", file=sys.stderr)
         return 2
 
@@ -210,7 +210,7 @@ def main():
         print("no SVGs to test in %s" % SVG_DIR, file=sys.stderr)
         return 2
 
-    tmp = Path(tempfile.mkdtemp(prefix="microsvg_tiles_"))
+    tmp = Path(tempfile.mkdtemp(prefix="lean-svg_tiles_"))
     failures = []
     heights = {}
     try:
