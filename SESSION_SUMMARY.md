@@ -80,6 +80,19 @@ the task file and worktree with the same model.
 
 1. Merge whatever landed; refresh corpora numbers with
    `python3 tests/run_corpora.py --fast --out tests/out/corpora-fast`.
+1b. **T31 (Opus when usage allows) edge rounding.** Found via the font demo:
+   a plain `<rect x=100 width=300 height=700 transform="translate(20 110)
+   scale(0.072 0.072)">` (positive or flipped scale, rect or path, same
+   result) differs from resvg on 142 px, all by whole quarter-steps
+   (63/96/127/128/176 levels) → one supersample row/column off on straight
+   edges at fractional positions. Quads differ by 1/16 steps (15/16/31/32),
+   the known flattening residual. Check `Raster.mkEdge` top/bottom rounding
+   against tiny-skia `LineEdge::new` (`fdot6::round`, the `(y+32)>>6` rule
+   and the `SHIFT` handling in `edge_builder`), and whether tiny-skia takes
+   the `fill_rect` exact-area path for rect-shaped paths. Repro SVGs: the
+   six cases in the scratch script `fontdemo.py`'s sibling run (see summary
+   text above); rebuild with any 0.072-scaled rect. This likely explains a
+   chunk of the 12_badge/14_flower/16_stress residual too.
 2. Wave 2 (Opus, one at a time): **T19** defs table + `use`/`symbol`
    (`interpret`; after T27/T29), then **T22** group opacity as a layer.
 3. Sonnet-eligible leftovers: paint-order and crispEdges (after T23), nested
