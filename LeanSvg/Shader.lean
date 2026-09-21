@@ -87,6 +87,19 @@ once per draw at 32 fractional bits (`Aff.invert`).  Because the input is the
 absolute device pixel index — the one `rootMat` already carries the tile
 offset for — a tile evaluates the very same parameter at the very same pixel
 as the full render, so tiles stay byte-identical (DESIGN §3.8).
+
+The parameter then picks a colour off the ramp (`rampAt`), and that is where
+a gradient's per-pixel cost used to sit.  Two things moved it (T41), neither
+of which changes a single output byte:
+
+* the ramp's four divisions became a multiply and a shift against a
+  reciprocal precomputed per stop pair (`recipOf`), exactly — and the whole
+  ramp moved into `Nat`, where the 63-bit unboxed path is (invariant 4);
+* a draw covering at least `rampArea` mask pixels evaluates the ramp once per
+  16.16 parameter value into a table first (`withRamp`) and then only reads
+  it.  The table *is* `rampCalc`, entry by entry, so which side of the
+  threshold a draw falls on — and therefore how a tile or a thread band is
+  cut — cannot change a pixel.
 -/
 
 namespace LeanSvg
@@ -139,6 +152,13 @@ separately. -/
 /-- `x² + y²` in 16.16 for 16.16 `x`, `y`. -/
 @[inline] def norm2 (x y : Int) : Int :=
   Int.ofNat ((x.natAbs * x.natAbs + y.natAbs * y.natAbs) >>> 16)
+
+/-- `√(x² + y²)` in 16.16, the `norm2`-then-`sqrt16` pair a radial gradient
+evaluates per pixel, with no `Int` in between (invariant 4).  Both inputs are
+clamped to `paramMax = 2^30`, so the sum is under 2^61 and `Nat.sqrt`'s
+argument under 2^61 as well. -/
+@[inline] def hypot16 (x y : Int) : Nat :=
+  Nat.sqrt (((x.natAbs * x.natAbs + y.natAbs * y.natAbs) >>> 16) <<< 16)
 
 @[inline] def clampTo (lim a : Int) : Int := if a > lim then lim else if a < -lim then -lim else a
 
@@ -593,11 +613,19 @@ folded into their alphas, exactly as resvg hands them to
 `tiny_skia::GradientStop`. -/
 
 structure RtStop where
-  off : Int
+  /-- 16.16 in `[0, 65536]` and monotone (`monotone`), so `Nat` throughout the
+  ramp: invariant 4 keeps the per-pixel path off the 31-bit `Int`. -/
+  off : Nat
   r : Nat
   g : Nat
   b : Nat
   a : Nat
+  /-- The segment that starts here: `off (j+1) − off j`, and `0` at the last
+  stop or at a hard stop, where the ramp is flat and no interpolation runs. -/
+  den : Nat := 0
+  /-- `⌊2^recipShift / (2·den)⌋ + 1` when `den > 0`: the multiplier that stands
+  in for the ramp's division (`lerpUp`). -/
+  recip : Nat := 0
 deriving Inhabited
 
 inductive Geom where
@@ -658,6 +686,15 @@ structure Rt where
   `SourceOver` to `Source`: true only for a linear gradient whose every stop
   is opaque (`Shader::is_opaque` is unconditionally `false` for a radial). -/
   isOpaque : Bool
+  /-- The premultiplied ramp, one entry per 16.16 parameter value, split by
+  channel: empty until `withRamp` fills it, which `fillMaskShader` does only
+  for a draw big enough to pay for the build (`rampArea`).  Filled or not, the
+  colour is the same — the entries *are* `rampCalc` — so a tile, a thread band
+  and the whole image agree whatever each one decides. -/
+  rr : Array Nat := #[]
+  rg : Array Nat := #[]
+  rb : Array Nat := #[]
+  ra : Array Nat := #[]
 deriving Inhabited
 
 /-! ### The colour ramp -/
@@ -672,7 +709,7 @@ search.  Taking `0` at `u = off 0` rather than the largest is what usvg's
 "remove zeros" pass buys with its `f32::EPSILON` nudge: with two stops at
 offset 0 the flat region to the left of the gradient keeps the *first*
 colour, and only strictly inside does the second take over. -/
-@[inline] def findStop (ss : Array RtStop) (u : Int) : Nat := Id.run do
+@[inline] def findStop (ss : Array RtStop) (u : Nat) : Nat := Id.run do
   let n := ss.size
   if n ≤ 1 then return 0
   if u ≤ (ss.getD 0 default).off then return 0
@@ -685,41 +722,116 @@ colour, and only strictly inside does the second take over. -/
     if (ss.getD mid default).off ≤ u then lo := mid else hi := mid - 1
   return lo
 
+/-- Shift of the precomputed reciprocal, `RtStop.recip`. -/
+def recipShift : Nat := 44
+
+/-- `⌊2^recipShift / (2·den)⌋ + 1`, built once per stop pair in `Grad.build`. -/
+def recipOf (den : Nat) : Nat :=
+  if den == 0 then 0 else (1 <<< recipShift) / (2 * den) + 1
+
 /-- One channel of the ramp at `u`, as tiny-skia's `lowp` pipeline computes it:
 the unpremultiplied channel is linear in `t` and then rounded to 8 bits with
-`round(c·255)`.  Written as one exact rational, halves up. -/
-@[inline] def lerpCh (cl cr : Nat) (num den : Int) : Nat :=
+`round(c·255)`.  Written as one exact rational, halves up:
+`q = ⌊v / 2·den⌋` with `v = 2·(cl·den + (cr − cl)·num) + den`, clamped to
+`[0, 255]`.
+
+The division is gone.  With `M = ⌊2^k / D⌋ + 1` for `D = 2·den` and
+`k = recipShift`, `⌊v·M / 2^k⌋ = ⌊v / D⌋` for every `v ≥ 0` with `v·D < 2^k`
+(writing `2^k = M·D − e`, `0 < e ≤ D`, the excess is `v·e / (D·2^k) < 1/D`).
+Here `den ≤ 65536` and `|num| ≤ 65536`, so `v < 2^27` and `v·e ≤ v·D < 2^44`:
+`k = 44` carries it exactly.  Clamping first also keeps the product small —
+`v < 510·den` bounds `v·M` by `510·2^43 < 2^52`, inside the unboxed `Nat`
+range (invariant 4).
+
+`num` is split by sign instead of being carried as an `Int`, for the same
+invariant.  `findStop` gives `0 ≤ num < den` everywhere except at `j = 0`
+below the first offset, where the ramp extrapolates backwards and the clamps
+are what stop it; `lerpDown` is that case. -/
+@[inline] def lerpUp (cl cr num den recip : Nat) : Nat :=
   if cl == cr then cl
   else
-    let v := 2 * ((cl : Int) * den + ((cr : Int) - (cl : Int)) * num) + den
-    let q := Int.ediv v (2 * den)
-    if q < 0 then 0 else if q > 255 then 255 else q.toNat
+    let base := (2 * cl + 1) * den
+    -- `0 ≤ num < den`, so `v ≤ 511·den`: neither clamp can bite.
+    let v := if cr ≥ cl then base + 2 * (cr - cl) * num
+             else base - 2 * (cl - cr) * num
+    Nat.min 255 ((v * recip) >>> recipShift)
 
-/-- The premultiplied colour at parameter `u ∈ [0, 65536]`. -/
-@[inline] def rampAt (sh : Rt) (u : Int) : Nat × Nat × Nat × Nat :=
-  let ss := sh.stops
+/-- `lerpUp` at `num = −back`, `back > 0`: the ramp continued to the left of
+its first stop. -/
+@[inline] def lerpDown (cl cr back den recip : Nat) : Nat :=
+  if cl == cr then cl
+  else if cr ≥ cl then
+    let base := (2 * cl + 1) * den
+    let d := 2 * (cr - cl) * back
+    if d ≥ base then 0 else Nat.min 255 (((base - d) * recip) >>> recipShift)
+  else
+    let v := (2 * cl + 1) * den + 2 * (cl - cr) * back
+    if v ≥ 510 * den then 255 else (v * recip) >>> recipShift
+
+/-- The premultiplied colour at parameter `u ∈ [0, 65536]`, from the stops. -/
+def rampCalc (ss : Array RtStop) (u : Nat) : Nat × Nat × Nat × Nat :=
   let j := findStop ss u
   let l := ss.getD j default
-  let nxt := ss.getD (j + 1) l
-  let den := nxt.off - l.off
   let (r, g, b, a) :=
-    if j + 1 ≥ ss.size || den ≤ 0 then (l.r, l.g, l.b, l.a)
+    -- `den = 0` is the last stop or a hard stop: the ramp is flat here.
+    if l.den == 0 then (l.r, l.g, l.b, l.a)
     else
-      let num := u - l.off
-      (lerpCh l.r nxt.r num den, lerpCh l.g nxt.g num den,
-       lerpCh l.b nxt.b num den, lerpCh l.a nxt.a num den)
+      let nxt := ss.getD (j + 1) l
+      if u ≥ l.off then
+        let num := u - l.off
+        (lerpUp l.r nxt.r num l.den l.recip, lerpUp l.g nxt.g num l.den l.recip,
+         lerpUp l.b nxt.b num l.den l.recip, lerpUp l.a nxt.a num l.den l.recip)
+      else
+        let back := l.off - u
+        (lerpDown l.r nxt.r back l.den l.recip, lerpDown l.g nxt.g back l.den l.recip,
+         lerpDown l.b nxt.b back l.den l.recip, lerpDown l.a nxt.a back l.den l.recip)
   if a == 255 then (r, g, b, a)
   else -- `lowp::premultiply`, which is `div255 (c * a)`, not `Canvas.premul`.
     (Canvas.div255 (r * a), Canvas.div255 (g * a), Canvas.div255 (b * a), a)
 
+/-- Mask pixels from which a ramp table is worth building.
+
+The table costs one `rampCalc` per entry — 65537 of them, ~7 ms here — and
+saves ~95 ns on every painted pixel, so it breaks even around 80 000 painted
+pixels.  What is counted here is the mask's *bounding box*, which over-counts
+a sparse shape, so the threshold sits at about three times the break-even:
+a draw that pays for a table it barely uses loses ~7 ms, and one that skips
+a table it would have used loses less than that.  Below the threshold the
+draw evaluates the ramp per pixel, as it always did. -/
+def rampArea : Nat := 262144
+
+/-- Fill `Rt.rr … ra`: one `rampCalc` per 16.16 parameter value.  65537 entries
+in four arrays of `Nat`, ~2 MB, live only while the draw that built them is
+running — `fillMaskShader` builds at most one per draw and keeps none. -/
+def withRamp (sh : Rt) : Rt := Id.run do
+  let ss := sh.stops
+  let mut rr : Array Nat := Array.emptyWithCapacity 65537
+  let mut rg : Array Nat := Array.emptyWithCapacity 65537
+  let mut rb : Array Nat := Array.emptyWithCapacity 65537
+  let mut ra : Array Nat := Array.emptyWithCapacity 65537
+  for u in [0:65537] do
+    let (r, g, b, a) := rampCalc ss u
+    rr := rr.push r
+    rg := rg.push g
+    rb := rb.push b
+    ra := ra.push a
+  return { sh with rr := rr, rg := rg, rb := rb, ra := ra }
+
+/-- The premultiplied colour at parameter `u ∈ [0, 65536]`: a table read when
+`withRamp` has run for this draw, otherwise the same value from the stops. -/
+@[inline] def rampAt (sh : Rt) (u : Nat) : Nat × Nat × Nat × Nat :=
+  if sh.rr.isEmpty then rampCalc sh.stops u
+  else (sh.rr.getD u 0, sh.rg.getD u 0, sh.rb.getD u 0, sh.ra.getD u 0)
+
 /-- `PadX1` / `ReflectX1` / `RepeatX1` on a 16.16 parameter, giving `[0, 65536]`.
 `pad` may clamp unconditionally because the ramp is already flat outside the
-stops. -/
-@[inline] def spreadT : Spread → Int → Int
-  | .pad, t => if t ≤ 0 then 0 else if t ≥ 65536 then 65536 else t
-  | .rep, t => Int.emod t 65536
+stops.  The result is where the ramp's `Nat` half begins: `Int.emod` against a
+positive modulus is non-negative, so every branch lands in `[0, 65536]`. -/
+@[inline] def spreadT : Spread → Int → Nat
+  | .pad, t => if t ≤ 0 then 0 else if t ≥ 65536 then 65536 else t.toNat
+  | .rep, t => (Int.emod t 65536).toNat
   | .reflect, t =>
-    let v := Int.emod t 131072
+    let v := (Int.emod t 131072).toNat
     if v ≤ 65536 then v else 131072 - v
 
 /-- The gradient's parameter at a device pixel, or `none` where the two-point
@@ -731,7 +843,7 @@ pixel fully transparent). -/
   | .radial =>
     let x := clampTo paramMax px16
     let y := clampTo paramMax py16
-    some (sqrt16 (norm2 x y))
+    some (Int.ofNat (hypot16 x y))
   | .conical ex ey rho0 delta a2 =>
     -- `P` lies on the circle of centre `f + t·(c − f)` and radius
     -- `r0 + t·(r1 − r0)`, i.e. `a2·t² − 2·b2·t + c2 = 0` with every length
@@ -832,9 +944,22 @@ def build (d : Defs) (i : Nat) (cmds : Array PathCmd) (ctm0 : Mat) (ox oy : Int)
   let ctm := if ox == 0 && oy == 0 then ctm0
              else (Mat.translate (ox * 256) (oy * 256)).mul ctm0
   let res := d.defs.getD i default
-  let ss : Array RtStop := res.stops.map fun s =>
-    { off := s.off, r := s.col.r, g := s.col.g, b := s.col.b,
+  -- `parseStopOffset` clamps to `[0, 65536]` and `monotone` keeps the array
+  -- non-decreasing, so `toNat` is exact and the ramp can stay in `Nat`.
+  let ss0 : Array RtStop := res.stops.map fun s =>
+    { off := s.off.toNat, r := s.col.r, g := s.col.g, b := s.col.b,
       a := stopAlpha8 s.col.a s.op fillOp groupOp }
+  -- One pass over at most `maxStops` stops fills each segment's width and its
+  -- reciprocal, so the per-pixel ramp is a multiply and a shift.
+  let ss : Array RtStop := Id.run do
+    let mut out := ss0
+    for j in [0:ss0.size] do
+      if j + 1 < ss0.size then
+        -- Offsets are monotone (`monotone`), so this width never underflows.
+        let den := (ss0.getD (j + 1) default).off - (ss0.getD j default).off
+        if den > 0 then
+          out := out.modify j fun s => { s with den := den, recip := recipOf den }
+    return out
   if ss.isEmpty then .skip else
   let first := ss.getD 0 default
   let last := ss.getD (ss.size - 1) default
@@ -902,10 +1027,14 @@ strength-reduces `SourceOver` to `Source`) or `blendOver` on a source the
 `scale_1_float` stage has already multiplied by the coverage.  Only the source
 colour moves, and it is read from the gradient at the pixel's *absolute*
 device position, so a tile paints what the full render paints. -/
-def fillMaskShader (cv : Canvas) (m : Raster.Mask) (sh : Grad.Rt) : Canvas := Id.run do
+def fillMaskShader (cv : Canvas) (m : Raster.Mask) (sh0 : Grad.Rt) : Canvas := Id.run do
   let w := cv.w
   let h := cv.h
   let mw := m.w
+  -- Big enough to amortise it: evaluate the ramp once per parameter value up
+  -- front instead of once per pixel.  `rampAt` reads the same colour either
+  -- way, so this changes no output — only where the work happens.
+  let sh := if mw * m.h ≥ Grad.rampArea then Grad.withRamp sh0 else sh0
   let mut px := cv.px
   for y in [0:m.h] do
     let mrow := y * mw
