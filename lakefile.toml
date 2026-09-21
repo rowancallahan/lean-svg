@@ -1,6 +1,6 @@
 name = "microsvg"
 version = "0.1.0"
-defaultTargets = ["microsvg"]
+defaultTargets = ["microsvg", "fontdump"]
 
 # No dependencies on purpose: the trusted computing base is Lean core only.
 # (No mathlib, no FFI, no C libraries.)
@@ -11,3 +11,10 @@ name = "MicroSvg"
 [[lean_exe]]
 name = "microsvg"
 root = "Main"
+
+# Debug/oracle tool for MicroSvg.Font (T25). Reads a font path off the
+# command line (its only IO); microsvg does not link it or the embedded
+# font data in MicroSvg/Fonts/*.lean.
+[[lean_exe]]
+name = "fontdump"
+root = "FontDump"
