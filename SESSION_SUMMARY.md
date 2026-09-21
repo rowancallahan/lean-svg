@@ -53,6 +53,14 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   text); percentages resolve against the viewport in usvg, not the bbox.
   Corpus byte-identical. Gap: resvg's content-bbox size refit when a root
   dimension falls back to 100×100.
+- **T29 `<style>` CSS** (`MicroSvg/Css.lean` simplecss subset: comments,
+  @-rules skipped, type/class/id/attr/`:first-child`, descendant/child
+  combinators, specificity + source order + `!important`; `Xml.Event.text`
+  + total `decodeText` so element text and CDATA reach `interpret`;
+  `tests/CssTests.lean` 38 `#guard`s): structure/style 5/16 → 16/16;
+  style-attribute 3/4 (`comments.svg` needs comment stripping in the
+  `style=""` parser). Merged with T27 by **T29m** (both stacks pushed/popped
+  in lockstep). Corpus byte-identical; adversarial now 42 cases.
 - Corpus now **19/23** at the strict bar. Failing: 12_badge 98.56, 14_flower
   97.81, 15_spiral 97.48, 16_stress 97.48 (curve/stroke antialiasing).
 
@@ -64,13 +72,12 @@ agents for scoped, mechanically checked tasks; at most 2 Opus at once; Opus
 agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 (usage) and a break once the in-flight work lands.**
 
-## Paused (Rowan's request, late 2026-09-20; agents stopped, work on disk)
+## Paused (Rowan's request, late 2026-09-20)
 
-| task | branch / worktree | state | to resume |
-|---|---|---|---|
-| **T29** CSS `<style>` | `t29-css` / `.worktrees/T29`, commit 3294751 | **feature complete and verified** (structure/style 16/16, 38 `#guard`s, adversarial 42/42) but conflicts with T27 in `Svg.interpret` (5 hunks) | **T29m** merge task (`tasks/T29m-merge-css-switch.md`): a `git merge main` is in progress in that worktree (`MERGE_HEAD` present, `Svg.lean` unmerged). Resume the T29m Sonnet agent, or `git merge --abort` there and start it fresh. Bar: switch 13/13, systemLanguage 6/10, style 16/16, style-attribute 3/4, corpus byte-identical |
-
-All other in-flight work landed (see the merged list above). No agents are running.
+**Everything landed; no agents running; nothing pending on any branch.**
+Worktrees under `.worktrees/` (T16, T17, T23, T24a, T24b, T25, T27, T29,
+T30) are all merged and can be removed with `git worktree remove <path>`
+(and `git branch -d`) when convenient.
 
 Merge recipe:
 ```bash
