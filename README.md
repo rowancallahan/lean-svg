@@ -1,21 +1,24 @@
 # microsvg
+## Human Preamble
+An experiment in specification based programming.
+The overall goal here is to my understanding of theorems on programs, and how to use theorems on programs to allow for more unrestricted use of computer generated code.
+A few goals of this program are as follows:
 
-A micro-SVG → PNG rasterizer in Lean 4 whose only goal is to be safe.
+- One input one ouptut, only the specified files should be touched and there should be no side effects asides from reading the input file and writing to the output file. This should be fairly easy to prove also by way of the Input output Monad. But does require us to trust the commands that it is calling. This also makes the program safer to run because I know it won't be able to touch other files despite how it is optimized.
+- No hang states, this program should have some limits to how long it can run and how much memory it uses, to prevent it from overflowing.
+- maximum output size, this program should have a maximum output size defined by the canvas size.
 
-- **One file in, one file out.** The program is a value of a free monad with
-  two operations. Theorems in `MicroSvg/Effect.lean`, checked by the Lean
-  kernel, say it reads only the input path and either fails without writing
-  or writes exactly the rendered bytes to the output path and nothing else.
-- **Total.** No `partial`, no `unsafe`, no FFI, no floats. Every loop is
-  bounded by the input size or a constant.
-- **Bounded.** Output ≤ 16384 px per side, ≤ 16 Mpx. Numbers, nesting depth,
-  and element counts are capped before any allocation.
-- **No references of any kind.** No DTD subsets, no entities beyond the five
-  predefined, no `href`, no `url()`, no CSS, no scripts. XXE, billion laughs,
-  and local-file-read attacks have no code path to reach.
+Long term
+- Defined file output type: this program should only be able to create a valid PNG output, this will require a specification for the PNG filetype which may take considerably more time since this entire spec may need to be hand written.
+- more features for SVGs
+- Better font support, curently fonts ship with the program and can't use system fonts, I want to find a safer way of reading the font cache but haven't decided on what that means yet.
+- Better multi core and gpu support
+- aenas translation to rust. Getting provable guarantees is also possible by translating rust into lean and proving things about the translation. The eventual goal of this project is to see how close to speed parity we can get with resvg. This won't work for all rust but it might be enough to get major speedups and get things close enough to be happy.
 
-Fidelity is checked against [resvg](https://github.com/linebender/resvg); the
-hand-written corpus renders ≥ 99% of pixels within a small tolerance.
+
+## Generated Readme
+
+Fidelity is checked against [resvg](https://github.com/linebender/resvg); 
 
 ## Build and run
 
