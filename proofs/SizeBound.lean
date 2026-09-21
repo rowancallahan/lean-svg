@@ -3,19 +3,22 @@
 
 ## STATUS: NOT PROVED. DO NOT CITE THIS AS A GUARANTEE.
 
-`zlibStoredRows_size_le` and `encode_size_le` are `sorry`. They report
-`sorryAx` and establish nothing. `encode_size_le_const` is stated in terms of
-`encode_size_le`, so it inherits the hole.
+**One hole remains: `zlibStoredRows_size_le`.** It is `sorry`, reports
+`sorryAx` and establishes nothing. `encode_size_le` and
+`encode_size_le_const` are now *derived* from it rather than being separate
+holes, so they inherit that one `sorryAx` and nothing else.
 
 Proved and hole-free: `forIn_invariant`, `forIn_measure_le`,
-`size_copySlice_append_le`, `size_blockHeader`. These report `[propext,
-Quot.sound]`, or `[propext]` for `size_blockHeader`. `Quot.sound` is one of
+`size_copySlice_append_le`, `size_blockHeader`, `size_be32`, `size_chunk`,
+and `encode_size_le'` — the whole PNG container layer, which is the half of
+the problem with no loop in it. These report `[propext, Quot.sound]`, or
+`[propext]` where no list or array lemma is used. `Quot.sound` is one of
 Lean's three standard axioms and arrives from core's `List.forIn_cons` and
 `Array.size_append`; it is not a hole.
 
 Check for yourself:
 
-    lake env lean proofs/SizeBound.lean          -- expect exactly 2 sorry warnings
+    lake env lean proofs/SizeBound.lean          -- expect exactly 1 sorry warning
 
 The statements below also need reading by a human against what they ought to
 say. A correct proof of the wrong statement is worth nothing, and the bound
@@ -194,6 +197,45 @@ theorem size_blockHeader (out : ByteArray) (pos rawSize : Nat) :
     (blockHeader out pos rawSize).size = out.size + 5 := by
   simp only [blockHeader, ByteArray.size_push]
 
+/-! ## The container layer — fully proved
+
+These reduce `encode` to its zlib stream. Everything outside the IDAT payload
+is a fixed 57 bytes, so the whole question is how big the stream is.
+-/
+
+theorem size_be32 (n : Nat) : (be32 n).size = 4 := by
+  simp only [be32, ByteArray.size_push]; rfl
+
+theorem size_chunk (t : String) (d : ByteArray) :
+    (chunk t d).size = 8 + t.toUTF8.size + d.size := by
+  simp only [chunk, ByteArray.size_append, size_be32]; omega
+
+/-- **Proved.** Whatever bound `C` holds for the zlib stream, `encode` is
+within `57 + C`. The 57 is signature 8, IHDR 25, IDAT length 4, IDAT type 4,
+IDAT CRC 4 and IEND 12.
+
+This is the half of the problem that does not involve a loop, and it is
+done. -/
+theorem encode_size_le' (w h : Nat) (rgba : ByteArray) (C : Nat)
+    (H : ∀ out : ByteArray, (zlibStoredRows out rgba (w * 4) h).size ≤ out.size + C) :
+    (encode w h rgba).size ≤ 57 + C := by
+  have hpure : ∀ x : ByteArray, ByteArray.size (pure x : Id ByteArray) = x.size :=
+    fun _ => rfl
+  simp only [encode, Id.run, hpure, ByteArray.size_append, size_be32, size_chunk]
+  have hb := H (ByteArray.emptyWithCapacity (8 + 25 + (12 + zlibLen (w * 4) h) + 12)
+      ++ signature ++ chunk "IHDR" (be32 w ++ be32 h ++ ⟨#[8,6,0,0,0]⟩)
+      ++ be32 (zlibLen (w * 4) h) ++ "IDAT".toUTF8)
+  simp only [ByteArray.size_append, size_be32, size_chunk] at hb
+  have e1 : signature.size = 8 := rfl
+  have e2 : (ByteArray.emptyWithCapacity (8 + 25 + (12 + zlibLen (w*4) h) + 12)).size = 0 := rfl
+  have e3 : "IDAT".toUTF8.size = 4 := rfl
+  have e4 : "IHDR".toUTF8.size = 4 := rfl
+  have e5 : (⟨#[8,6,0,0,0]⟩ : ByteArray).size = 5 := rfl
+  have e6 : "IEND".toUTF8.size = 4 := rfl
+  have e7 : ByteArray.empty.size = 0 := rfl
+  simp only [e1, e2, e3, e4, e5, e6, e7] at hb ⊢
+  omega
+
 /-! ## The target -/
 
 /-- `zlibStoredRows` appends at most `11 + 6 * raw` bytes, where
@@ -237,19 +279,25 @@ theorem zlibStoredRows_size_le (out rgba : ByteArray) (rowBytes h : Nat) :
           + 5 * (h * (rowBytes + 1) / 65535) := by
   sorry
 
-/-- The whole file is bounded by a function of the canvas dimensions: 73
-bytes of fixed overhead, plus `raw = 4*w*h + h` for the pixels themselves,
-plus one 5-byte block header per 65535 bytes.
+/-- The `ByteArray` that `encode` returns is bounded by a function of the
+canvas dimensions: 73 bytes of fixed overhead, plus `raw = 4*w*h + h` for the
+pixels themselves, plus one 5-byte block header per 65535 bytes.
 
 This is the statement that should look tautological, and does: `raw` is every
 pixel written exactly once, and everything else is sub-percent.
 
-Follows from `zlibStoredRows_size_le` by unfolding `encode`, whose other
-seven steps all append constants. -/
+**This is about the returned `ByteArray`, not about a file.** What the
+operating system does with those bytes is outside the model.
+
+No longer an independent hole: it now derives from `encode_size_le'` (proved)
+and `zlibStoredRows_size_le` (the one remaining `sorry`). -/
 theorem encode_size_le (w h : Nat) (rgba : ByteArray) :
     (encode w h rgba).size
       ≤ 73 + h * (w * 4 + 1) + 5 * (h * (w * 4 + 1) / 65535) := by
-  sorry
+  have := encode_size_le' w h rgba
+      (16 + h * (w * 4 + 1) + 5 * (h * (w * 4 + 1) / 65535))
+      (fun out => by have := zlibStoredRows_size_le out rgba (w * 4) h; omega)
+  omega
 
 /-- What the bound is for. `render` already rejects `w` or `h` above `maxDim`
 and `w * h` above `maxPixels` at runtime, and the bound above is monotone in
