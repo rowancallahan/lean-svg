@@ -1,4 +1,5 @@
 import MicroSvg.Xml
+import MicroSvg.Css
 import MicroSvg.Canvas
 
 /-!
@@ -775,38 +776,124 @@ def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
     height := (attr attrs "height").bind parseLengthAll,
     viewBox := vb }
 
-/-- Walk the event stream with a style stack. -/
+/-- Walk the event stream with a style stack.
+
+T29 adds CSS from `<style>` elements.  Every `<style>` in the document
+contributes, including ones after an element that uses their classes, so the
+stylesheet is collected in one pass over `events` *before* the main walk
+(`combinedCss`, gated on the element's `type` attribute being absent, empty,
+or `text/css`; multiple `<style>`s, and CDATA-vs-plain-text chunks within
+one, are simply concatenated in document order — CSS is whitespace
+insensitive at chunk boundaries so a separator byte is enough).  The main
+walk keeps a second stack, `elemStack`/`childCounts`, in exact lockstep with
+the existing `Style` stack (pushed/popped in the same three places: root,
+`g`, shape; left alone while `skip > 0`, same as `stack`) to build each
+element's ancestor `Css.ElemInfo` chain and its `:first-child` flag.
+
+`applyEffective` replaces the old `applyAttrs` call at all three sites with
+the four-layer cascade the task asks for: presentation attributes, then
+non-important CSS, then the `style=""` attribute, then `!important` CSS.
+`color` is still special-cased to resolve first — from whichever of the four
+layers wins — exactly as `applyAttrs` already did for its two layers, so
+`currentcolor` on `fill`/`stroke` never sees a stale value regardless of
+which layer sets `color`. -/
 def interpret (events : Array Xml.Event) : Except String Doc := do
+  let combinedCss : ByteArray := Id.run do
+    let mut out := ByteArray.empty
+    let mut curDepth : Nat := 0
+    let mut styleDepth : Option Nat := none
+    let mut styleOk := false
+    for ev in events do
+      match ev with
+      | .open_ name attrs =>
+        if styleDepth.isNone && name == "style" then
+          styleOk := match attr attrs "type" with
+            | none => true
+            | some v => let t := trim v; t.size == 0 || eqAsciiCI t "text/css"
+          styleDepth := some curDepth
+        curDepth := curDepth + 1
+      | .close =>
+        curDepth := curDepth - 1
+        if styleDepth == some curDepth then styleDepth := none
+      | .text bytes =>
+        if styleDepth.isSome && styleOk then out := (out ++ bytes).push 32
+    return out
+  let rules := Css.parseStylesheet combinedCss
+  let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
+    let styleDecls := match attr attrs "style" with
+      | some v => parseStyleDecls v
+      | none => #[]
+    let (normalCss, importantCss) := Css.matchingDeclsSplit rules chain
+    let lastNamed := fun (decls : Array (String × ByteArray)) (n : String) =>
+      (decls.filter (fun d => d.1 == n)).back?.map (·.2)
+    let colorVal : Option ByteArray :=
+      match lastNamed importantCss "color" with
+      | some v => some v
+      | none =>
+        match styleDecls.findSome? (fun (n, val) => if n == "color" then some val else none) with
+        | some v => some v
+        | none =>
+          match lastNamed normalCss "color" with
+          | some v => some v
+          | none => attr attrs "color"
+    let base := match colorVal with
+      | some v => applyProp parent "color" v
+      | none => parent
+    let skipName (n : String) := n == "style" || n == "color"
+    let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
+    let afterNormalCss := normalCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterAttrs
+    let afterStyle := styleDecls.foldl (fun st (n, val) => if n == "color" then st else applyProp st n val) afterNormalCss
+    importantCss.foldl (fun st (n, v) => if n == "color" then st else applyProp st n v) afterStyle
   let mut stack : Array Style := #[]
+  let mut elemStack : Array Css.ElemInfo := #[]
+  let mut childCounts : Array Nat := #[]
   let mut skip : Nat := 0
   let mut shapes : Array Shape := #[]
   let mut root : Option RootInfo := none
   for ev in events do
     match ev with
+    | .text _ => pure ()
     | .close =>
-      if skip > 0 then skip := skip - 1 else stack := stack.pop
+      if skip > 0 then skip := skip - 1
+      else
+        stack := stack.pop
+        elemStack := elemStack.pop
+        childCounts := childCounts.pop
     | .open_ name attrs =>
       if skip > 0 then
         skip := skip + 1
       else
+        let isFirst := childCounts.back?.getD 0 == 0
+        childCounts := match childCounts.back? with
+          | some c => childCounts.pop.push (c + 1)
+          | none => childCounts
+        let elemInfo := Css.buildElemInfo name (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let chain := elemStack.push elemInfo
         let parent := stack.back?.getD default
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
           root := some (parseRoot attrs)
-          stack := stack.push (applyAttrs default attrs)
+          stack := stack.push (applyEffective default attrs chain)
+          elemStack := chain
+          childCounts := childCounts.push 0
         | some _ =>
           if name == "g" then
             if isDisplayNone attrs then skip := 1
-            else stack := stack.push (applyAttrs parent attrs)
+            else
+              stack := stack.push (applyEffective parent attrs chain)
+              elemStack := chain
+              childCounts := childCounts.push 0
           else if isShape name then
             if isDisplayNone attrs then skip := 1
             else
-              let st := applyAttrs parent attrs
+              let st := applyEffective parent attrs chain
               match shapeCmds name attrs with
               | some cmds => if st.visible && cmds.size > 0 then shapes := shapes.push ⟨cmds, st⟩
               | none => pure ()
               stack := stack.push st
+              elemStack := chain
+              childCounts := childCounts.push 0
           else
             skip := 1
   match root with

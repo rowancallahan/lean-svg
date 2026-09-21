@@ -30,6 +30,12 @@ deriving Inhabited
 inductive Event where
   | open_ (name : String) (attrs : Array Attr)
   | close
+  /-- Character data between tags, or the contents of a `<![CDATA[ ... ]]>`
+  section.  Added for `<style>` (T29): its CSS text has to reach `interpret`
+  somehow, and neither plain text nor CDATA was delivered as an event before.
+  Every other consumer of `Event` simply ignores this constructor, so nothing
+  about existing element/attribute handling changes. -/
+  | text (bytes : ByteArray)
 deriving Inhabited
 
 def maxDepth : Nat := 64
@@ -84,6 +90,51 @@ def decodeValue (bs : ByteArray) (b e : Nat) : Except String ByteArray := do
       i := i + 1
   return out
 
+/-- Decode text content leniently: the five predefined entities and numeric
+character references are expanded, exactly like `decodeValue`, but anything
+that does not fit that grammar (an unknown entity, or a malformed or
+unterminated one) is copied through verbatim instead of failing the parse.
+
+Element text was never inspected at all before T29 (see the module doc), so
+making it strict here — reusing `decodeValue` — would turn documents that
+used to parse (any stray `&` in a `<title>`/`<desc>`/etc. text run, never
+checked before) into parse failures.  Being lenient keeps `<style>` CSS text
+decoding real entities while leaving every other element's rendering
+byte-for-byte unaffected. -/
+def decodeText (bs : ByteArray) (b e : Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity (e - b)
+  let mut i := b
+  for _ in [b:e] do
+    if i ≥ e then break
+    let c := at' bs i
+    if c == 38 then
+      let semi := findByte bs (i + 1) 59
+      if semi ≥ e then
+        out := out ++ bs.extract i e
+        i := e
+      else
+        let name := bs.extract (i + 1) semi
+        if eqAscii name "lt" then out := out.push 60; i := semi + 1
+        else if eqAscii name "gt" then out := out.push 62; i := semi + 1
+        else if eqAscii name "amp" then out := out.push 38; i := semi + 1
+        else if eqAscii name "quot" then out := out.push 34; i := semi + 1
+        else if eqAscii name "apos" then out := out.push 39; i := semi + 1
+        else if at' name 0 == 35 then
+          match parseCharRef name with
+          | .ok cp =>
+            out := out ++ (Char.ofNat cp).toString.toUTF8
+            i := semi + 1
+          | .error _ =>
+            out := out.push c
+            i := i + 1
+        else
+          out := out.push c
+          i := i + 1
+    else
+      out := out.push c
+      i := i + 1
+  return out
+
 /-- Parse a document into events.  Fails on anything outside the accepted subset. -/
 def parse (bs : ByteArray) : Except String (Array Event) := do
   let mut events : Array Event := #[]
@@ -91,7 +142,11 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
   let mut i := if at' bs 0 == 0xEF && at' bs 1 == 0xBB && at' bs 2 == 0xBF then 3 else 0
   let mut count := 0
   for _ in [0:bs.size + 1] do
+    let textStart := i
     i := findByte bs i 60
+    if textStart < i then
+      let txt := decodeText bs textStart i
+      if txt.size > 0 then events := events.push (.text txt)
     if i ≥ bs.size then break
     if startsWith bs i "<?" then
       let e := findSeq bs (i + 2) "?>"
@@ -104,6 +159,7 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
     else if startsWith bs i "<![CDATA[" then
       let e := findSeq bs (i + 9) "]]>"
       if e ≥ bs.size then throw "unterminated CDATA section"
+      events := events.push (.text (bs.extract (i + 9) e))
       i := e + 3
     else if startsWith bs i "<!DOCTYPE" || startsWith bs i "<!doctype" then
       let mut j := i + 9
@@ -179,7 +235,11 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
       else stack := stack.push name
       i := j
   if stack.size != 0 then throw s!"unclosed element <{stack.back?.getD ""}>"
-  if events.isEmpty then throw "no elements found"
+  -- `count` (not `events.isEmpty`): a tagless document now produces a single
+  -- `.text` event (T29 delivers text so `<style>` content is reachable), so
+  -- emptiness has to mean "no elements", exactly as before that event
+  -- existed, not "no events at all".
+  if count == 0 then throw "no elements found"
   return events
 
 end Xml

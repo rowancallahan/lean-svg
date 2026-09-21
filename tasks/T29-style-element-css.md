@@ -79,3 +79,116 @@ per-level child counter).
 - Commit on the branch (`-c user.name="Rowan Callahan" -c user.email="rowan.l.callahan@gmail.com"`,
   message ending `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
   Append `## Report`.
+
+## Report
+
+Branch was rebased (fast-forward, no conflicts — it had no commits of its own
+yet) onto main at `ba299cc` before starting, since main had advanced with
+T16/T23/T24a/T24b/T30 while this task was queued; `tests/svg/*.svg` is now 23
+files and `tests/corpora` (gitignored, symlinked to the shared clone for the
+corpora runs below) is intentionally left out of the commit.
+
+Files changed:
+- `MicroSvg/Css.lean` (new) — the whole `simplecss`-subset parser and
+  matcher: `parseStylesheet`, `«matches»` (named with guillemets — `matches`
+  is a reserved term-level keyword in Lean 4, `e matches pat`, so the spec's
+  exact name can only be spelled that way), `resolve`, `matchingDeclsSplit`,
+  `buildElemInfo`, and the `ElemInfo`/`Rule`/`Selector`/`Compound`/`Decl`
+  structures, all `deriving Repr, BEq` (added `deriving instance Repr for
+  ByteArray` at the top — core Lean has no `Repr ByteArray`, needed for any
+  struct with a `ByteArray` field to derive `Repr`). Selector matching is a
+  bounded DP over (component index × chain index), not the backtracking
+  recursion `simplecss` itself uses, so there is no recursion anywhere in the
+  module — every function is `for` loops over a range fixed before the loop
+  starts. Deviations from `simplecss`'s exact grammar, each because the task
+  says "unsupported ⇒ never matches, still total": `^=`/`$=`/`*=` aren't in
+  `simplecss::AttributeOperator` (only `Exists`/`Matches`/`Contains`/
+  `StartsWith` exist) so they parse structurally but never match; `+`
+  (adjacent-sibling) is real in `simplecss` but our match `chain` carries no
+  sibling links (ancestors + self only), so it can never be evaluated and
+  never matches either. `class` splitting uses general whitespace
+  (`Char.isWhitespace`) per the task's explicit instruction, not
+  `simplecss`'s own narrower "split on literal space" quirk.
+- `MicroSvg.lean` — one import line for `MicroSvg.Css`.
+- `MicroSvg/Xml.lean` — **had to touch it, and for more than CDATA.**
+  Checked first as instructed: neither CDATA nor plain element text was
+  delivered as an event at all (`Event` had only `open_`/`close`; the main
+  scan loop jumped straight from one `<` to the next via `findByte`, never
+  looking at what was skipped over). Since real-world `<style>` content is
+  almost always plain text, not CDATA, CDATA-only support would have fixed
+  only the one corpus file that happens to wrap its CSS in
+  `<![CDATA[...]]>`. Added one `Event.text (bytes : ByteArray)` constructor
+  and a new total `decodeText` (bounded scan, entities decoded like
+  `decodeValue` but never throws — an unknown or malformed entity is copied
+  through verbatim instead of failing the parse) used for text between tags;
+  CDATA payloads are pushed as `.text` verbatim, no entity decoding, per XML
+  CDATA semantics. `decodeText` is deliberately lenient (unlike the existing
+  strict `decodeValue` for attributes) specifically so this change cannot
+  turn a document that used to parse into one that doesn't — text was never
+  inspected before, so any stray unescaped `&` sitting in a `<title>`/`<desc>`
+  run must keep parsing exactly as before. One more line had to change for
+  the same reason: `if events.isEmpty then throw "no elements found"` now
+  reads `if count == 0 ...` (element count, already tracked) — a tagless
+  document (e.g. the `random_bytes.bin` adversarial case, which happens to
+  contain zero `<` bytes) now produces one `.text` event, so `events.isEmpty`
+  stopped meaning "no elements"; caught by the direct binary diff below and
+  fixed before it could count as a behaviour change.
+- `MicroSvg/Svg.lean` — only `interpret` (plus its `import`) touched, exactly
+  as scoped; `applyAttrs`, `applyProp`, `Style`, `parsePaint`, `namedColors`,
+  `parsePathData` are all byte-identical to main. `interpret` now: (1) a
+  pre-pass over `events` (`combinedCss`) collecting every `<style>`'s text —
+  CDATA and plain-text chunks concatenated in document order, gated on
+  `type` being absent/empty/`text/css` — *before* the main walk, so a
+  `<style>` after the elements using its classes still applies
+  (`style-after-usage.svg`); (2) a second stack, `elemStack`/`childCounts`,
+  pushed/popped in exact lockstep with the existing `Style` stack at all
+  three sites (root/`g`/shape; left alone under `skip`) to build each
+  element's `Css.ElemInfo` ancestor chain and `:first-child` flag; (3) the
+  `applyAttrs parent attrs` call at those three sites replaced by a local
+  `applyEffective` closure implementing the four-layer cascade (presentation
+  attributes → non-important CSS → `style=""` → `!important` CSS), with
+  `color` still resolved first from whichever of the four layers wins, the
+  same special-casing `applyAttrs` already did for its two layers, so
+  `currentcolor` never sees a stale value.
+- `tests/CssTests.lean` (new) — 38 `#guard` checks (≥ 15 required): comment
+  removal (incl. unterminated-comment-drops-rest-of-sheet), `@media`/`@import`
+  skipping, all four attribute operators plus exists/type/universal/id/class,
+  `^=` (unsupported, never matches), `:first-child` and an unsupported
+  pseudo-class, descendant/child/adjacent-sibling (never matches) combinators,
+  specificity ordering, source-order tie-break, `!important` (incl. the
+  case-sensitive keyword), and malformed input (empty sheet, unclosed
+  declaration block, unterminated string in an attribute selector, 1 MB of
+  `{`, 50 000 nested `{`). `lake env lean tests/CssTests.lean` prints nothing.
+- `tests/adversarial/style_nested_braces.svg` and
+  `tests/adversarial/style_huge_selector_list.svg` (new, checked in) — a
+  `<style>` whose whole body is 50 000 `{`, and a `<style>` with a ~2 MB
+  comma-separated selector list (`.a,.a,...`); both render in well under a
+  second.
+
+Before/after, `python3 tests/run_corpora.py --fast --no-worst --corpus resvg
+--route direct`:
+- `structure/style`: **5/16 → 16/16** (target was ≥ 13/16). No remaining
+  failures.
+- `structure/style-attribute`: **3/4 → 3/4** (target: not below 3/4). One
+  remaining failure, unchanged by this task: `comments.svg` —
+  `style="/*text*/fill:green/*text*/"` — the pre-existing `style=""`
+  attribute-value parser (`parseStyleDecls`, off-limits/untouched here, not a
+  `<style>`-element concern) doesn't strip CSS comments, so it reads the
+  property name as `/*text*/fill` instead of `fill`; failing before this
+  task too.
+
+`python3 tests/run_tests.py`: 19/23 both before and after (identical
+exact/mean_abs/max_d per file — the 4 pre-existing failures are unrelated
+geometry-fidelity gaps, not touched). Additionally built main's binary
+(`ba299cc`) alongside this branch's and diffed PNG bytes directly for all 23
+`tests/svg/*.svg` files at natural size and `--width 800` (46 renders): **0
+mismatches** — confirmed byte-identical, not just equal-scoring.
+
+`python3 tests/run_adversarial.py`: 40/40 clean before, **42/42 clean**
+after adding the two new cases (both render in single-digit/tens of ms).
+`git diff main -- MicroSvg/Effect.lean`: empty.
+
+`lake build`: clean, no errors, no new warnings (checked with `lake clean &&
+lake build` for a full recompile, not just an incremental one).
+
+Nothing from the spec was left undone.
