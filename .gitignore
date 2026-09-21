@@ -1,9 +1,11 @@
-.lake/
-tests/out/
-*.olean
+
 *.ilean
+*.olean
 *.trace
-__pycache__/
 .DS_Store
+.lake/
 .worktrees/
+__pycache__/
+learn/hello-effects/.lake/
 tests/corpora/
+tests/out/

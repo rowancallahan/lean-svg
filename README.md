@@ -47,6 +47,10 @@ python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
 
 ## Read next
 
+- `SPEC.md` — every claim in English beside its Lean form, and an explicit list
+  of what is *not* proven.
+- `learn/` — a standalone hello-world project that builds the effect monad from
+  scratch, with an exercise: prove no-clobber yourself.
 - `DESIGN.md` — what is proven, what is trusted, threat model, algorithms.
 - `PLAN.md` — milestones, settled decisions, what to delegate.
 

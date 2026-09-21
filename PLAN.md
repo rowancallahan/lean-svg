@@ -73,7 +73,23 @@ Approach (decided):
 
 ## M3b — Stronger effect theorems  [design → Opus for the proofs; future]
 
-Requested 2026-09-20, not started. Statements to add to `Effect.lean`:
+Requested 2026-09-20, not started. Statements to add to `Effect.lean`.
+**Priority set 2026-09-21: no-clobber (1) is the next one to do**, because it
+subsumes the distinct-paths requirement below.
+
+0. **Input and output paths must differ.** Today nothing stops
+   `lean-svg in.svg in.svg`: the program reads the file and then overwrites
+   it. `runFS_frame` is still true, because the output path is the one path
+   allowed to change, so the theorem is honest but protects less than
+   "only touches the two paths given" suggests. Two ways to fix it, and
+   no-clobber is the better one:
+   - cheap: reject `inp = out` in `Main.lean` before running the program,
+     and state it as a theorem about the argument parser rather than the
+     effect layer;
+   - better: **no-clobber** (1) makes it impossible to overwrite *any*
+     existing file, which covers this case and every other one. Do that
+     instead, and keep the cheap check only if it gives a clearer error.
+
 
 1. **No-clobber.** The program only writes the output path if that path did
    not exist when the program started. Model: `FS := String → Option ByteArray`
