@@ -73,20 +73,24 @@ def urlpath(path_str):
 # --------------------------------------------------------------------------
 
 
-def run_harness(args, run_dir, renders_dir, routes):
+def run_harness(args, run_dir, renders_dir, routes, jobs):
     csvs = [run_dir / ("resvg_%s.csv" % r) for r in routes]
     if args.reuse and all(p.is_file() for p in csvs) and renders_dir.is_dir():
         print("-- --reuse: found %s, skipping run_corpora.py" % run_dir)
         return None
     cmd = [
         sys.executable, str(REPO / "tests" / "run_corpora.py"),
-        "--fast", "--no-worst",
+        "--no-worst",
         "--corpus", CORPUS, "--route", args.route,
         "--keep-renders", str(renders_dir),
         "--out", str(run_dir),
         "--bin", args.bin,
         "--tol", str(args.tol), "--threshold", str(args.threshold),
     ]
+    if args.render_width is None:
+        cmd.append("--fast")
+    else:
+        cmd += ["--width", str(args.render_width), "--jobs", str(jobs)]
     print("-- running: %s" % " ".join(cmd), flush=True)
     start = time.perf_counter()
     subprocess.run(cmd, check=True)
@@ -465,6 +469,12 @@ def main():
     ap.add_argument("--width", type=int, default=150,
                      help="thumbnail CSS display width in px (default 150); "
                           "does not change the render resolution")
+    ap.add_argument("--render-width", type=int, default=None,
+                     help="render the corpus at this width instead of the "
+                          "harness's --fast width (thin features vanish at "
+                          "the default 100px); passed to run_corpora.py's "
+                          "--width, without --fast. Default: unset, same "
+                          "--fast behaviour as before")
     ap.add_argument("--route", choices=["direct", "usvg", "both"], default="both",
                      help="which route(s) to run/show (default both)")
     ap.add_argument("--reuse", action="store_true",
@@ -488,7 +498,7 @@ def main():
     jobs = args.jobs or (os.cpu_count() or 4)
 
     grand_start = time.perf_counter()
-    harness_elapsed = run_harness(args, run_dir, renders_dir, routes)
+    harness_elapsed = run_harness(args, run_dir, renders_dir, routes, jobs)
 
     rows_by_route = read_rows(run_dir, routes)
     total_rows = sum(len(v) for v in rows_by_route.values())

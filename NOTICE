@@ -1,0 +1,47 @@
+lean-svg (currently packaged as "microsvg")
+Copyright 2026 Rowan Callahan
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project contains ports of algorithms from, and was verified against,
+the following works. Their licences and notices apply to the corresponding
+material.
+
+tiny-skia — https://github.com/linebender/tiny-skia
+  Copyright (c) 2020 Yevhenii Reizner. BSD-3-Clause.
+  Itself a port of parts of Skia, Copyright (c) 2011 Google Inc., BSD-3-Clause.
+  The anti-aliased scan converter (supersampling, coverage accumulation),
+  hairline stroking, cubic and quadratic subdivision counts, the dash
+  splitting rules, the lowp blend arithmetic and the gradient evaluation in
+  this project are fixed-point Lean re-implementations of tiny-skia's
+  algorithms (MicroSvg/Raster.lean, Geom.lean, Canvas.lean, Shader.lean).
+
+resvg and usvg — https://github.com/linebender/resvg
+  Copyright (c) 2017 Yevhenii Reizner. MPL-2.0.
+  Used as the rendering oracle in the test harness and as the reference for
+  SVG semantics (parsing defaults, conditional processing, CSS cascade,
+  paint servers, text layout). No resvg or usvg source code is included in
+  this project; behaviour was matched by reading it. The resvg test suite is
+  used locally for fidelity measurement and is not distributed here.
+
+simplecss — https://github.com/linebender/simplecss
+  Copyright (c) 2019 Yevhenii Reizner. MIT/Apache-2.0.
+  The supported CSS selector subset in MicroSvg/Css.lean follows its grammar.
+
+svgtypes — https://github.com/linebender/svgtypes
+  Copyright (c) 2018 Yevhenii Reizner. MIT/Apache-2.0.
+  Colour, length and transform parsing rules follow its behaviour.
+
+Noto Sans — https://github.com/notofonts/latin-greek-cyrillic
+  Copyright 2022 The Noto Project Authors. SIL Open Font License 1.1
+  (MicroSvg/Fonts/LICENSE-OFL.txt). Latin subsets of Noto Sans Regular,
+  Bold and Italic are embedded in the binary as MicroSvg/Fonts/*.lean.
+
+lean-zip — https://github.com/kim-em/lean-zip
+  Copyright Kim Morrison. Apache-2.0. The "one input, one output, proven
+  effect boundary" project shape follows its example; no code is shared.
+
+Test corpora used locally and not distributed: simple-icons (CC0-1.0),
+Feather icons (MIT), resvg test suite (MPL-2.0).
+
+Lean 4 and Lake — https://github.com/leanprover/lean4, Apache-2.0.
