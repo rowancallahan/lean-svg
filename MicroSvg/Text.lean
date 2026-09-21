@@ -541,8 +541,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
     let mut y : Int := 0
     for q in [0:cl.size] do
       let c := cl.getD q default
-      let i := rend.getD (a + q) 0
-      let p := pos.getD i {}
+      -- usvg indexes `dx`/`dy`/`rotate` by the character's position among the
+      -- *rendered* characters (`layout.rs` accumulates `char_offset` from the
+      -- chunks' own text, which never contains a hidden span's characters),
+      -- while chunk starts and `x`/`y` use the position among *all*
+      -- characters.  `rotate-and-display-none.svg` pins this down.
+      let p := pos.getD (a + q) {}
       x := x + p.dx * 256
       y := y + p.dy * 256
       if !c.dropped then
