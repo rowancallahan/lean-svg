@@ -7,3 +7,6 @@ __pycache__/
 .DS_Store
 .worktrees/
 tests/corpora/
+# the Pages site is generated, never committed: the workflow uploads it as the
+# Pages artifact instead
+site/_build/

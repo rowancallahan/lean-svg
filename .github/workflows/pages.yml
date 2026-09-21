@@ -1,0 +1,114 @@
+name: Pages
+
+# Push to main and manual runs only. There is deliberately no pull_request
+# trigger: a fork's PR must never run this workflow, which holds the Pages
+# deployment token.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  RESVG_VERSION: "0.48.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record start time
+        run: echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Cache elan and the pinned toolchain
+        id: elan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Install elan
+        if: steps.elan-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            -o elan-init.sh && \
+          sh elan-init.sh -y --default-toolchain "$(cat lean-toolchain)"
+
+      - name: Put elan on PATH
+        run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache the Lake build
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', '**/*.lean') }}
+          restore-keys: |
+            lake-${{ runner.os }}-
+
+      - name: Build the renderer
+        run: |
+          lean --version && \
+          lake build
+
+      - name: Cache the resvg oracle
+        id: resvg-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/resvg
+          key: resvg-${{ runner.os }}-${{ env.RESVG_VERSION }}
+
+      - name: Install resvg
+        if: steps.resvg-cache.outputs.cache-hit != 'true'
+        run: cargo install resvg --version "$RESVG_VERSION"
+
+      - name: Clone the resvg test suite
+        run: |
+          git clone --depth 1 https://github.com/linebender/resvg "$RUNNER_TEMP/resvg" && \
+          mkdir -p tests/corpora && \
+          ln -s "$RUNNER_TEMP/resvg/crates/resvg/tests" tests/corpora/resvg-test-suite && \
+          ls tests/corpora/resvg-test-suite/tests >/dev/null
+
+      - name: Python dependencies
+        run: python3 -m pip install --upgrade numpy pillow
+
+      - name: Generate the site
+        run: |
+          resvg --version && \
+          python3 site/gen_site.py --out site/_build
+
+      - name: Report timings and size
+        run: |
+          {
+            echo "### Pages build"
+            echo ""
+            echo "- wall clock: $(( $(date +%s) - STARTED ))s"
+            echo "- elan cache hit: ${{ steps.elan-cache.outputs.cache-hit || 'false' }}"
+            echo "- resvg cache hit: ${{ steps.resvg-cache.outputs.cache-hit || 'false' }}"
+            echo "- artifact: $(du -sh --apparent-size site/_build | cut -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Drop the generator's work directory
+        run: rm -rf site/_build/_work
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/_build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

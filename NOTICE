@@ -17,12 +17,17 @@ tiny-skia — https://github.com/linebender/tiny-skia
   algorithms (LeanSvg/Raster.lean, Geom.lean, Canvas.lean, Shader.lean).
 
 resvg and usvg — https://github.com/linebender/resvg
-  Copyright (c) 2017 Yevhenii Reizner. MPL-2.0.
+  Copyright (c) 2017 Yevhenii Reizner. Apache-2.0 OR MIT (MPL-2.0 up to
+  version 0.44; relicensed in 0.45.0 — resvg#838). The version used and read
+  here is 0.48.1.
   Used as the rendering oracle in the test harness and as the reference for
   SVG semantics (parsing defaults, conditional processing, CSS cascade,
   paint servers, text layout). No resvg or usvg source code is included in
-  this project; behaviour was matched by reading it. The resvg test suite is
-  used locally for fidelity measurement and is not distributed here.
+  this project; behaviour was matched by reading it. The resvg test suite
+  lives in that repository and carries the same licence; it is used locally
+  for fidelity measurement and is republished, unmodified, only by the
+  generated GitHub Pages site (site/, never committed), which ships both
+  licence texts and credits the suite on every page.
 
 simplecss — https://github.com/linebender/simplecss
   Copyright (c) 2019 Yevhenii Reizner. MIT/Apache-2.0.
@@ -46,12 +51,17 @@ lean-zip — https://github.com/kim-em/lean-zip
   effect boundary" project shape follows its example; no code is shared.
 
 Used only when running the tests, cloned locally and not distributed with
-this project: the resvg binary as the rendering oracle (MPL-2.0), the resvg
-test suite (MPL-2.0), simple-icons (CC0-1.0), Feather icons (MIT), Pillow
-(MIT-CMU), NumPy (BSD-3-Clause), fontTools (MIT). If a published page or
-release ever includes renders derived from the resvg test suite, that
-material is MPL-2.0 and must carry the suite's licence and state that the
-files are unmodified.
+this project: the resvg binary as the rendering oracle (Apache-2.0 OR MIT),
+the resvg test suite (Apache-2.0 OR MIT) and its bundled fonts, used to pin
+the oracle's font set (Amiri, M PLUS 1p, Noto Sans/Serif/Mono/Devanagari/
+Malayalam/Znamenny, Roboto Flex, Sedgwick Ave Display, Source Sans Pro: SIL
+OFL 1.1; CFF-and-SBIX, Noto Color Emoji CBDT, Yellowtail: Apache-2.0; Twitter
+Color Emoji: MIT), simple-icons (CC0-1.0), Feather icons (MIT), Pillow
+(MIT-CMU), NumPy (BSD-3-Clause), fontTools (MIT). The generated GitHub Pages
+site additionally uses actions/checkout, actions/cache,
+actions/upload-pages-artifact and actions/deploy-pages (MIT), and republishes
+the suite's SVG files unmodified under Apache-2.0 OR MIT with both licence
+texts included; no font file is redistributed by it.
 
 README.md has the same credits in full, with links.
 

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}} — lean-svg</title>
+<meta name="description" content="lean-svg: an SVG renderer written in Lean 4, measured against resvg.">
+<link rel="stylesheet" href="assets/site.css">
+<!-- inline so the page asks for nothing it does not ship -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231d3557'/%3E%3Cpath d='M4 4v8h8' fill='none' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="site">
+  <a class="brand" href="index.html">lean-svg</a>
+  <nav>{{nav}}</nav>
+  <a class="repo" href="{{repo}}">source on GitHub</a>
+</header>
+
+<main>
+{{body}}
+</main>
+
+<footer class="site">
+  <p>
+    <strong>lean-svg</strong> is Apache-2.0
+    (<a href="licenses/LICENSE.txt">licence</a>,
+    <a href="licenses/NOTICE.txt">NOTICE</a>).
+    Reference renderings by <a href="https://github.com/linebender/resvg">resvg 0.48.1</a>
+    and the SVG files in the gallery are from the resvg test suite, republished unmodified
+    under <code>Apache-2.0 OR MIT</code>.
+    The embedded Noto Sans faces are <a href="licenses/LICENSE-OFL.txt">SIL OFL 1.1</a>.
+    Algorithms ported from tiny-skia (BSD-3-Clause, itself a port of Skia, BSD-3-Clause,
+    Google). Lean 4 and Lake are Apache-2.0.
+    <a href="licensing.html"><strong>Full licensing</strong></a>.
+  </p>
+  <p class="muted">
+    Generated {{generated}} from
+    <a href="{{repo}}/commit/{{commit}}"><code>{{commit_short}}</code></a>
+    &middot; oracle <code>{{resvg}}</code>
+    &middot; corpus rendered at {{width}} px
+    &middot; <a href="{{repo}}">{{repo}}</a>
+  </p>
+</footer>
+{{scripts}}
+</body>
+</html>
