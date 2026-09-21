@@ -380,6 +380,50 @@ def ctrlBoxMeets (ctm : Mat) (cmds : Array PathCmd) (lox loy hix hiy : Fx) : Boo
     | none => pure ()
   return false
 
+/-- The device-space bounding box of `cmds`' control points: the same box
+`ctrlBoxMeets` builds, without the early exit, and `none` for a path that
+contributes no point at all.
+
+It is a superset of the flattened path's own box (a Bézier lies inside the hull
+of its control points) up to the floors `ctrlBoxMeets` documents, which is what
+makes it usable as a layer's allocation rectangle: a layer larger than the ink
+inside it only adds transparent pixels, and those composite as a no-op in every
+blend mode, while a layer that is too small would clip. -/
+def ctrlBox (ctm : Mat) (cmds : Array PathCmd) : Option Box := Id.run do
+  let mut b : Option Box := none
+  let mut empty := true
+  let mut pt : Pt := ⟨0, 0⟩
+  let mut start : Pt := ⟨0, 0⟩
+  for c in cmds do
+    match c with
+    | .moveTo p =>
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      start := p
+      empty := false
+    | .lineTo p =>
+      if empty then b := Box.cover b (ctm.apply pt)
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      empty := false
+    | .cubicTo c1 c2 p =>
+      if empty then b := Box.cover b (ctm.apply pt)
+      b := Box.cover b (ctm.apply c1)
+      b := Box.cover b (ctm.apply c2)
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      empty := false
+    | .quadTo c p =>
+      if empty then b := Box.cover b (ctm.apply pt)
+      b := Box.cover b (ctm.apply c)
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      empty := false
+    | .close =>
+      pt := start
+      empty := true
+  return b
+
 /-! ## Stroking
 
 A stroke is converted to **one closed outline per subpath** and filled with the

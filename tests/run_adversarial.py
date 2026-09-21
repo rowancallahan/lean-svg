@@ -70,6 +70,67 @@ def generate_cases():
     write_text("deep_nesting_200.svg", nested(200))
     write_text("deep_nesting_60.svg", nested(60))
 
+    # --- T22 compositing layers -------------------------------------------
+    # Every one of these asks for far more layers than the renderer will
+    # allocate; each must be answered with a clean exit, never a crash, a hang
+    # or an out-of-memory.
+
+    def nested_layers(depth, head, body):
+        return (
+            head
+            + '<g opacity="0.5">' * depth
+            + body
+            + "</g>" * depth
+            + "\n</svg>\n"
+        )
+
+    # 100k nested groups, each asking for its own layer. The XML parser's depth
+    # cap (Xml.maxDepth = 64) rejects this long before any layer is allocated.
+    write_text(
+        "layers_nested_100k.svg",
+        nested_layers(
+            100_000,
+            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n',
+            '<rect x="10" y="10" width="180" height="180" fill="#3366cc"/>',
+        ),
+    )
+
+    # A group opacity on a 16384x16384 canvas: the canvas itself is 268 Mpx,
+    # over the 16 Mpx area cap, so this is rejected before a layer is sized.
+    write_text(
+        "layers_huge_canvas.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16384" height="16384">\n'
+        '<g opacity="0.5"><rect x="0" y="0" width="16384" height="16384" '
+        'fill="#3366cc"/></g>\n</svg>\n',
+    )
+
+    # Nested full-canvas layers on a canvas that is exactly at the area cap:
+    # this is the case that reaches Render.maxLayerPixels (4x maxPixels) and
+    # must come back as the "layer budget" error rather than allocating 5
+    # canvases of 16 Mpx.
+    write_text(
+        "layers_budget.svg",
+        nested_layers(
+            6,
+            '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="4096">\n',
+            '<rect x="0" y="0" width="4096" height="4096" fill="#3366cc"/>',
+        ),
+    )
+
+    # 10 000 sibling layers: bounded depth, unbounded count. Only one layer is
+    # live at a time, so this must render rather than hit the budget.
+    write_text(
+        "layers_siblings_10k.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n'
+        + "\n".join(
+            '<g opacity="0.5" style="mix-blend-mode:multiply">'
+            '<rect x="%d" y="%d" width="12" height="12" fill="#204080"/></g>'
+            % (i % 190, (i // 190) % 190)
+            for i in range(10_000)
+        )
+        + "\n</svg>\n",
+    )
+
     # 300k tiny rects: large but legitimate input.
     rects = [
         '<rect x="%d" y="%d" width="1" height="1" fill="#204080"/>'

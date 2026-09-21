@@ -59,11 +59,13 @@ That is inherent to rendering; cap with `--width` or lower `Xml.maxElements`.
 ## 3. Pipeline
 
 ```
-ByteArray ──Xml.parse──▶ Array Event ──Svg.interpret──▶ Doc (root info, Array Shape)
+ByteArray ──Xml.parse──▶ Array Event ──Svg.interpret──▶ Doc (root info, Array Node)
    │                                                       │
    │        Render.canvasSetup: size, viewBox transform, zoom
    ▼                                                       ▼
- for each Shape: flatten (user space) ──▶ [fill] map ctm ──▶ Raster.rasterize ──▶ Canvas.fillMask
+ for each Node: groupBegin ──▶ push a layer canvas (§3.9)
+                groupEnd   ──▶ Canvas.compositeLayer (opacity, blend mode)
+                shape: flatten (user space) ──▶ [fill] map ctm ──▶ Raster.rasterize ──▶ Canvas.fillMask
                                        └▶ [stroke] strokePoly ──▶ map ctm ──▶ rasterize ──▶ fillMask
                                                                                    │
                                                               Canvas.toRgbaBytes ──▶ Png.encode ──▶ ByteArray
@@ -106,8 +108,11 @@ This is a superset of usvg's *micro SVG* output (`svg g path` with absolute
 `M L C Z` and `matrix()` transforms), so any full SVG can be pre-processed
 with `usvg` and rendered here; text becomes paths on the way.
 
-Known deviations: group opacity is multiplied into children (wrong when
-children overlap); no dashes; nested `<svg>` skipped; `rx`/`ry` handled.
+Also `opacity`, `mix-blend-mode` and `isolation`, which make an element a
+compositing layer (§3.9).
+
+Known deviations: nested `<svg>` skipped; `color-dodge` and `color-burn` are
+within two levels of resvg rather than exact (§3.9).
 
 ### 3.4 Flattening
 
@@ -178,7 +183,8 @@ non-uniform scales stroke correctly.
 ### 3.7 Compositing and PNG
 
 Canvas: premultiplied RGBA8 packed into one `Nat` per pixel. Source-over with
-`div255(x) = (x + 127) / 255`. Output: straight alpha, 8-bit RGBA, filter 0,
+`div255(x) = (x + 127) / 255`; the sixteen CSS blend modes are §3.9.
+Output: straight alpha, 8-bit RGBA, filter 0,
 zlib stream of stored DEFLATE blocks, CRC-32 and Adler-32 computed in Lean.
 PNG size is therefore a closed-form function of `(w, h)`; see PLAN M3.
 
@@ -202,6 +208,58 @@ render gets that from the canvas bounds, but a tile's canvas is the tile, so
 `--viewport` that window is the whole canvas and `clipMask` returns the mask
 untouched, so the ordinary path is unchanged, byte for byte.
 
+### 3.9 Compositing layers
+
+An element with `opacity < 1`, a `mix-blend-mode` other than `normal`, or
+`isolation: isolate` is a *layer*: usvg's `Group::should_isolate`. Its subtree
+renders into a fresh transparent canvas, which is then composited onto its
+parent with the group opacity and the blend mode. `interpret` marks this by
+bracketing the subtree with `groupBegin`/`groupEnd` nodes instead of folding the
+opacity into the children's paint, which is what makes overlapping children
+correct. A document with none of the three emits no such node and its pixels are
+unchanged, byte for byte.
+
+This applies to shapes too, not only containers: usvg wraps every graphic
+element that carries one of these properties in its own group, so
+`<rect opacity="0.5"/>` is a one-child layer rather than a paint-alpha
+shortcut, and matching that is what took `07_opacity` from 96.7% to 100.0%
+within 8 (§4).
+
+The layer's rectangle is the union of its subtree's device control-point boxes,
+widened exactly as `shapeOnCanvas` widens its culling box and then by resvg's
+two further pixels, intersected with the canvas. Larger than the ink is safe
+(a transparent source is a no-op in every blend mode, which is why those pixels
+can be skipped outright); smaller would clip. A rectangle that misses the
+canvas skips the whole subtree.
+
+Because every shape is still rasterised against the *band's* canvas and only
+the resulting mask is clipped to the layer and shifted into it, the coverage of
+a shape does not depend on which layer it lands in, and a band's layers are its
+own: `--threads N` stays byte-identical (§3.8), as do tiles.
+
+Bounds: nesting is capped at `Svg.maxLayerDepth` (10) — deeper groups degrade to
+the old fold, never an error — and live layer area at `Render.maxLayerPixels`
+(4 × `maxPixels`), past which the render is rejected with `layer budget`.
+
+**Which pipeline, and the one inexact mode.** resvg composites a layer with
+`Pixmap::draw_pixmap`, whose `Pattern` shader has no lowp implementation, so
+tiny-skia compiles the *highp* (f32) pipeline for every layer composite
+whatever the blend mode. `MicroSvg.F32` therefore emulates IEEE binary32 —
+round-to-nearest-even, exactly, in `Nat` — and ports those stages. Checked
+against resvg 0.48.1 on strip images covering all 65 536 `(source, backdrop)`
+byte pairs per mode: 14 of the 16 modes are bit-exact, and `color-dodge` and
+`color-burn` are within 2 of 255 because tiny-skia evaluates their one division
+with `_mm_rcp_ps`, a 12-bit hardware approximation whose result is not
+specified portably; the exact reciprocal is used instead.
+
+Two performance notes that are really Lean runtime notes, both worth 4× on a
+composite: a `Nat` literal that does not fit in 32 bits compiles to a decimal
+*string* parsed into a GMP bignum on every evaluation, and `Nat.shiftLeft` is
+the one bitwise operation with no scalar fast path in the runtime (it always
+goes through GMP). So `F32` keeps every constant under `2^32` — hence the sign
+bit at the *bottom* of the packed word — and multiplies by a tabulated power of
+two instead of shifting left.
+
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
 | file | exact | ≤ 8 | ≤ 32 | max d |
@@ -220,9 +278,14 @@ untouched, so the ordinary path is unchanged, byte for byte.
 
 `max d = 255` pixels are single anti-aliasing seam pixels where one renderer
 puts a partially covered pixel and the other does not (tiny-skia supersamples
-4× vertically; we compute exact area). `07_opacity` exact is low because
-large translucent areas differ by 1 level from rounding in premultiply /
-unpremultiply; within-8 is 99.8%.
+4× vertically; we compute exact area).
+
+The table is the M0 snapshot and predates the later tasks; run
+`python3 tests/run_tests.py` for current numbers. One row it is worth
+correcting here, because §3.9 is what changed it: `07_opacity`'s exact score
+was low (62.64% here, 96.73% before T22) because a group or element opacity was
+folded into the paint alpha instead of compositing a layer. With layers it is
+99.997% exact and 100.00% within 8.
 
 Render time per 200×200 file: 28–43 ms including process start.
 
@@ -235,10 +298,10 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `MicroSvg/Fixed.lean` | `Fx`, number and length parsing with cost bounds |
 | `MicroSvg/Geom.lean` | `Pt`, `Mat`, trig, `PathCmd`, `flatten`, stroker |
 | `MicroSvg/Raster.lean` | accumulation rasterizer → coverage mask |
-| `MicroSvg/Canvas.lean` | premultiplied canvas, blending, RGBA export |
+| `MicroSvg/Canvas.lean` | premultiplied canvas, blending, `F32`, blend modes, layer composite, RGBA export |
 | `MicroSvg/Png.lean` | CRC-32, Adler-32, stored zlib, PNG chunks |
 | `MicroSvg/Xml.lean` | event-based XML subset parser with caps |
-| `MicroSvg/Svg.lean` | paints, transforms, path data, shapes, style stack |
-| `MicroSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, `render` |
+| `MicroSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo` |
+| `MicroSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |

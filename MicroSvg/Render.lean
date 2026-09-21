@@ -139,6 +139,24 @@ def canvasSetup (root : RootInfo) (opts : Options) :
        vx, vy⟩
     return (vw, vh, (Mat.translate (-(vx * 256)) (-(vy * 256))).mul mat, clip)
 
+/-- The user-space reach `shapeOnCanvas` widens a shape's control box by, in
+device x and y: the stroke's own reach mapped through the CTM, plus the slack
+the floors in `cubicAt` / `Mat.apply` can introduce.  Factored out of
+`shapeOnCanvas` so that a layer's allocation rectangle (`Render.nodeBox`) is
+widened by exactly the same amount as the culling test, and therefore cannot
+be smaller than the region the shape may paint. -/
+def shapeSlack (ctm : Mat) (s : Shape) : Fx × Fx :=
+  let st := s.style
+  -- Any paint that inks, not just a solid one: a gradient stroke reaches
+  -- just as far (main's `shapeOnCanvas` before this was factored out).
+  let reach : Fx := match st.stroke with
+    | .none => 0
+    | _ => strokeReach ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+  let ax := Fx.abs ctm.a + Fx.abs ctm.c
+  let ay := Fx.abs ctm.b + Fx.abs ctm.d
+  (Fx.clamp (Int.ediv ((reach + 4) * ax) 65536 + 258),
+   Fx.clamp (Int.ediv ((reach + 4) * ay) 65536 + 258))
+
 /-- Can any pixel this shape paints land on the `W × H` canvas?
 
 The device-space box of the path's control points contains the flattened path
@@ -157,14 +175,7 @@ everything that can put a painted point outside that box:
 Widening the rectangle is exactly equivalent to inflating the box by the same
 amounts, and it keeps the growing box the only thing the scan has to touch. -/
 def shapeOnCanvas (ctm : Mat) (s : Shape) (W H : Nat) : Bool :=
-  let st := s.style
-  let reach : Fx := match st.stroke with
-    | .none => 0
-    | _ => strokeReach ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
-  let ax := Fx.abs ctm.a + Fx.abs ctm.c
-  let ay := Fx.abs ctm.b + Fx.abs ctm.d
-  let dx := Fx.clamp (Int.ediv ((reach + 4) * ax) 65536 + 258)
-  let dy := Fx.clamp (Int.ediv ((reach + 4) * ay) 65536 + 258)
+  let (dx, dy) := shapeSlack ctm s
   ctrlBoxMeets ctm s.cmds (-dx) (-dy) ((W : Int) * 256 + dx) ((H : Int) * 256 + dy)
 
 /-- `painter.rs::treat_as_hairline`.  The translation is dropped from the CTM,
@@ -183,6 +194,35 @@ def hairCoverage (ctm : Mat) (w : Fx) : Option Int :=
   let len1 := fastLen (Int.ediv (ctm.c * w) 256) (Int.ediv (ctm.d * w) 256)
   if len0 ≤ 65536 && len1 ≤ 65536 then some (Int.ediv (len0 + len1) 2) else none
 
+/-- Where one shape is rasterised *to*.
+
+`w`/`h` are the band's canvas — the size all device geometry is built and
+clipped against, so that a shape's coverage never depends on which layer it
+lands in.  `clip` is the destination window in those same canvas coordinates
+(the document window of §3.8, intersected with the enclosing layer's
+rectangle), and `ox`/`oy` is where the destination canvas' pixel `(0, 0)` sits
+in them: `(0, 0)` for the band itself, the layer's top-left corner for a layer.
+
+So a layer changes exactly two things about drawing a shape: the mask is
+clipped to the layer's rectangle, and it is then shifted into the layer's own
+coordinates.  Everything upstream — culling, flattening, stroking, rasterising
+— is bit for bit what it was, which is what keeps a document with no layers
+byte-identical. -/
+structure Target where
+  w : Nat
+  h : Nat
+  clip : Clip
+  ox : Nat := 0
+  oy : Nat := 0
+deriving Inhabited
+
+/-- Move a mask from canvas coordinates into the destination canvas'.  A no-op
+for the band itself (`ox = oy = 0`); the mask has already been clipped to the
+layer, so the subtraction cannot underflow. -/
+@[inline] def shiftMask (t : Target) (m : Raster.Mask) : Raster.Mask :=
+  if t.ox == 0 && t.oy == 0 then m
+  else { m with x0 := m.x0 - t.ox, y0 := m.y0 - t.oy }
+
 /-- Draw one shape (fill, then stroke) onto the canvas.
 
 A shape that `shapeOnCanvas` rules out is skipped before `flatten`, which is
@@ -192,23 +232,41 @@ transforming of every off-tile shape goes away.  The output does not change.
 the culling box contains and returns `none` — leaving the canvas alone — as
 soon as that box misses `[0, W) × [0, H)` in whole pixels, so every shape
 culled here is one that `rasterize` would have thrown away anyway. -/
-def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :=
+def drawShape (rootMat : Mat) (tgt : Target) (cv : Canvas) (s : Shape) : Canvas :=
   let st := s.style
   let ctm := rootMat.mul st.ctm
-  let W := cv.w
-  let H := cv.h
+  let clip := tgt.clip
+  let W := tgt.w
+  let H := tgt.h
   if !(shapeOnCanvas ctm s W H) then cv else
   let polys := flatten ctm s.cmds
   -- T18: a `Paint` is a colour, a gradient, or nothing.  A gradient is turned
   -- into a device-space shader here, against this shape's own bounding box and
   -- its own `ctm`; `Grad.build` hands back a solid colour for the degenerate
   -- cases usvg collapses, which then take the ordinary `fillMask` path.
-  let paintMask := fun (cv : Canvas) (p : Svg.Paint) (m : Raster.Mask) (op : Nat) =>
+  -- T22: the mask is rasterised in canvas coordinates and `shiftMask` moves it
+  -- into the destination canvas, which is the band itself (a no-op) or a layer.
+  --
+  -- A gradient has to survive that shift. `fillMaskShader` reads `m.x0 + x`
+  -- both as a destination index and as the coordinate it evaluates the paint
+  -- at, so a shifted mask would sample the gradient in the wrong place. It is
+  -- the same problem `--viewport` already solved: `Grad.build` takes the origin
+  -- that turns a sample coordinate into a whole-image one and folds it into the
+  -- constant term, leaving the coefficients bit for bit the full render's. A
+  -- layer just adds its own origin to that pair, and `gctm` maps user space to
+  -- the layer instead of the canvas so the two agree — `Mat.translate` has an
+  -- identity linear part, so that composition is exact and a layer's gradient
+  -- pixels equal the full render's.
+  let gctm := if tgt.ox == 0 && tgt.oy == 0 then ctm
+    else (Mat.translate (-((tgt.ox : Int) * 256)) (-((tgt.oy : Int) * 256))).mul ctm
+  let paintMask := fun (cv : Canvas) (p : Svg.Paint) (m0 : Raster.Mask) (op : Nat) =>
+    let m := shiftMask tgt m0
     match p with
     | .none => cv
     | .solid c => cv.fillMask m c (opacityToU8 c.a op st.opacity)
     | .gradient i =>
-      match Grad.build st.defs i s.cmds ctm clip.vx clip.vy op st.opacity with
+      match Grad.build st.defs i s.cmds gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
+              op st.opacity with
       | .skip => cv
       | .solid c a8 => cv.fillMask m c a8
       | .grad sh => cv.fillMaskShader m sh
@@ -255,6 +313,84 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
   -- `stroke` precedes `fill` in the property's resolved order) swaps them.
   if st.strokeFirst then drawFill (drawStroke cv) else drawStroke (drawFill cv)
 
+/-- Total layer pixels that may be live at once, as a multiple of `maxPixels`.
+
+Nesting is already bounded by `Svg.maxLayerDepth`, but each of those ten levels
+could in principle ask for a full canvas, so the *area* needs its own bound.
+Four canvases of layers on top of the canvas itself is far more than any real
+document uses (the whole resvg suite peaks at one), and a document that asks
+for more is rejected rather than allocating. -/
+def maxLayerPixels : Nat := 4 * maxPixels
+
+/-- The layer rectangle for the group that opens at `nodes[i]` (a `groupBegin`):
+the union of the device boxes of every shape in its subtree, in whole canvas
+pixels, widened like resvg's (`render.rs`: `floor`/`ceil` then two pixels of
+margin on each side, so anti-aliased edge pixels are never clipped) and
+intersected with `clip`.
+
+`none` means the group paints nothing inside `clip` — an empty subtree, or one
+entirely outside the window — and the whole group can then be skipped, which is
+what makes an off-canvas layer free rather than merely small.
+
+The scan stops at the matching `groupEnd`, so nested groups are included in
+their ancestor's box (usvg's `layer_bounding_box`, which likewise unions the
+children's). Cost is the subtree's size, so over a whole document it is at most
+`Svg.maxLayerDepth` passes over the node array. -/
+def nodeBox (rootMat : Mat) (nodes : Array Svg.Node) (i : Nat) (clip : Clip) : Option Clip :=
+  Id.run do
+    let mut lo : Option (Int × Int × Int × Int) := none
+    let mut depth : Nat := 0
+    for j in [i + 1 : nodes.size] do
+      match nodes.getD j default with
+      | .groupBegin _ => depth := depth + 1
+      | .groupEnd => if depth == 0 then break else depth := depth - 1
+      | .shape s =>
+        let ctm := rootMat.mul s.style.ctm
+        match ctrlBox ctm s.cmds with
+        | none => pure ()
+        | some b =>
+          let (dx, dy) := shapeSlack ctm s
+          let x0 := Int.ediv (b.x0 - dx) 256 - 2
+          let y0 := Int.ediv (b.y0 - dy) 256 - 2
+          let x1 := -(Int.ediv (-(b.x1 + dx)) 256) + 2
+          let y1 := -(Int.ediv (-(b.y1 + dy)) 256) + 2
+          lo := match lo with
+            | none => some (x0, y0, x1, y1)
+            | some (a0, b0, a1, b1) =>
+              some (min a0 x0, min b0 y0, max a1 x1, max b1 y1)
+    match lo with
+    | none => return none
+    | some (x0, y0, x1, y1) =>
+      let cx0 := Nat.max clip.x0 x0.toNat
+      let cy0 := Nat.max clip.y0 y0.toNat
+      let cx1 := Nat.min clip.x1 x1.toNat
+      let cy1 := Nat.min clip.y1 y1.toNat
+      -- `vx`/`vy` are carried through unchanged: they say where this canvas
+      -- sits in the whole zoomed image, which a layer does not change.
+      if cx1 ≤ cx0 || cy1 ≤ cy0 then return none
+      else return some { clip with x0 := cx0, y0 := cy0, x1 := cx1, y1 := cy1 }
+
+/-- `Svg.opacityOne`-grid opacity as the binary32 resvg hands to tiny-skia.
+
+usvg stores it as an `f32` parsed from the file and `PixmapPaint::opacity` is
+that same `f32`, so the value to emulate is "the binary32 nearest the decimal
+in the file".  The grid is `10^18`ths and every literal `parseOpacity` can
+return is exact on it, so `F32.ofRat` on those two integers is exactly that
+nearest binary32 — no double rounding. -/
+def opacityF32 (o : Nat) : F32 :=
+  if o ≥ Svg.opacityOne then F32.one else F32.ofRat o Svg.opacityOne
+
+/-- One frame of the layer stack: the canvas being painted, where it sits in
+band coordinates, the clip its children use, and how it composites back. -/
+structure Layer where
+  cv : Canvas
+  ox : Nat
+  oy : Nat
+  clip : Clip
+  opacity : F32
+  blend : BlendMode
+deriving Inhabited
+
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.
 
@@ -269,8 +405,75 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
   if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
-  let canvas := doc.shapes.foldl (drawShape rootMat clip) (Canvas.new w h opts.background)
-  return (w, h, canvas.toRgbaBytes)
+  -- The node walk.  `cur` is the canvas being painted and `stack` the enclosing
+  -- layers; with no `groupBegin` in the document the loop is the old
+  -- `shapes.foldl (drawShape ...)` with one `match` in front of it.
+  --
+  -- `skipDepth > 0` swallows the subtree of a group whose rectangle missed the
+  -- window entirely (nothing it contains can be visible), counting nested
+  -- `groupBegin`s so the right `groupEnd` ends the skip.
+  let mut cur : Canvas := Canvas.new w h opts.background
+  let mut stack : Array Layer := #[]
+  let mut curClip := clip
+  let mut curOx : Nat := 0
+  let mut curOy : Nat := 0
+  let mut livePixels : Nat := 0
+  let mut skipDepth : Nat := 0
+  let mut err : Option String := none
+  for i in [0:doc.nodes.size] do
+    match doc.nodes.getD i default with
+    | .shape s =>
+      if skipDepth == 0 then
+        cur := drawShape rootMat ⟨w, h, curClip, curOx, curOy⟩ cur s
+    | .groupBegin g =>
+      if skipDepth > 0 then skipDepth := skipDepth + 1
+      else
+        match nodeBox rootMat doc.nodes i curClip with
+        | none => skipDepth := 1
+        | some r =>
+          let lw := r.x1 - r.x0
+          let lh := r.y1 - r.y0
+          if livePixels + lw * lh > maxLayerPixels then
+            err := some "layer budget"
+            break
+          livePixels := livePixels + lw * lh
+          stack := stack.push ⟨cur, curOx, curOy, curClip, opacityF32 g.opacity, g.blend⟩
+          cur := Canvas.new lw lh none
+          curClip := r
+          curOx := r.x0
+          curOy := r.y0
+    | .groupEnd =>
+      if skipDepth > 0 then skipDepth := skipDepth - 1
+      else
+        match stack.back? with
+        | none => pure ()
+        | some parent =>
+          livePixels := livePixels - cur.w * cur.h
+          let lx := curOx - parent.ox
+          let ly := curOy - parent.oy
+          -- Popped *before* the composite so that the parent's pixel array is
+          -- uniquely referenced and `compositeLayer` can update it in place.
+          stack := stack.pop
+          cur := parent.cv.compositeLayer cur lx ly parent.opacity parent.blend
+          curOx := parent.ox
+          curOy := parent.oy
+          curClip := parent.clip
+  match err with
+  | some e => throw e
+  | none => pure ()
+  -- A `groupEnd` is emitted for every `groupBegin` (`Svg.interpret` pushes both
+  -- from one place), so the stack is empty here; composite anything left over
+  -- rather than dropping it if that ever stops being true.
+  for _ in [0:stack.size] do
+    match stack.back? with
+    | none => pure ()
+    | some parent =>
+      stack := stack.pop
+      cur := parent.cv.compositeLayer cur (curOx - parent.ox) (curOy - parent.oy)
+        parent.opacity parent.blend
+      curOx := parent.ox
+      curOy := parent.oy
+  return (w, h, cur.toRgbaBytes)
 
 /-- How many bands to cut `h` output rows into for `threads` threads.
 

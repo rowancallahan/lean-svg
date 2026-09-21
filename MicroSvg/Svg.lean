@@ -59,12 +59,25 @@ structure Style where
   /-- `stroke-dasharray`, raw: `Geom.dashPattern` normalises it.  Empty = solid. -/
   dashes : Array Fx := #[]
   dashOffset : Fx := 0
+  /-- Group opacity folded into this element from ancestors that were rendered
+  *without* a compositing layer (plain groups past `maxLayerDepth`), times
+  nothing else: an element's own `opacity` is `ownOpacity` until `interpret`
+  decides whether it becomes a layer or is folded in as well. -/
   opacity : Nat := opacityOne
   /-- `paint-order`, collapsed to the one bit that matters here: whether
   `stroke` is painted before `fill` (we have no markers, so their position in
   the property's value never changes what gets drawn).  Inherited, like every
   other paint property. -/
   strokeFirst : Bool := false
+  /-- This element's own `opacity` property; not inherited (reset to 1 for
+  every element before its attributes apply). -/
+  ownOpacity : Nat := opacityOne
+  /-- `mix-blend-mode`; not inherited.  Only honoured from CSS (`style=""` or a
+  `<style>` sheet), never as a presentation attribute — usvg drops the
+  attribute form (`svgtree/parse.rs`: "allowed only inside a `style`"). -/
+  blend : BlendMode := .normal
+  /-- `isolation: isolate`; not inherited, CSS only, like `blend`. -/
+  isolate : Bool := false
   visible : Bool := true
   /-- The CSS `color` property: inherited, defaults to black, and is what
   `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
@@ -129,10 +142,49 @@ structure RootInfo where
   viewBox : Option (Fx × Fx × Fx × Fx) := none
 deriving Inhabited
 
+/-- What a container (or a lone shape) that becomes a compositing *layer*
+carries: its children render into a fresh transparent canvas which is then
+composited onto the parent with these (resvg `render.rs::render_group`).
+
+`clip`/`mask`/`filter` are the hooks T20/T21 will need: usvg's
+`Group::should_isolate` also creates a layer for those, and they apply to the
+finished layer (a post-multiply mask) *before* this composite.  Neither is
+implemented here, so neither has a field yet; adding one is additive and
+`Render.renderRgba`'s `groupEnd` is the single place that would consume it. -/
+structure GroupInfo where
+  /-- Group opacity on the `opacityOne` grid. -/
+  opacity : Nat := opacityOne
+  blend : BlendMode := .normal
+  isolate : Bool := false
+deriving Repr, Inhabited
+
+/-- The document as a flat, ordered instruction stream.
+
+Before T22 this was just `Array Shape`; a group's `opacity` was multiplied into
+its children's paint, which is wrong as soon as the children overlap.  Now a
+container that needs isolation brackets its subtree with `groupBegin`/`groupEnd`
+and `Render` gives it a real layer.  Groups that need none emit nothing at all,
+so a document without opacity, `mix-blend-mode` or `isolation` produces exactly
+the shape sequence it produced before, in the same order. -/
+inductive Node where
+  | shape (s : Shape)
+  | groupBegin (g : GroupInfo)
+  | groupEnd
+deriving Inhabited
+
 structure Doc where
   root : RootInfo
-  shapes : Array Shape
+  nodes : Array Node
 deriving Inhabited
+
+/-- How deep compositing layers may nest.  A document may nest groups far
+deeper (the XML parser's own cap is `Xml.maxDepth` = 64) and every level would
+cost one canvas, so past this bound a group that asks for a layer is rendered
+as a plain group instead: its opacity is folded into its children's paint, as
+it was before T22, and its blend mode is ignored.  Ten is more than any real
+document needs — the deepest nesting in the whole resvg test suite is eight,
+and none of those levels is a layer. -/
+def maxLayerDepth : Nat := 10
 
 /-! ## Colours -/
 
@@ -486,8 +538,19 @@ def parseOpacity (bs : ByteArray) : Option Nat :=
   match parseDecimal t 0 with
   | none => none
   | some (neg, mant, exp10, j) =>
-    let exp10 := if at' t j == 37 then exp10 - 2 else exp10
-    some (if neg then 0 else scaleDecimal mant exp10 opacityOne opacityOne)
+    -- usvg parses an opacity as an `svgtypes::Length` and accepts it only when
+    -- the unit is `None` or `%` (`FromValue for Opacity`); `Length::from_str`
+    -- itself rejects trailing junk.  So a value with any other unit, or with
+    -- anything after the number, is *invalid* rather than clamped —
+    -- `none` here, which leaves the property at its default of fully opaque
+    -- (`painting/opacity/invalid-value-2.svg`: `opacity="0.1mm"` renders the
+    -- element opaque, not at 10%).
+    let pct := at' t j == 37
+    let e := if pct then j + 1 else j
+    if e != t.size then none
+    else
+      let exp10 := if pct then exp10 - 2 else exp10
+      some (if neg then 0 else scaleDecimal mant exp10 opacityOne opacityOne)
 
 /-- Multiply two opacities, staying on the 1/10^18 grid (halves up).
 
@@ -1290,6 +1353,15 @@ def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
       let fillPos := if o0 == 0 then 0 else if o1 == 0 then 1 else 2
       decide (strokePos < fillPos)
 
+/-- Properties usvg honours only from CSS — a `style=""` declaration or a
+`<style>` rule — and ignores as presentation attributes
+(`parser/svgtree/parse.rs`: "For some reason those properties are allowed only
+inside a `style` attribute and CSS").  Confirmed by the corpus files
+`painting/mix-blend-mode/as-property.svg` and
+`painting/isolation/as-property.svg`, both of which must render *unblended*. -/
+def isCssOnlyProp (name : String) : Bool :=
+  name == "mix-blend-mode" || name == "isolation"
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
@@ -1297,7 +1369,38 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "stroke" => match parsePaint v with | some p => { st with stroke := resolvePaint st p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
   | "stroke-opacity" => match parseOpacity v with | some o => { st with strokeOpacity := o } | none => st
-  | "opacity" => match parseOpacity v with | some o => { st with opacity := mulOpacity st.opacity o } | none => st
+  -- `opacity` is not an inherited property: it belongs to this element alone
+  -- and `interpret` turns it into a layer (or, past the nesting bound, folds
+  -- it into `opacity`, which *is* what descendants inherit).  `applyEffective`
+  -- resets `ownOpacity` for every element, so two sources on the same element
+  -- (a presentation attribute and CSS, say) still let the last one win,
+  -- exactly as any other property does.
+  | "opacity" => match parseOpacity v with | some o => { st with ownOpacity := o } | none => st
+  | "mix-blend-mode" =>
+    let t := lower (trim v)
+    let m : Option BlendMode :=
+      if eqAscii t "normal" then some .normal
+      else if eqAscii t "multiply" then some .multiply
+      else if eqAscii t "screen" then some .screen
+      else if eqAscii t "overlay" then some .overlay
+      else if eqAscii t "darken" then some .darken
+      else if eqAscii t "lighten" then some .lighten
+      else if eqAscii t "color-dodge" then some .colorDodge
+      else if eqAscii t "color-burn" then some .colorBurn
+      else if eqAscii t "hard-light" then some .hardLight
+      else if eqAscii t "soft-light" then some .softLight
+      else if eqAscii t "difference" then some .difference
+      else if eqAscii t "exclusion" then some .exclusion
+      else if eqAscii t "hue" then some .hue
+      else if eqAscii t "saturation" then some .saturation
+      else if eqAscii t "color" then some .color
+      else if eqAscii t "luminosity" then some .luminosity
+      else none
+    match m with | some m => { st with blend := m } | none => st
+  | "isolation" =>
+    let t := lower (trim v)
+    if eqAscii t "isolate" then { st with isolate := true }
+    else if eqAscii t "auto" then { st with isolate := false } else st
   | "fill-rule" =>
     let t := trim v
     if eqAscii t "evenodd" then { st with evenOdd := true }
@@ -1873,11 +1976,18 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       | some v => parseTransformOrigin v base.pctRefW base.pctRefH
       | none => (0, 0)
     let base := { base with originDx := odx, originDy := ody }
+    -- Not inherited, like `transform-origin`: every element starts from
+    -- "no layer" and only its own declarations can change that (T22).
+    let base := { base with ownOpacity := opacityOne, blend := .normal, isolate := false }
     let early (n : String) := n == "color" || n == "transform-origin"
     -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
     -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and
     -- only the `style=""`/CSS layers below can set it (T36).
+    -- `mix-blend-mode` and `isolation` (`isCssOnlyProp`) are dropped from
+    -- the presentation-attribute layer for the same reason; the three CSS
+    -- layers below still apply all three.
     let skipName (n : String) := n == "style" || early n || n == "font-kerning"
+                                 || isCssOnlyProp n
     let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
     let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
     let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
@@ -1886,8 +1996,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
   let mut switchSel : Array (Option (Option Nat)) := #[]
+  -- T22's fifth stack, again in lockstep with `stack`: did this element open a
+  -- compositing layer (so its `.close` must emit a `groupEnd`)?
+  let mut layerOpen : Array Bool := #[]
+  let mut layerDepth : Nat := 0
   let mut skip : Nat := 0
-  let mut shapes : Array Shape := #[]
+  let mut nodes : Array Node := #[]
   let mut root : Option RootInfo := none
   -- T36: how many more characters the whole document may lay out.  Every
   -- `<text>` element draws from this one budget, so glyph generation is
@@ -1899,10 +2013,14 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     | .close =>
       if skip > 0 then skip := skip - 1
       else
+        if layerOpen.back?.getD false then
+          nodes := nodes.push .groupEnd
+          layerDepth := layerDepth - 1
         stack := stack.pop
         elemStack := elemStack.pop
         childCounts := childCounts.pop
         switchSel := switchSel.pop
+        layerOpen := layerOpen.pop
     | .open_ name attrs =>
       if skip > 0 then
         skip := skip + 1
@@ -1914,6 +2032,14 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let elemInfo := Css.buildElemInfo name (attrs.map (fun a => (a.name, toStr a.value))) isFirst
         let chain := elemStack.push elemInfo
         let parent := stack.back?.getD default
+        -- Each branch below either sets `skip` (the element and its subtree are
+        -- dropped) or fills `enter` with the style to push — and, for a shape,
+        -- `shapeNode` with the geometry to emit.  The layer decision and all
+        -- five stack pushes then happen once, at the bottom, so no site can
+        -- push a `groupBegin` without the matching `layerOpen` entry.
+        let mut enter : Option Style := none
+        let mut shapeNode : Option Shape := none
+        let mut sel : Option (Option Nat) := none
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
@@ -1921,10 +2047,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           if isDisplayNone attrs || !passesConditions attrs then
             skip := 1
           else
-            stack := stack.push (applyEffective { (default : Style) with defs := gradTable } attrs chain)
-            elemStack := chain
-            childCounts := childCounts.push 0
-            switchSel := switchSel.push none
+            enter := some (applyEffective { (default : Style) with defs := gradTable } attrs chain)
         | some _ =>
           let allowed := match switchSel.back?.getD none with
             | none => true
@@ -1933,11 +2056,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           if !allowed then skip := 1
           else if name == "g" then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
-            else
-              stack := stack.push (applyEffective parent attrs chain)
-              elemStack := chain
-              childCounts := childCounts.push 0
-              switchSel := switchSel.push none
+            else enter := some (applyEffective parent attrs chain)
           else if name == "switch" then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
@@ -1977,36 +2096,64 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                     else depth := depth + 1
                   | .text _ => pure ()
                 return none
-              stack := stack.push (applyEffective parent attrs chain)
-              elemStack := chain
-              childCounts := childCounts.push 0
-              switchSel := switchSel.push (some target)
+              enter := some (applyEffective parent attrs chain)
+              sel := some target
           else if name == "text" then
             -- T36: one branch.  `textShapes` walks the whole subtree itself
-            -- (layout is not per-element) and the main loop skips it.
+            -- (layout is not per-element) and the main loop skips it, so this
+            -- is the one element that cannot go through `enter` below: its
+            -- layer, if it needs one, is opened and closed right here.
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let st := applyEffective parent attrs chain
+              let needs := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+              let layered := needs && layerDepth < maxLayerDepth
+              let st := if needs && !layered then
+                  { st with opacity := mulOpacity st.opacity st.ownOpacity } else st
+              if layered then nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate⟩)
               let (shs, used) := textShapes applyEffective events idx st chain textBudget
-              shapes := shapes ++ shs
+              nodes := nodes ++ shs.map Node.shape
               textBudget := textBudget - used
+              if layered then nodes := nodes.push .groupEnd
               skip := 1
           else if isShape name then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let st := applyEffective parent attrs chain
               match shapeCmds name attrs with
-              | some cmds => if st.visible && cmds.size > 0 then shapes := shapes.push ⟨cmds, st⟩
+              | some cmds => if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st⟩
               | none => pure ()
-              stack := stack.push st
-              elemStack := chain
-              childCounts := childCounts.push 0
-              switchSel := switchSel.push none
+              enter := some st
           else
             skip := 1
+        match enter with
+        | none => pure ()
+        | some st =>
+          -- usvg's `Group::should_isolate`, minus the `clip-path`/`mask`/
+          -- `filter` cases this task does not implement.  It applies to every
+          -- element usvg wraps in a group, shapes included: `opacity` on a
+          -- `<rect>` is a one-child layer there, not a paint-alpha shortcut.
+          let needs := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+          -- Past `maxLayerDepth` the layer is dropped: the opacity is folded
+          -- into the subtree's paint the way it was before T22 (wrong where
+          -- children overlap, but bounded and never an error) and the blend
+          -- mode is ignored.
+          let layered := needs && layerDepth < maxLayerDepth
+          let st := if needs && !layered then { st with opacity := mulOpacity st.opacity st.ownOpacity } else st
+          if layered then
+            nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate⟩)
+            layerDepth := layerDepth + 1
+          match shapeNode with
+          | some s => nodes := nodes.push (.shape { s with style := st })
+          | none => pure ()
+          stack := stack.push st
+          elemStack := chain
+          childCounts := childCounts.push 0
+          switchSel := switchSel.push sel
+          layerOpen := layerOpen.push layered
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, shapes⟩
+  | some r => return ⟨r, nodes⟩
 
 end Svg
 end MicroSvg

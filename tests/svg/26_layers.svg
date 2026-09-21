@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="420" viewBox="0 0 480 420">
+  <rect x="0" y="0" width="480" height="420" fill="#f2efe6"/>
+
+  <!-- group opacity over overlapping children: the whole group is one layer,
+       so the overlap is NOT doubly darkened the way per-child opacity would be -->
+  <g opacity="0.5">
+    <circle cx="60" cy="60" r="38" fill="#e63946"/>
+    <circle cx="95" cy="60" r="38" fill="#1d3557"/>
+    <circle cx="77" cy="92" r="38" fill="#2a9d8f"/>
+  </g>
+
+  <!-- nested layers: 0.8 inside 0.6, and a plain group in between -->
+  <g opacity="0.6">
+    <rect x="150" y="20" width="90" height="90" fill="#e9c46a"/>
+    <g transform="translate(20 20)">
+      <g opacity="0.8">
+        <rect x="150" y="20" width="90" height="90" fill="#264653"/>
+        <circle cx="195" cy="65" r="28" fill="#f4a261"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- opacity on a single shape: usvg wraps it in its own layer -->
+  <rect x="320" y="20" width="60" height="90" fill="#8338ec" opacity="0.35"/>
+  <rect x="360" y="20" width="60" height="90" fill="#fb8500" opacity="0.75"/>
+
+  <!-- isolation: the inner blend sees only its own group as backdrop -->
+  <rect x="20" y="140" width="80" height="60" fill="#457b9d"/>
+  <g style="isolation:isolate">
+    <rect x="30" y="150" width="60" height="40" fill="#e9c46a"/>
+    <rect x="50" y="160" width="60" height="40" fill="#e63946" style="mix-blend-mode:multiply"/>
+  </g>
+  <!-- the same pair without isolation: the blue rect IS part of the backdrop -->
+  <rect x="140" y="140" width="80" height="60" fill="#457b9d"/>
+  <g>
+    <rect x="150" y="150" width="60" height="40" fill="#e9c46a"/>
+    <rect x="170" y="160" width="60" height="40" fill="#e63946" style="mix-blend-mode:multiply"/>
+  </g>
+
+  <!-- mix-blend-mode as a presentation attribute is ignored (usvg: CSS only) -->
+  <rect x="270" y="140" width="80" height="60" fill="#2a9d8f"/>
+  <rect x="290" y="155" width="60" height="40" fill="#e63946" mix-blend-mode="difference"/>
+  <!-- an unknown blend mode falls back to normal -->
+  <rect x="380" y="140" width="80" height="60" fill="#2a9d8f"/>
+  <rect x="400" y="155" width="60" height="40" fill="#e63946" style="mix-blend-mode:xor"/>
+
+  <!-- every blend mode, each on the same coloured backdrop -->
+  <g>
+    <rect x="20" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="20" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:normal">
+      <circle cx="45" cy="264" r="22" fill="#c2185b"/>
+      <rect x="22" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="77" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="77" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:multiply">
+      <circle cx="102" cy="264" r="22" fill="#c2185b"/>
+      <rect x="79" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="134" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="134" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:screen">
+      <circle cx="159" cy="264" r="22" fill="#c2185b"/>
+      <rect x="136" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="191" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="191" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:overlay">
+      <circle cx="216" cy="264" r="22" fill="#c2185b"/>
+      <rect x="193" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="248" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="248" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:darken">
+      <circle cx="273" cy="264" r="22" fill="#c2185b"/>
+      <rect x="250" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="305" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="305" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:lighten">
+      <circle cx="330" cy="264" r="22" fill="#c2185b"/>
+      <rect x="307" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="362" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="362" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:color-dodge">
+      <circle cx="387" cy="264" r="22" fill="#c2185b"/>
+      <rect x="364" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="419" y="230" width="50" height="34" fill="#1d7f74"/>
+    <rect x="419" y="264" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:color-burn">
+      <circle cx="444" cy="264" r="22" fill="#c2185b"/>
+      <rect x="421" y="232" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="20" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="20" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:hard-light">
+      <circle cx="45" cy="359" r="22" fill="#c2185b"/>
+      <rect x="22" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="77" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="77" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:soft-light">
+      <circle cx="102" cy="359" r="22" fill="#c2185b"/>
+      <rect x="79" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="134" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="134" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:difference">
+      <circle cx="159" cy="359" r="22" fill="#c2185b"/>
+      <rect x="136" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="191" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="191" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:exclusion">
+      <circle cx="216" cy="359" r="22" fill="#c2185b"/>
+      <rect x="193" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="248" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="248" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:hue">
+      <circle cx="273" cy="359" r="22" fill="#c2185b"/>
+      <rect x="250" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="305" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="305" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:saturation">
+      <circle cx="330" cy="359" r="22" fill="#c2185b"/>
+      <rect x="307" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="362" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="362" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:color">
+      <circle cx="387" cy="359" r="22" fill="#c2185b"/>
+      <rect x="364" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+  <g>
+    <rect x="419" y="325" width="50" height="34" fill="#1d7f74"/>
+    <rect x="419" y="359" width="50" height="34" fill="#f0c419"/>
+    <g opacity="0.85" style="mix-blend-mode:luminosity">
+      <circle cx="444" cy="359" r="22" fill="#c2185b"/>
+      <rect x="421" y="327" width="22" height="22" fill="#90caf9"/>
+    </g>
+  </g>
+</svg>
