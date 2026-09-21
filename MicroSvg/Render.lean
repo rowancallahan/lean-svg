@@ -192,40 +192,43 @@ def drawShape (rootMat : Mat) (clip : Clip) (cv : Canvas) (s : Shape) : Canvas :
   let H := cv.h
   if !(shapeOnCanvas ctm s W H) then cv else
   let polys := flatten ctm s.cmds
-  let cv := match st.fill with
+  let drawFill := fun (cv : Canvas) => match st.fill with
     | .solid c =>
       let dev := polys.map fun p => p.pts.map ctm.apply
       match (Raster.rasterize W H dev st.evenOdd).bind (clipMask clip) with
       | some m => cv.fillMask m c (opacityToU8 c.a st.fillOpacity st.opacity)
       | none => cv
     | .none => cv
-  match st.stroke with
-  | .solid c =>
-    if st.strokeWidth ≤ 0 then cv
-    else
-      let a8 := opacityToU8 c.a st.strokeOpacity st.opacity
-      -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
-      -- actually inked, before stroking, so every dash end gets a cap.  The
-      -- fill above uses the undashed polylines; dashes are a stroke property.
-      let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
-      match hairCoverage ctm st.strokeWidth with
-      | some cov16 =>
-        -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
-        -- the coverage rather than the paint alpha (see `Raster.hairline`).
-        let scale := Int.ediv cov16 256
-        let covScale := (Int.ediv (255 * scale) 256).toNat
-        let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
-        match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
-        | some m => cv.fillMask m c a8
-        | none => cv
-      | none =>
-        let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
-        let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
-        let dev := outline.map fun p => p.map ctm.apply
-        match (Raster.rasterize W H dev false).bind (clipMask clip) with
-        | some m => cv.fillMask m c a8
-        | none => cv
-  | .none => cv
+  let drawStroke := fun (cv : Canvas) => match st.stroke with
+    | .solid c =>
+      if st.strokeWidth ≤ 0 then cv
+      else
+        let a8 := opacityToU8 c.a st.strokeOpacity st.opacity
+        -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
+        -- actually inked, before stroking, so every dash end gets a cap.  The
+        -- fill above uses the undashed polylines; dashes are a stroke property.
+        let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
+        match hairCoverage ctm st.strokeWidth with
+        | some cov16 =>
+          -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
+          -- the coverage rather than the paint alpha (see `Raster.hairline`).
+          let scale := Int.ediv cov16 256
+          let covScale := (Int.ediv (255 * scale) 256).toNat
+          let dev := polys.map fun p => ({ p with pts := p.pts.map ctm.apply } : Poly)
+          match (Raster.hairline W H dev st.cap a8 covScale).bind (clipMask clip) with
+          | some m => cv.fillMask m c a8
+          | none => cv
+        | none =>
+          let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+          let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
+          let dev := outline.map fun p => p.map ctm.apply
+          match (Raster.rasterize W H dev false).bind (clipMask clip) with
+          | some m => cv.fillMask m c a8
+          | none => cv
+    | .none => cv
+  -- `paint-order`: normally fill then stroke; `st.strokeFirst` (set when
+  -- `stroke` precedes `fill` in the property's resolved order) swaps them.
+  if st.strokeFirst then drawFill (drawStroke cv) else drawStroke (drawFill cv)
 
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.
