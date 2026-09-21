@@ -49,6 +49,21 @@ pure; store in a `let`).
   (fill, stroke, opacities, dashes all apply as for paths). Glyph advance
   = `advance × scale + kern + letter-spacing (+ word-spacing at spaces)`.
 
+## Known ceiling (measured 2026-09-21 with `fontdump --embedded NotoSans`)
+
+Of the 147 files in the nine text directories above, 20 contain characters
+outside the embedded Latin subset and will render `.notdef` for them: 9
+Arabic (`font-kerning/arabic-script`, `letter-spacing/mixed-scripts`,
+`letter-spacing/on-Arabic`, `text-anchor/on-tspan-with-arabic`,
+`text/bidi-reordering`, `text/fill-rule=evenodd`, `text/rotate-on-Arabic`,
+`text/x-and-y-with-multiple-values-and-arabic-text`, `tspan/bidi-reordering`),
+5 combining marks (`text/complex-grapheme*`, `text/rotate-with-multiple-values-and-complex-text`,
+`text/zalgo`), 4 Cyrillic (overlapping the previous plus `text/escaped-text-4`),
+2 CJK (`letter-spacing/non-ASCII-character`, `text/xml-lang=ja`), 3 emoji
+(`text/compound-emojis*`, `text/emojis`). Count them as expected failures in
+the report, not as layout bugs. Directories font-size, font-weight,
+font-style and word-spacing are fully covered by the subset.
+
 ## Oracle font pinning
 
 The harness currently lets resvg pick system fonts. Add to
