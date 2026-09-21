@@ -116,6 +116,7 @@ inductive PathCmd where
   | moveTo (p : Pt)
   | lineTo (p : Pt)
   | cubicTo (c1 c2 p : Pt)
+  | quadTo (c p : Pt)
   | close
 deriving Repr, Inhabited
 
@@ -192,6 +193,54 @@ def segCount (ctm : Mat) (p0 p1 p2 p3 : Pt) : Nat :=
   let dy := cubicDeltaFromLine q0.y q1.y q2.y q3.y
   2 ^ Nat.min maxCoeffShift (diffToShift dx dy + 1)
 
+/-- `(2·b − a − c) >> 2`, un-abs'd (as tiny-skia leaves it — `cheap_distance`,
+called through `diffToShift`, takes the absolute value itself).  The deviation
+of a quadratic's single off-curve point from the midpoint of its chord, along
+one axis.  `QuadraticEdge::new2`'s inline `(SkLeftShift(x1,1) - x0 - x2) >> 2`;
+there is no named function for it in tiny-skia, unlike the cubic's
+`cubic_delta_from_line`. -/
+def quadDeltaFromLine (a b c : Fx) : Fx :=
+  Int.ediv (2 * b - a - c) 4
+
+/-- Number of line segments used for a quadratic: tiny-skia's
+`QuadraticEdge::new2`, which takes `2 ^ diff_to_shift(dx, dy, 2)` steps — the
+same `diffToShift` the cubic rule uses, since `QuadraticEdge::new` is called
+with the builder's `clip_shift = 2` and threads it straight through as
+`shift_aa` (unlike the cubic path, which passes the literal `2`; the two
+coincide here as they do for cubics).  Two differences from `segCount`:
+
+* **No `+1`.**  The cubic rule adds one shift of headroom because it has to
+  fold two off-curve points' deviation into one number; a quadratic has only
+  one off-curve point, so `diff_to_shift` already sees the full deviation.
+* **Bumped up to at least `2^1`, not down to `2^0`.**  `QuadraticEdge::new2`:
+  `if shift == 0 { shift = 1 }` — the comment reads "need at least 1
+  subdivision for our bias trick", which is about tiny-skia's forward-difference
+  walker (`curve_shift = shift - 1` would underflow its `u8` at `shift = 0`),
+  not about visual fidelity.  We evaluate the quadratic exactly at `k/n`
+  instead of forward-differencing, so nothing here would break at `shift = 0`,
+  but resvg's actual pixels are produced by the bumped path, and matching them
+  is the point of this task — so the bump is ported as literally as the cap. -/
+def segCountQuad (ctm : Mat) (p0 p1 p2 : Pt) : Nat :=
+  let q0 := ctm.apply p0
+  let q1 := ctm.apply p1
+  let q2 := ctm.apply p2
+  let dx := quadDeltaFromLine q0.x q1.x q2.x
+  let dy := quadDeltaFromLine q0.y q1.y q2.y
+  let s := diffToShift dx dy
+  2 ^ (if s == 0 then 1 else Nat.min maxCoeffShift s)
+
+/-- Point `k/n` along a quadratic Bézier, evaluated exactly in integers. -/
+def quadAt (p0 p1 p2 : Pt) (k n : Nat) : Pt :=
+  let a := n - k
+  let b := k
+  let w0 : Int := a * a
+  let w1 : Int := 2 * a * b
+  let w2 : Int := b * b
+  let n2 : Int := n * n
+  if n2 == 0 then p2 else
+  ⟨Fx.clamp (Int.ediv (w0 * p0.x + w1 * p1.x + w2 * p2.x) n2),
+   Fx.clamp (Int.ediv (w0 * p0.y + w1 * p1.y + w2 * p2.y) n2)⟩
+
 /-- Point `k/n` along a cubic Bézier, evaluated exactly in integers. -/
 def cubicAt (p0 p1 p2 p3 : Pt) (k n : Nat) : Pt :=
   let a := n - k
@@ -228,6 +277,12 @@ def flatten (ctm : Mat) (cmds : Array PathCmd) : Array Poly := Id.run do
       let n := segCount ctm pt c1 c2 p
       for k in [1:n + 1] do
         cur := cur.push (cubicAt pt c1 c2 p k n)
+      pt := p
+    | .quadTo c p =>
+      if cur.isEmpty then cur := #[pt]
+      let n := segCountQuad ctm pt c p
+      for k in [1:n + 1] do
+        cur := cur.push (quadAt pt c p k n)
       pt := p
     | .close =>
       if cur.size ≥ 1 then polys := polys.push ⟨cur, true⟩
@@ -266,16 +321,16 @@ end Box
 /-- Does the device-space bounding box of `cmds`' control points meet the
 half-open rectangle `[lox, hix) × [loy, hiy)`?
 
-The box is over every `Pt` that appears in `cmds` (both cubic control points as
-well as the endpoint), plus the implicit current point that `flatten` starts a
-subpath from, each mapped through `ctm`.  The flattened path lies inside that
-box up to rounding: a cubic lies inside the convex hull of its four control
-points, and an affine map takes that hull to the hull of the four mapped
-points.  `flatten` emits hull points floored to the `Fx` grid (`cubicAt`
-divides with `Int.ediv`) and `Mat.apply` floors again, so a caller must widen
-the rectangle by one `Fx` unit of user-space slack (worth `(|a| + |c|)/65536`
-in device x) and one of device slack per side — which is what
-`Render.shapeOnCanvas` does, along with the stroke's reach.
+The box is over every `Pt` that appears in `cmds` (cubic and quadratic control
+points as well as the endpoint), plus the implicit current point that
+`flatten` starts a subpath from, each mapped through `ctm`.  The flattened
+path lies inside that box up to rounding: a cubic or quadratic lies inside the
+convex hull of its control points, and an affine map takes that hull to the
+hull of the mapped points.  `flatten` emits hull points floored to the `Fx`
+grid (`cubicAt`/`quadAt` divide with `Int.ediv`) and `Mat.apply` floors again,
+so a caller must widen the rectangle by one `Fx` unit of user-space slack
+(worth `(|a| + |c|)/65536` in device x) and one of device slack per side —
+which is what `Render.shapeOnCanvas` does, along with the stroke's reach.
 
 The state machine mirrors `flatten`'s exactly, so that the implicit start point
 of a path that begins with a `lineTo` is accounted for.
@@ -308,6 +363,12 @@ def ctrlBoxMeets (ctm : Mat) (cmds : Array PathCmd) (lox loy hix hiy : Fx) : Boo
       if empty then b := Box.cover b (ctm.apply pt)
       b := Box.cover b (ctm.apply c1)
       b := Box.cover b (ctm.apply c2)
+      b := Box.cover b (ctm.apply p)
+      pt := p
+      empty := false
+    | .quadTo c p =>
+      if empty then b := Box.cover b (ctm.apply pt)
+      b := Box.cover b (ctm.apply c)
       b := Box.cover b (ctm.apply p)
       pt := p
       empty := false
