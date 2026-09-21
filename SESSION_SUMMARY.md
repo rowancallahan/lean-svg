@@ -47,6 +47,12 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   our paths == resvg on `<text>`, 100% identical). Our rasteriser on those
   paths: 96.3% exact, and *no* pixels within 1–8, max diff 255 → to
   investigate (flipped `scale(k -k)` transform + native quads? see T31 note).
+- **T24b transform-origin + percent root sizes** (`Style.originDx/Dy`,
+  `parseTransformOrigin`, `resolveRootSize` shared by `canvasSetup`):
+  structure/transform-origin 3/23 → 14/23 (rest need clipPath/gradients/
+  text); percentages resolve against the viewport in usvg, not the bbox.
+  Corpus byte-identical. Gap: resvg's content-bbox size refit when a root
+  dimension falls back to 100×100.
 - Corpus now **19/23** at the strict bar. Failing: 12_badge 98.56, 14_flower
   97.81, 15_spiral 97.48, 16_stress 97.48 (curve/stroke antialiasing).
 
@@ -62,7 +68,6 @@ agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 
 | task | branch / worktree | state | to resume |
 |---|---|---|---|
-| **T24b** transform-origin + percent root sizes | `t24b-transform-origin` / `.worktrees/T24b` | **code complete, uncommitted** (`Render.lean`, `Svg.lean`, task file with report edits); agent was at "commit everything" | resume the T24b Sonnet agent (or by hand): `lake build`, run the spec's Verify, commit, then merge into main with the recipe below |
 | **T29** CSS `<style>` | `t29-css` / `.worktrees/T29`, commit 3294751 | **feature complete and verified** (structure/style 16/16, 38 `#guard`s, adversarial 42/42) but conflicts with T27 in `Svg.interpret` (5 hunks) | **T29m** merge task (`tasks/T29m-merge-css-switch.md`): a `git merge main` is in progress in that worktree (`MERGE_HEAD` present, `Svg.lean` unmerged). Resume the T29m Sonnet agent, or `git merge --abort` there and start it fresh. Bar: switch 13/13, systemLanguage 6/10, style 16/16, style-attribute 3/4, corpus byte-identical |
 
 All other in-flight work landed (see the merged list above). No agents are running.
