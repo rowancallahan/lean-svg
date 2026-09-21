@@ -34,6 +34,12 @@ Merged today, each after `lake build`, `run_tests` (no regression),
   clipPath, gradients, text). Replicates usvg quirks: unknown tags are not
   switch candidates, `display:none` winner renders nothing, root `<svg>` is
   gated too. Corpus byte-identical.
+- **T25 fonts** (`MicroSvg/Font.lean`, pure total TrueType parser: cmap 4/12,
+  glyf simple+composite with fuel, hmtx, kern, GPOS pair adjustment;
+  `MicroSvg/Fonts/{NotoSans,NotoSansBold,NotoSansItalic}.lean` OFL Latin
+  subsets ~32 KB each; `fontdump` debug exe, the only IO, not linked into
+  `microsvg`): exact match vs fontTools on 431/431 subset glyphs ×3 and
+  2791/2791 full-font glyphs; fuzz 2000/2000 clean. Renderer untouched.
 - Corpus now **19/23** at the strict bar. Failing: 12_badge 98.56, 14_flower
   97.81, 15_spiral 97.48, 16_stress 97.48 (curve/stroke antialiasing).
 
@@ -49,7 +55,6 @@ agents may spawn Sonnet helpers. **Rowan asked for no new Opus agents
 
 | task | model | branch | what | merge check |
 |---|---|---|---|---|
-| T25 fonts | Sonnet | `t25-fonts` | `MicroSvg/Font.lean` pure total TrueType parser, embedded Noto Sans subsets, `fontdump` exe, fontTools oracle + fuzz | 0 mismatches vs fontTools, fuzz clean, corpus byte-identical |
 | T29 CSS | Sonnet | `t29-css` | `MicroSvg/Css.lean` (simplecss subset), `<style>` integration in `interpret`, `tests/CssTests.lean` `#guard`s | structure/style ≥13/16 |
 | T24b | Sonnet | `t24b-transform-origin` | `transform-origin`, percent root `width`/`height` | structure/transform-origin ≥80%, structure/svg up |
 
