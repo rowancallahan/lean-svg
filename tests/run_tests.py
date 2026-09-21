@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 SVG_DIR = REPO / "tests" / "svg"
 OUT_DIR = REPO / "tests" / "out"
 DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "microsvg"
+RESVG_FONTS_DIR = REPO / "tests" / "corpora" / "resvg-test-suite" / "fonts"
 
 RENDER_TIMEOUT = 60  # seconds, per subprocess
 BAR_WIDTH = 4  # gray separator between composite panels
@@ -34,6 +35,23 @@ DIFF_GAIN = 4  # diff image red intensity = d * DIFF_GAIN, clamped
 # --------------------------------------------------------------------------
 # rendering
 # --------------------------------------------------------------------------
+
+
+def resvg_font_args(no_font_pin=False):
+    """Extra `resvg` flags that pin the oracle to the test suite's own bundled
+    fonts, so text renders against known font files instead of whatever the
+    system happens to have installed. Returns [] (no pinning) when disabled
+    or when the fonts directory is missing (with a warning on stderr)."""
+    if no_font_pin:
+        return []
+    if not RESVG_FONTS_DIR.is_dir():
+        print(
+            "warning: resvg fonts dir not found at %s, not pinning fonts"
+            % RESVG_FONTS_DIR,
+            file=sys.stderr,
+        )
+        return []
+    return ["--skip-system-fonts", "--use-fonts-dir", str(RESVG_FONTS_DIR)]
 
 
 def run_renderer(cmd):
@@ -129,7 +147,7 @@ def write_composite(path, panels):
 # --------------------------------------------------------------------------
 
 
-def run_one(svg, binary, tol, threshold):
+def run_one(svg, binary, tol, threshold, resvg_args=None):
     name = svg.stem
     result = {
         "name": name,
@@ -154,7 +172,9 @@ def run_one(svg, binary, tol, threshold):
     for stale in (ref_png, ours_png, OUT_DIR / result["cmp_png"]):
         stale.unlink(missing_ok=True)
 
-    rc_ref, ms_ref, err_ref, to_ref = run_renderer(["resvg", str(svg), str(ref_png)])
+    rc_ref, ms_ref, err_ref, to_ref = run_renderer(
+        ["resvg"] + (resvg_args or []) + [str(svg), str(ref_png)]
+    )
     rc_ours, ms_ours, err_ours, to_ours = run_renderer(
         [str(binary), str(svg), str(ours_png)]
     )
@@ -375,6 +395,12 @@ def main():
         default=True,
         help="run every test even after a failure (always on)",
     )
+    parser.add_argument(
+        "--no-font-pin",
+        action="store_true",
+        help="do not pin the resvg oracle's fonts to the test suite's bundled "
+             "set (falls back to whatever fonts resvg finds on the system)",
+    )
     args = parser.parse_args()
 
     binary = Path(args.bin).resolve()
@@ -395,7 +421,10 @@ def main():
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    results = [run_one(svg, binary, args.tol, args.threshold) for svg in svgs]
+    resvg_args = resvg_font_args(args.no_font_pin)
+    results = [
+        run_one(svg, binary, args.tol, args.threshold, resvg_args) for svg in svgs
+    ]
     print_table(results)
 
     passed = sum(1 for r in results if r["passed"])

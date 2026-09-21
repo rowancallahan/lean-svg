@@ -8,5 +8,6 @@ import MicroSvg.Canvas
 import MicroSvg.Png
 import MicroSvg.Xml
 import MicroSvg.Css
+import MicroSvg.Text
 import MicroSvg.Svg
 import MicroSvg.Render

@@ -15,6 +15,6 @@ def chunks : Array String := #[
 ]
 
 /-- The subsetted font, ready for `MicroSvg.Font.parse`. -/
-def bytes : ByteArray := MicroSvg.Font.hexDecodeChunks chunks
+def bytes (_ : Unit) : ByteArray := MicroSvg.Font.hexDecodeChunks chunks
 
 end MicroSvg.Fonts.NotoSans

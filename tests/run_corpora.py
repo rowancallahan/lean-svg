@@ -68,6 +68,7 @@ from run_tests import (  # noqa: E402  (path must be set up first)
     diff_panel,
     load_rgba,
     over_white,
+    resvg_font_args,
     write_composite,
 )
 
@@ -156,7 +157,7 @@ def first_line(text, limit=160):
 
 
 def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
-                keep_renders_dir=None):
+                keep_renders_dir=None, resvg_args=None):
     """Render one file both ways and score it.
 
     Returns a row dict. When `keep` is true the loaded RGBA arrays and the
@@ -218,7 +219,7 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
 
     # reference: resvg on the ORIGINAL file, for both routes
     rc_ref, ms_ref, err_ref, to_ref = run_cmd(
-        ["resvg", "-w", str(width), str(svg), str(ref_png)]
+        ["resvg"] + (resvg_args or []) + ["-w", str(width), str(svg), str(ref_png)]
     )
     row["ref_rc"] = "timeout" if to_ref else rc_ref
     row["ref_err"] = first_line(err_ref)
@@ -359,7 +360,8 @@ CSV_FIELDS = [
 ]
 
 
-def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_renders_dir=None):
+def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_renders_dir=None,
+                     resvg_args=None):
     width = width_for(corpus)
     tmpdir = Path(tempfile.mkdtemp(prefix="corpora_%s_%s_" % (corpus, route)))
     try:
@@ -373,6 +375,7 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
             return render_one(
                 svg, corpus, route, width, binary, tmpdir, i,
                 tol, threshold, keep=False, keep_renders_dir=keep_renders_dir,
+                resvg_args=resvg_args,
             )
 
         start = time.perf_counter()
@@ -392,7 +395,9 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
     return rows, elapsed, csv_path
 
 
-def write_worst_composites(corpus, route, rows, binary, tol, threshold, jobs):
+def write_worst_composites(
+    corpus, route, rows, binary, tol, threshold, jobs, resvg_args=None
+):
     """Re-render the N worst scored files and write ref|ours|diff composites."""
     scored = [r for r in rows if "_within" in r]
     worst = sorted(scored, key=lambda r: r["_within"])[:N_WORST]
@@ -408,7 +413,7 @@ def write_worst_composites(corpus, route, rows, binary, tol, threshold, jobs):
             svg = root / row["file"]
             fresh = render_one(
                 svg, corpus, route, width, binary, tmpdir, i,
-                tol, threshold, keep=True,
+                tol, threshold, keep=True, resvg_args=resvg_args,
             )
             panels = fresh.pop("_panels", None)
             if panels is None:
@@ -926,6 +931,11 @@ def main():
         "--no-worst", action="store_true", help="skip the worst-file composites"
     )
     parser.add_argument(
+        "--no-font-pin", action="store_true",
+        help="do not pin the resvg oracle's fonts to the test suite's bundled "
+             "set (falls back to whatever fonts resvg finds on the system)",
+    )
+    parser.add_argument(
         "--keep-renders", metavar="DIR", default=None,
         help="save each file's reference and our render as PNGs under "
              "DIR/<corpus>/<route>/<relative path>.{ref,ours}.png, for a "
@@ -1070,6 +1080,7 @@ def main():
     ).stdout.decode().strip() or "unknown"
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    resvg_args = resvg_font_args(args.no_font_pin)
     all_runs = []
     grand_start = time.perf_counter()
     for (corpus, route), files in selected.items():
@@ -1080,7 +1091,7 @@ def main():
         )
         rows, elapsed, csv_path = run_corpus_route(
             corpus, route, files, binary, args.tol, args.threshold, args.jobs,
-            keep_renders_dir,
+            keep_renders_dir, resvg_args=resvg_args,
         )
         s = stats_for(rows)
         print(
@@ -1095,7 +1106,8 @@ def main():
         )
         if not args.no_worst:
             write_worst_composites(
-                corpus, route, rows, binary, args.tol, args.threshold, args.jobs
+                corpus, route, rows, binary, args.tol, args.threshold, args.jobs,
+                resvg_args=resvg_args,
             )
         all_runs.append((corpus, route, rows, elapsed, csv_path))
 

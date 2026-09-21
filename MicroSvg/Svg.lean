@@ -1,6 +1,8 @@
 import MicroSvg.Xml
 import MicroSvg.Css
 import MicroSvg.Shader
+import MicroSvg.Canvas
+import MicroSvg.Text
 
 /-!
 # SVG interpretation
@@ -95,6 +97,23 @@ structure Style where
   signature.  Every other `Style` inherits the same table by copying. -/
   defs : Grad.Defs := {}
   ctm : Mat := Mat.identity
+  -- The text properties (T36).  All inherited, all unused by every element
+  -- except `text`/`tspan`, so nothing outside `Svg.textShapes` reads them.
+  /-- `font-size`, already resolved: `em`/`ex`/`%` are relative to the
+  inherited value (usvg's `resolve_font_size`), and the default is usvg's
+  `Options::font_size`. -/
+  fontSize : Fx := Fx.ofNat 12
+  /-- Numeric CSS `font-weight` after `bolder`/`lighter` stepping. -/
+  fontWeight : Nat := 400
+  /-- `font-style: italic` or `oblique`. -/
+  fontItalic : Bool := false
+  letterSpacing : Fx := 0
+  wordSpacing : Fx := 0
+  /-- `font-kerning: none`, or SVG 1.1 `kerning="0"`, turns pair kerning off. -/
+  textKerning : Bool := true
+  textAnchor : Text.Anchor := .start
+  /-- `xml:space="preserve"`. -/
+  spacePreserve : Bool := false
 deriving Repr, Inhabited
 
 structure Shape where
@@ -1077,6 +1096,152 @@ def parseColor (bs : ByteArray) : Option Rgba :=
   | some (.solid c) => some c
   | _ => none
 
+/-! ## Text properties (T36)
+
+`font-size`, `letter-spacing` and `word-spacing` are lengths whose `em`/`ex`
+(and, for `font-size`, `%`) units resolve against a *font size* rather than the
+viewport, so `Fixed.lean`'s `parseLength` — which prices `em` at a fixed 16 px —
+cannot be reused for them. -/
+
+/-- usvg's `convert_named_font_size`: a factor of `1.2^n` on the inherited
+size, with `n` from the keyword.  Anything unrecognised is `n = 0`, i.e. the
+inherited size itself (usvg warns and carries on), which is also what makes a
+malformed `font-size` inherit rather than fail. -/
+def namedFontSize (t : ByteArray) (parent : Fx) : Fx :=
+  let step : Int :=
+    if eqAscii t "xx-small" then -3
+    else if eqAscii t "x-small" then -2
+    else if eqAscii t "small" then -1
+    else if eqAscii t "smaller" then -1
+    else if eqAscii t "large" then 1
+    else if eqAscii t "larger" then 1
+    else if eqAscii t "x-large" then 2
+    else if eqAscii t "xx-large" then 3
+    else 0
+  let pow := fun (b : Int) (n : Nat) => Id.run do
+    let mut r : Int := 1
+    for _ in [0:n] do r := r * b
+    return r
+  if step > 0 then Fx.clamp (Int.ediv (parent * pow 6 step.toNat) (pow 5 step.toNat))
+  else if step < 0 then Fx.clamp (Int.ediv (parent * pow 5 (-step).toNat) (pow 6 (-step).toNat))
+  else parent
+
+/-- The unit suffix of a font-relative length, as a multiplier applied to
+`ref` (`em`), half of it (`ex`) or a hundredth (`%`); absolute units go
+through `Fixed.lean`'s own conversions, and `dpi` is usvg's default 96. -/
+def applyFontUnit (rest : ByteArray) (n ref : Fx) : Option Fx :=
+  if rest.size == 0 || eqAscii rest "px" then some n
+  else if eqAscii rest "em" then some (Fx.mul n ref)
+  else if eqAscii rest "ex" then some (Int.ediv (Fx.mul n ref) 2)
+  else if eqAscii rest "%" then some (Int.ediv (Fx.mul n ref) 100)
+  else if eqAscii rest "pt" then some (Int.ediv (n * 4) 3)
+  else if eqAscii rest "pc" then some (n * 16)
+  else if eqAscii rest "mm" then some (Int.ediv (n * 960) 254)
+  else if eqAscii rest "cm" then some (Int.ediv (n * 9600) 254)
+  else if eqAscii rest "in" then some (n * 96)
+  else none
+
+/-- `font-size`: a length relative to the inherited size, or a keyword. -/
+def parseFontSize (parent : Fx) (bs : ByteArray) : Fx :=
+  let t := trim bs
+  match parseNumber t 0 with
+  | none => namedFontSize t parent
+  | some (n, j) =>
+    match applyFontUnit (t.extract j t.size) n parent with
+    | some v => v
+    | none => namedFontSize t parent
+
+/-- The length a percentage resolves against on an attribute that names
+neither axis (`letter-spacing`, `word-spacing`): usvg's
+`√((w² + h²) / 2)` of the viewport, i.e. `hypot(w, h)/√2`; `46341/65536` is
+`1/√2`. -/
+def viewportDiag (w h : Fx) : Fx := Fx.scale16 (Fx.hypot w h) 46341
+
+/-- `letter-spacing` / `word-spacing`.  `normal` is zero; a percentage
+resolves against `viewportDiag`, as `convert_length`'s catch-all arm does. -/
+def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  if eqAscii t "normal" then some 0
+  else match parseNumber t 0 with
+    | none => none
+    | some (n, j) =>
+      let rest := t.extract j t.size
+      if eqAscii rest "%" then some (Int.ediv (Fx.mul n refLen) 100)
+      else applyFontUnit rest n fontSize
+
+/-- `font-weight`, as usvg resolves it: the keywords map to numbers, and
+`bolder`/`lighter` step from the inherited value by 300/200 at 400 and by 100
+elsewhere (Chrome's behaviour, which usvg follows over the CSS 2 spec),
+clamped to `[100, 900]`. -/
+def parseFontWeight (parent : Nat) (bs : ByteArray) : Nat :=
+  let t := trim bs
+  if eqAscii t "normal" then 400
+  else if eqAscii t "bold" then 700
+  else if eqAscii t "bolder" then Nat.min 900 (parent + (if parent == 400 then 300 else 100))
+  else if eqAscii t "lighter" then Nat.max 100 (parent - (if parent == 400 then 200 else 100))
+  else if eqAscii t "100" then 100
+  else if eqAscii t "200" then 200
+  else if eqAscii t "300" then 300
+  else if eqAscii t "400" then 400
+  else if eqAscii t "500" then 500
+  else if eqAscii t "600" then 600
+  else if eqAscii t "700" then 700
+  else if eqAscii t "800" then 800
+  else if eqAscii t "900" then 900
+  else parent
+
+/-- One item of an `x`/`y`/`dx`/`dy` list: `convert_user_length`, which
+resolves `em`/`ex` against the element's own font size and a percentage
+against the viewport axis the attribute belongs to (`x`/`dx` → width,
+`y`/`dy` → height). -/
+def parseTextLen (fontSize refLen : Fx) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
+  match parseNumber bs i with
+  | none => none
+  | some (v, j) =>
+    if startsWith bs j "px" then some (v, j + 2)
+    else if startsWith bs j "em" then some (Fx.mul v fontSize, j + 2)
+    else if startsWith bs j "ex" then some (Int.ediv (Fx.mul v fontSize) 2, j + 2)
+    else if startsWith bs j "pt" then some (Int.ediv (v * 4) 3, j + 2)
+    else if startsWith bs j "pc" then some (v * 16, j + 2)
+    else if startsWith bs j "mm" then some (Int.ediv (v * 960) 254, j + 2)
+    else if startsWith bs j "cm" then some (Int.ediv (v * 9600) 254, j + 2)
+    else if startsWith bs j "in" then some (v * 96, j + 2)
+    else if at' bs j == 37 then some (Int.ediv (Fx.mul v refLen) 100, j + 1)
+    else some (v, j)
+
+/-- A whitespace/comma separated list of such lengths.  Stops at the first
+item it cannot read, like `parseNumberList`. -/
+def parseTextLenList (fontSize refLen : Fx) (bs : ByteArray) : Array Fx := Id.run do
+  let mut out : Array Fx := #[]
+  let mut i := 0
+  for _ in [0:bs.size + 1] do
+    i := skipWsComma bs i
+    if i ≥ bs.size then break
+    match parseTextLen fontSize refLen bs i with
+    | some (v, j) =>
+      out := out.push v
+      i := j
+    | none => break
+  return out
+
+/-- `rotate` is a *number* list, and usvg's `Vec<f32>` reader propagates a
+parse error out of the whole attribute (`n.ok()?`), so one bad item — a unit
+suffix, say — makes the element carry no rotation at all rather than a
+truncated list. -/
+def parseStrictNumberList (bs : ByteArray) : Option (Array Fx) := Id.run do
+  let mut out : Array Fx := #[]
+  let mut i := 0
+  for _ in [0:bs.size + 1] do
+    i := skipWsComma bs i
+    if i ≥ bs.size then break
+    match parseNumber bs i with
+    | some (v, j) =>
+      -- a trailing unit is a `NumberListParser` error, not a stopping point
+      if j < bs.size && !(isWs (at' bs j)) && at' bs j != 44 then return none
+      out := out.push v
+      i := j
+    | none => return none
+  return some out
 /-- `fill` / `stroke` / `markers`, by position (`0`/`1`/`2`), matching
 svgtypes' `PaintOrderKind`. -/
 def paintOrderKindOf (tok : ByteArray) : Option Nat :=
@@ -1170,6 +1335,37 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  -- T36: text properties.  Inherited like every other property here; only
+  -- `Svg.textShapes` ever reads them.
+  | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
+  | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
+  | "font-style" =>
+    let t := trim v
+    if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
+    else if eqAscii t "normal" then { st with fontItalic := false } else st
+  | "letter-spacing" =>
+    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    | some s => { st with letterSpacing := s } | none => st
+  | "word-spacing" =>
+    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    | some s => { st with wordSpacing := s } | none => st
+  | "font-kerning" =>
+    let t := trim v
+    if eqAscii t "none" then { st with textKerning := false }
+    else if eqAscii t "auto" || eqAscii t "normal" then { st with textKerning := true } else st
+  -- SVG 1.1's `kerning` property: usvg turns pair kerning off only for an
+  -- explicit zero length, and leaves `auto` (and anything unparsable) alone.
+  | "kerning" =>
+    match parseLengthAll v with | some k => { st with textKerning := k != 0 } | none => st
+  | "text-anchor" =>
+    let t := trim v
+    if eqAscii t "middle" then { st with textAnchor := .middle }
+    else if eqAscii t "end" then { st with textAnchor := .atEnd }
+    else if eqAscii t "start" then { st with textAnchor := .start } else st
+  -- `get_xmlspace`: `preserve` turns collapsing off, any *other* value turns
+  -- it back on, and an absent attribute inherits (which is what not matching
+  -- here does).
+  | "xml:space" => { st with spacePreserve := eqAscii (trim v) "preserve" }
   | "paint-order" => { st with strokeFirst := strokeBeforeFill v }
   | _ => st
 
@@ -1466,6 +1662,111 @@ def gradPctRef (events : Array Xml.Event) : Grad.PctRef := Id.run do
       return { w := w * 256, h := h * 256 }
     | _ => pure ()
   return {}
+/-! ## `text` (T36) -/
+
+/-- The text-layout properties of a resolved `Style`. -/
+def spanPropsOf (st : Style) : Text.SpanProps :=
+  { face := Text.pickFace st.fontWeight st.fontItalic,
+    size := st.fontSize,
+    letterSpacing := st.letterSpacing,
+    wordSpacing := st.wordSpacing,
+    kerning := st.textKerning,
+    anchor := st.textAnchor }
+
+/-- The per-character position lists of one `text`/`tspan` element, resolved
+against that element's own font size and the viewport. -/
+def elemPosOf (st : Style) (attrs : Array Xml.Attr) : Text.ElemPos :=
+  let horiz := parseTextLenList st.fontSize st.pctRefW
+  let vert := parseTextLenList st.fontSize st.pctRefH
+  let rots := (attr attrs "rotate").bind parseStrictNumberList
+  { xs := (attr attrs "x").map horiz |>.getD #[],
+    ys := (attr attrs "y").map vert |>.getD #[],
+    dxs := (attr attrs "dx").map horiz |>.getD #[],
+    dys := (attr attrs "dy").map vert |>.getD #[],
+    rots := rots.getD #[],
+    hasRot := rots.isSome }
+
+/-- Turn the `<text>` element opened at `events[idx]` into shapes.
+
+The subtree is walked here rather than by `interpret`'s main loop because text
+layout is not per-element: whitespace collapsing, character positions and
+anchored chunks all need the whole element at once.  `interpret` therefore
+calls this once and then skips the subtree, which keeps its own edit to a
+single branch.
+
+`applyEff` is `interpret`'s own four-layer cascade, passed in so `tspan`
+styling goes through exactly the same CSS resolution as everything else.
+Elements other than `tspan` (and `a`, which SVG says to treat as a `tspan`
+here) are dropped together with their character data, as usvg's tree builder
+does — that covers `textPath` and `tref`, which this task does not support.
+
+Only `Text.SpanProps` and an index into a local table of resolved styles cross
+into `MicroSvg/Text.lean`; the styles come back attached to whole runs of
+glyphs, which become ordinary `Shape`s.  `evenOdd` is forced off because
+`fill-rule` does not apply to text (SVG 2 §text-rendering-order), and `ctm` is
+the `<text>` element's, because `transform` on a `tspan` is not a thing. -/
+def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
+    (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
+    (chain : Array Css.ElemInfo) (budget : Nat) : Array Shape × Nat := Id.run do
+  let textAttrs := match events.getD idx default with
+    | .open_ _ a => a
+    | _ => #[]
+  let mut styles : Array Style := #[]
+  let mut evs : Array Text.Ev := #[Text.Ev.open_ (elemPosOf textStyle textAttrs)]
+  let mut stStack : Array Style := #[textStyle]
+  let mut chStack : Array (Array Css.ElemInfo) := #[chain]
+  let mut ccStack : Array Nat := #[0]
+  let mut rendStack : Array Bool := #[true]
+  let mut skip : Nat := 0
+  let mut depth : Nat := 1
+  for j in [idx + 1 : events.size] do
+    if depth == 0 then break
+    match events.getD j default with
+    | .close =>
+      depth := depth - 1
+      if skip > 0 then skip := skip - 1
+      else
+        evs := evs.push .close
+        stStack := stStack.pop
+        chStack := chStack.pop
+        ccStack := ccStack.pop
+        rendStack := rendStack.pop
+    | .open_ nm attrs =>
+      depth := depth + 1
+      if skip > 0 then skip := skip + 1
+      else if nm == "tspan" || nm == "a" then
+        let isFirst := ccStack.back?.getD 0 == 0
+        ccStack := match ccStack.back? with
+          | some c => ccStack.pop.push (c + 1)
+          | none => ccStack
+        let info := Css.buildElemInfo nm (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let ch := (chStack.back?.getD #[]).push info
+        let st := applyEff (stStack.back?.getD default) attrs ch
+        stStack := stStack.push st
+        chStack := chStack.push ch
+        ccStack := ccStack.push 0
+        -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
+        -- while its characters keep their slots in the position lists.
+        rendStack := rendStack.push ((rendStack.back?.getD true) && !isDisplayNone attrs)
+        evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
+      else skip := skip + 1
+    | .text bs =>
+      if skip == 0 then
+        let st := stStack.back?.getD default
+        styles := styles.push st
+        evs := evs.push
+          (Text.Ev.text bs st.spacePreserve (styles.size - 1) (spanPropsOf st)
+            -- usvg's zero-`font-size` guard is per text node (the span's own
+            -- size), not inherited: `<text font-size="0"><tspan
+            -- font-size="40">` still draws the tspan.
+            ((rendStack.back?.getD true) && st.fontSize > 0))
+  let (placed, used) := Text.layout evs textStyle.spacePreserve budget
+  let mut out : Array Shape := #[]
+  for p in placed do
+    let st := styles.getD p.styleIdx textStyle
+    if st.visible then
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
+  return (out, used)
 
 /-- Walk the event stream with a style stack.
 
@@ -1573,7 +1874,10 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       | none => (0, 0)
     let base := { base with originDx := odx, originDy := ody }
     let early (n : String) := n == "color" || n == "transform-origin"
-    let skipName (n : String) := n == "style" || early n
+    -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
+    -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and
+    -- only the `style=""`/CSS layers below can set it (T36).
+    let skipName (n : String) := n == "style" || early n || n == "font-kerning"
     let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
     let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
     let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
@@ -1585,6 +1889,10 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let mut skip : Nat := 0
   let mut shapes : Array Shape := #[]
   let mut root : Option RootInfo := none
+  -- T36: how many more characters the whole document may lay out.  Every
+  -- `<text>` element draws from this one budget, so glyph generation is
+  -- bounded by a constant however much text the input contains.
+  let mut textBudget : Nat := 100000
   for idx in [0:events.size] do
     match events.getD idx default with
     | .text _ => pure ()
@@ -1673,6 +1981,16 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               elemStack := chain
               childCounts := childCounts.push 0
               switchSel := switchSel.push (some target)
+          else if name == "text" then
+            -- T36: one branch.  `textShapes` walks the whole subtree itself
+            -- (layout is not per-element) and the main loop skips it.
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let st := applyEffective parent attrs chain
+              let (shs, used) := textShapes applyEffective events idx st chain textBudget
+              shapes := shapes ++ shs
+              textBudget := textBudget - used
+              skip := 1
           else if isShape name then
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
