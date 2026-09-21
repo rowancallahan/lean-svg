@@ -2,6 +2,7 @@ import MicroSvg.Effect
 import MicroSvg.Bytes
 import MicroSvg.Fixed
 import MicroSvg.Geom
+import MicroSvg.Font
 import MicroSvg.Raster
 import MicroSvg.Canvas
 import MicroSvg.Png
