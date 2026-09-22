@@ -1,114 +1,20 @@
 /-
-# Output size upper bound — working file
+# Output byte-array size bounds
 
-## STATUS: NOT PROVED. DO NOT CITE THIS AS A GUARANTEE.
+These theorems concern the values returned by `Png.encode` and `render`.
+The filesystem, operating system and IO interpreter are outside their scope.
 
-**One hole remains: `zlibStoredRows_size_le`.** A complete proof of it
-exists in `proofs/L5-wip.lean` with no `sorry`, but Lean does not finish
-elaborating it (over 400 s with no heartbeat limit) because the function
-inlines two nested loops. The fix is `tasks/T46-recursive-zlib-rows.md`:
-rewrite that one function as explicit recursion, then port the proof.
- It is `sorry`, reports
-`sorryAx` and establishes nothing. `encode_size_le` and
-`encode_size_le_const` are now *derived* from it rather than being separate
-holes, so they inherit that one `sorryAx` and nothing else.
+The bound counts copied row bytes once, plus at most five header bytes per
+fragment iteration. It needs no assumption about the input RGBA array length:
+`copySlice` clamps short sources, and excess source bytes are never copied.
 
-Proved and hole-free: `forIn_invariant`, `forIn_measure_le`,
-`size_copySlice_append_le`, `size_blockHeader`, `size_be32`, `size_chunk`,
-and `encode_size_le'` — the whole PNG container layer, which is the half of
-the problem with no loop in it. These report `[propext, Quot.sound]`, or
-`[propext]` where no list or array lemma is used. `Quot.sound` is one of
-Lean's three standard axioms and arrives from core's `List.forIn_cons` and
-`Array.size_append`; it is not a hole.
+Public bounds:
+* `Png.encode`: at most `5 * max(w, h)^2 + 132` bytes, without hypotheses.
+* `render`: on success, at most `67452996` bytes under its current limits.
 
-Check for yourself:
-
-    lake env lean proofs/SizeBound.lean          -- expect exactly 1 sorry warning
-
-The statements below also need reading by a human against what they ought to
-say. A correct proof of the wrong statement is worth nothing, and the bound
-here was already wrong once in a way the kernel would never have caught: an
-earlier version claimed `6 * raw`, which is true but six times looser than
-the encoder deserves. See "The bound" below.
-
-## Scope
-
-The theorems are about the `ByteArray` that `Png.encode` returns. They say
-nothing about the file on disk. What the operating system does with those
-bytes is outside the model, and deliberately so.
-
-Not part of the `LeanSvg` library, so `lake build` does not see it and the
-`sorry` below does not break invariant 5. Check it with:
-
-    lake env lean proofs/SizeBound.lean
-
-## What is being proved, in English
-
-The renderer cannot produce an arbitrarily large file. The size of the PNG it
-writes is bounded by a function of the canvas dimensions alone, and the
-canvas dimensions are already checked at runtime. So a bounded input cannot
-turn into an unbounded output.
-
-Only the **upper bound** is wanted, not the exact size. That decision makes
-this much easier, in two specific ways that are worth naming:
-
-1. `ByteArray.copySlice` clamps its length with `min` against the source's
-   size. For an exact size you would have to prove `rgba` is long enough,
-   which means carrying the canvas-size invariant all the way down. For a
-   bound the `min` is free — it only ever helps.
-2. The number of stored DEFLATE blocks is `⌈raw/65535⌉`, and an exact size
-   has to get that count right. The bound below still has to count them, but
-   only up to the slack the invariant already carries, which is easier.
-
-**The bound must stay tight, and an earlier draft of this file did not.** It
-charged each 5-byte block header against a *single* data byte rather than
-against the 65535 bytes a block actually covers, giving `6 * raw`. That 6x
-was an artifact of the proof, not of the encoder. The encoder writes each
-pixel exactly once — four bytes per pixel, plus one filter byte per row —
-which is the tautological minimum for an uncompressed still image. A bound
-that exceeds it by a constant factor is measuring the proof, not the code.
-
-## The bound
-
-`zlibStoredRows` appends, to `out`:
-
-  - 2 bytes of zlib header,
-  - one byte per byte of `raw = h * (rowBytes + 1) = 4*w*h + h`, which is
-    every pixel once plus one filter byte per row,
-  - 5 bytes per stored-block header, and there are `⌊raw/65535⌋ + 1` of them,
-  - 5 more if `raw = 0`, for the empty-stream block,
-  - 4 bytes of Adler-32.
-
-so at most `out.size + 16 + raw + 5 * (raw / 65535)`. Wrapping that in the
-PNG container adds 8 signature, 25 IHDR, 4 IDAT length, 4 IDAT type, 4 IDAT
-CRC and 12 IEND, which is 57. Total `73 + raw + 5 * (raw / 65535)`, where the
-division term is under 0.008% of `raw`.
-
-There is no animation case to exclude. The encoder emits a single IDAT
-stream for one static frame; it has no APNG path, so nothing here can repeat
-a pixel across frames.
-
-## Empirical check
-
-Rendering `tests/svg/12_badge.svg` at 800x800 gives, in bytes:
-
-  | quantity                        | value     |
-  |---------------------------------|-----------|
-  | `raw` (every pixel once + filter) | 2 560 800 |
-  | actual file                     | 2 561 063 |
-  | bound above                      | 2 561 068 |
-
-Five bytes of slack. The 263 bytes between `raw` and the actual file are 57
-of container framing, 2 of zlib header, 4 of Adler-32 and forty 5-byte block
-headers. A bound that is not within a hair of `raw` is a broken bound.
-
-## Status
-
-The four supporting lemmas below are **proved**. The final assembly is not —
-see the note on `encode_size_le` for exactly what is left and why.
+Check with `lake env lean proofs/SizeBound.lean`.
 -/
-
-import LeanSvg.Png
+import LeanSvg.Render
 
 /-- The state carried by a `ForInStep`, whichever constructor it used. -/
 def ForInStep.val {β : Type} : ForInStep β → β
@@ -116,21 +22,14 @@ def ForInStep.val {β : Type} : ForInStep β → β
   | .yield b => b
 
 namespace LeanSvg.Png.SizeBound
-
 open LeanSvg Png
 
-/-! ## Generic loop reasoning
-
-Lean has no automation for `for` loops over ranges, so these two lemmas are
-the reusable core. Both reduce a loop to a single obligation about its body.
-They are stated over `List` because `Std.Legacy.Range.forIn_eq_forIn_range'`
-rewrites a range loop into a list loop.
--/
+/-! Reusable range-loop lemmas from the original proof attempt. The current
+encoder proof below instead uses induction on its recursive helpers. -/
 
 /-- **The workhorse.** Any predicate preserved by one step of a loop body
 holds of the loop's result. Use this when the invariant relates several
-components of the state, which is the case here: the bound on `o.size`
-depends on `pos`. -/
+components of the state. -/
 theorem forIn_invariant {α β : Type} (P : β → Prop)
     (f : α → β → Id (ForInStep β))
     (hstep : ∀ a b, P b → P (f a b).val) :
@@ -153,9 +52,7 @@ theorem forIn_invariant {α β : Type} (P : β → Prop)
       exact ih b h1
 
 /-- The simpler special case: if every step grows a measure by at most `k`,
-the loop grows it by at most `k` per element. Not strong enough for
-`zlibStoredRows`, where the useful invariant ties size to position, but it is
-the right tool for a loop whose body has a flat per-step cost. -/
+the loop grows it by at most `k` per element. Useful for loops whose bodies have a flat per-step cost. -/
 theorem forIn_measure_le {α β : Type} (sz : β → Nat) (k : Nat)
     (f : α → β → Id (ForInStep β))
     (hstep : ∀ a b, sz (f a b).val ≤ sz b + k) :
@@ -182,8 +79,6 @@ theorem forIn_measure_le {α β : Type} (sz : β → Nat) (k : Nat)
       have h3 := h2 b
       show sz (Id.run (forIn as b f)) ≤ sz init + (as.length * k + k)
       omega
-
-/-! ## Leaf lemmas about the two writing primitives -/
 
 /-- Copying `len` bytes into the end of `dest` grows it by at most `len`.
 
@@ -241,100 +136,183 @@ theorem encode_size_le' (w h : Nat) (rgba : ByteArray) (C : Nat)
   simp only [e1, e2, e3, e4, e5, e6, e7] at hb ⊢
   omega
 
-/-! ## The target -/
+/-- Each fragment consumes its requested bytes from the remaining row budget.
+Only the five-byte header is charged per iteration. -/
+theorem storedPieces_size_le (rgba : ByteArray) (rawSize stop fuel : Nat)
+    (out : ByteArray) (pos off : Nat) :
+    (storedPieces rgba rawSize stop fuel out pos off).1.size
+      ≤ out.size + (stop - off) + 5 * fuel := by
+  induction fuel generalizing out pos off with
+  | zero => simp only [storedPieces]; omega
+  | succ fuel ih =>
+    rw [storedPieces]
+    split
+    · rename_i h
+      let o := if pos % 65535 == 0 then blockHeader out pos rawSize else out
+      let n := Nat.min (65535 - pos % 65535) (stop - off)
+      have ho : o.size ≤ out.size + 5 := by
+        dsimp [o]
+        split
+        · rw [size_blockHeader]; omega
+        · omega
+      have hn : n ≤ stop - off := Nat.min_le_right _ _
+      have hc := size_copySlice_append_le rgba o off n false
+      have hi := ih (rgba.copySlice off o o.size n false) (pos + n) (off + n)
+      change (storedPieces rgba rawSize stop fuel
+        (rgba.copySlice off o o.size n false) (pos + n) (off + n)).1.size ≤ _
+      omega
+    · simp only []; omega
 
-/-- `zlibStoredRows` appends at most `11 + 6 * raw` bytes, where
-`raw = h * (rowBytes + 1)` is the filtered-scanline size.
+/-- One row adds its pixel bytes, one filter byte, and conservative header costs. -/
+theorem storedRows_size_le (rgba : ByteArray) (rowBytes rawSize pieces fuel y : Nat)
+    (out : ByteArray) (pos : Nat) :
+    (storedRows rgba rowBytes rawSize pieces fuel y out pos).size
+      ≤ out.size + fuel * (rowBytes + 6 + 5 * pieces) := by
+  induction fuel generalizing y out pos with
+  | zero => simp only [storedRows]; omega
+  | succ fuel ih =>
+    rw [storedRows]
+    let o := if pos % 65535 == 0 then blockHeader out pos rawSize else out
+    let row := storedPieces rgba rawSize (y * rowBytes + rowBytes) pieces
+      (o.push 0) (pos + 1) (y * rowBytes)
+    have ho : o.size ≤ out.size + 5 := by
+      dsimp [o]
+      split
+      · rw [size_blockHeader]; omega
+      · omega
+    have hr := storedPieces_size_le rgba rawSize (y * rowBytes + rowBytes) pieces
+      (o.push 0) (pos + 1) (y * rowBytes)
+    have hi := ih (y + 1) row.1 row.2
+    change (storedRows rgba rowBytes rawSize pieces fuel (y + 1) row.1 row.2).size ≤ _
+    change row.1.size ≤ _ at hr
+    simp only [ByteArray.size_push] at hr
+    rw [Nat.succ_mul fuel]
+    omega
 
-**Not proved yet, but the route changed on 2026-09-21** when Rowan relaxed
-the requirement: a bound of 2-3x the image is fine, the goal being "you will
-not fill your hard drive", not a tight number.
-
-That removes the hard part entirely. The tight bound needed an invariant
-conditional on `pos % 65535`, because a block header adds 5 bytes *without*
-advancing `pos`, so a position-only bound cannot stop that branch firing
-repeatedly. A loose bound does not care: **the header can fire at most once
-per loop iteration**, and the iteration counts are known up front. So the
-flat `forIn_measure_le` above suffices and no conditional invariant is
-needed.
-
-The arithmetic, with `pieces = rowBytes / 65535 + 2`:
-
-  - inner step: at most one header (5) plus a copy of at most 65535, so
-    65540; `size_copySlice_append_le` gives the copy;
-  - inner loop: `pieces * 65540`;
-  - outer step: one header (5), one filter byte (1), one inner loop;
-  - outer loop: `h * (6 + pieces * 65540)`;
-  - plus 2 zlib header, 4 Adler-32, 5 for the empty-stream block.
-
-For a full-width canvas this lands near 2x the true size, which is what was
-asked for. For a narrow one it is looser, because the per-step bound charges
-65535 for a copy that is really `rowBytes`; still a constant cap, which is
-the point.
-
-**The measure also dissolves the term-duplication problem.** Do-notation
-duplicates the inner `forIn` once per tuple projection, but the size measure
-only ever projects `.fst`, so the second copy is never looked at.
-
-**Progress so far**, in `scratchpad/L5.lean`: `unfold` then `simp only` with
-`Id.run`, a local `hbind` (`e >>= k = k e` in `Id`, by `rfl`), and
-`Std.Legacy.Range.forIn_eq_forIn_range'` reduces the goal to explicit
-projections on two `forIn`s over `List.range'`. `[:h].size = h` needs
-`simp [Std.Legacy.Range.size]`, not `rfl`. `forIn_measure_le` then applies
-with the measure given explicitly as `fun s : ByteArray × Nat => s.1.size`,
-which keeps unification first-order.
-
-What is left is plumbing, not insight: push `hpure` through the two branches
-of the `rawSize == 0` split, then discharge the two per-step obligations.
-Both steps are `Nat` arithmetic over `size_blockHeader`,
-`ByteArray.size_push` and `size_copySlice_append_le`, all three proved above.
-
-**lean-zip does not help.** It has no output-size theorems at all — only
-round-tripping, CRC properties and Huffman prefix-freeness. Its level 0 does
-emit stored blocks like ours, but adopting its encoder would change our
-output bytes, break corpus byte-identity, and add a runtime dependency with C
-primitives. It would cost the README's "no dependencies, no FFI" line and
-still not supply the theorem. -/
+/-- Stream bound, including zlib framing and the possible empty block. -/
 theorem zlibStoredRows_size_le (out rgba : ByteArray) (rowBytes h : Nat) :
     (zlibStoredRows out rgba rowBytes h).size
-      ≤ out.size + 11 + h * (6 + (rowBytes / 65535 + 2) * 65540) := by
-  sorry
+      ≤ out.size + 11 + h * (rowBytes + 16 + 5 * (rowBytes / 65535)) := by
+  have hr := storedRows_size_le rgba rowBytes (h * (rowBytes + 1))
+    (rowBytes / 65535 + 2) h 0 ((out.push 0x78).push 0x01) 0
+  simp only [ByteArray.size_push] at hr
+  simp only [zlibStoredRows, ByteArray.size_append, size_be32]
+  split
+  · rw [size_blockHeader]
+    have he : rowBytes + 6 + 5 * (rowBytes / 65535 + 2) =
+        rowBytes + 16 + 5 * (rowBytes / 65535) := by omega
+    rw [he] at hr
+    omega
+  · have he : rowBytes + 6 + 5 * (rowBytes / 65535 + 2) =
+        rowBytes + 16 + 5 * (rowBytes / 65535) := by omega
+    rw [he] at hr
+    omega
 
-/-- The `ByteArray` that `encode` returns is bounded by a function of the
-canvas dimensions: 73 bytes of fixed overhead, plus `raw = 4*w*h + h` for the
-pixels themselves, plus one 5-byte block header per 65535 bytes.
-
-This is the statement that should look tautological, and does: `raw` is every
-pixel written exactly once, and everything else is sub-percent.
-
-**This is about the returned `ByteArray`, not about a file.** What the
-operating system does with those bytes is outside the model.
-
-No longer an independent hole: it now derives from `encode_size_le'` (proved)
-and `zlibStoredRows_size_le` (the one remaining `sorry`). -/
+/-- A rectangular bound with all overhead explicit; valid even for short RGBA input. -/
 theorem encode_size_le (w h : Nat) (rgba : ByteArray) :
-    (encode w h rgba).size
-      ≤ 68 + h * (6 + (w * 4 / 65535 + 2) * 65540) := by
-  have := encode_size_le' w h rgba
-      (11 + h * (6 + (w * 4 / 65535 + 2) * 65540))
-      (fun out => by have := zlibStoredRows_size_le out rgba (w * 4) h; omega)
+    (encode w h rgba).size ≤ 68 + h * (4 * w + 16 + 5 * (4 * w / 65535)) := by
+  have hb := encode_size_le' w h rgba
+    (11 + h * (w * 4 + 16 + 5 * (w * 4 / 65535)))
+    (fun out => by have := zlibStoredRows_size_le out rgba (w * 4) h; omega)
+  rw [Nat.mul_comm w 4] at hb
   omega
 
-/-- What the bound is for. `render` already rejects `w` or `h` above `maxDim`
-and `w * h` above `maxPixels` at runtime, and the bound above is monotone in
-both, so the output size is capped by a constant. This is the statement that
-answers "no arbitrary image size"; it needs only `encode_size_le` plus
-monotonicity, both of which are arithmetic. -/
-theorem encode_size_le_const (w h : Nat) (rgba : ByteArray)
-    (maxDim : Nat) (hw : w ≤ maxDim) (hh : h ≤ maxDim) :
-    (encode w h rgba).size
-      ≤ 68 + maxDim * (6 + (maxDim * 4 / 65535 + 2) * 65540) := by
+/-- Conservative row accounting fits five bytes per pixel of the enclosing
+square, with 64 extra bytes covering the small dimensions. -/
+theorem square_budget (n : Nat) :
+    n * (4 * n + 16 + 5 * (4 * n / 65535)) ≤ 5 * n * n + 64 := by
+  by_cases hn : 16 ≤ n
+  · have hc : 4 * n + 16 + 5 * (4 * n / 65535) ≤ 5 * n := by omega
+    have hm := Nat.mul_le_mul_left n hc
+    have he : n * (5 * n) = 5 * n * n := by ac_rfl
+    rw [he] at hm
+    omega
+  · have hs : n = 0 ∨ n = 1 ∨ n = 2 ∨ n = 3 ∨ n = 4 ∨ n = 5 ∨
+        n = 6 ∨ n = 7 ∨ n = 8 ∨ n = 9 ∨ n = 10 ∨ n = 11 ∨
+        n = 12 ∨ n = 13 ∨ n = 14 ∨ n = 15 := by omega
+    rcases hs with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
+      rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide
+
+/-- The public bound: 1.25 times the RGBA bytes of the enclosing square,
+plus exactly 132 bytes. No hypotheses on dimensions or RGBA length. -/
+theorem encode_size_le_square (w h : Nat) (rgba : ByteArray) :
+    (encode w h rgba).size ≤ 5 * (max w h) * (max w h) + 132 := by
   have hb := encode_size_le w h rgba
-  have hdiv : w * 4 / 65535 ≤ maxDim * 4 / 65535 :=
-    Nat.div_le_div_right (by omega)
-  have hmono : h * (6 + (w * 4 / 65535 + 2) * 65540)
-      ≤ maxDim * (6 + (maxDim * 4 / 65535 + 2) * 65540) :=
-    Nat.mul_le_mul hh (by omega)
+  have hw : w ≤ max w h := Nat.le_max_left _ _
+  have hh : h ≤ max w h := Nat.le_max_right _ _
+  have hd : 4 * w / 65535 ≤ 4 * max w h / 65535 := by omega
+  have hm := Nat.mul_le_mul hh
+    (show 4 * w + 16 + 5 * (4 * w / 65535) ≤
+      4 * max w h + 16 + 5 * (4 * max w h / 65535) by omega)
+  have hs := square_budget (max w h)
   omega
 
 end LeanSvg.Png.SizeBound
+
+namespace LeanSvg
+
+/-- Every successful render returns a byte array bounded by its checked canvas.
+The witnesses are the dimensions passed to the encoder, including for tiles
+and parallel renders. No filesystem behavior is part of this statement. -/
+theorem render_output_size_bound (opts : Options) (input png : ByteArray)
+    (hr : render opts input = .ok png) :
+    ∃ w h : Nat, w ≤ maxDim ∧ h ≤ maxDim ∧ w * h ≤ maxPixels ∧
+      png.size ≤ 68 + h * (4 * w + 16 + 5 * (4 * w / 65535)) ∧
+      png.size ≤ 5 * (max w h) * (max w h) + 132 := by
+  unfold render at hr
+  simp only [bind, Except.bind, pure, Except.pure] at hr
+  cases hp : Xml.parse input with
+  | error e => simp [hp] at hr
+  | ok events =>
+    simp only [hp] at hr
+    cases hd : Svg.interpret events with
+    | error e => simp [hd] at hr
+    | ok doc =>
+      simp only [hd] at hr
+      cases hs : Render.canvasSetup doc.root opts with
+      | error e => simp [hs] at hr
+      | ok setup =>
+        rcases setup with ⟨w, h, mat, clip⟩
+        simp only [hs] at hr
+        split at hr
+        · simp at hr
+        · split at hr
+          · simp at hr
+          · rename_i hdim
+            split at hr
+            · simp at hr
+            · rename_i hpixels
+              have hw : w ≤ maxDim := by
+                simp only [Bool.or_eq_true, decide_eq_true_eq, not_or] at hdim
+                omega
+              have hh : h ≤ maxDim := by
+                simp only [Bool.or_eq_true, decide_eq_true_eq, not_or] at hdim
+                omega
+              have ha : w * h ≤ maxPixels := by omega
+              split at hr <;> split at hr <;> simp at hr
+              all_goals
+                subst png
+                exact ⟨w, h, hw, hh, ha, Png.SizeBound.encode_size_le w h _,
+                  Png.SizeBound.encode_size_le_square w h _⟩
+
+/-- The current dimension and pixel limits imply an explicit universal cap
+of 67,452,996 bytes for every successful pure render. -/
+theorem render_size_le_const (opts : Options) (input png : ByteArray)
+    (hr : render opts input = .ok png) : png.size ≤ 67452996 := by
+  obtain ⟨w, h, hw, hh, ha, hb, _⟩ := render_output_size_bound opts input png hr
+  simp only [maxDim, maxPixels] at hw hh ha
+  have hd : 4 * w / 65535 ≤ 1 := by omega
+  have hm := Nat.mul_le_mul_left h (show 4 * w + 16 + 5 * (4 * w / 65535) ≤
+    4 * w + 21 by omega)
+  have he : h * (4 * w + 21) = 4 * (w * h) + 21 * h := by
+    rw [Nat.mul_add]
+    ac_rfl
+  rw [he] at hm
+  omega
+
+end LeanSvg
+
+-- Public theorem audit: only standard Lean axioms, never `sorryAx`.
+#print axioms LeanSvg.Png.SizeBound.encode_size_le_square
+#print axioms LeanSvg.render_output_size_bound
+#print axioms LeanSvg.render_size_le_const

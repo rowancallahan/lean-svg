@@ -69,11 +69,11 @@ python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
   of what is *not* proven.
 - `learn/` — a standalone hello-world project that builds the effect monad from scratch, with an exercise (kept locally, not tracked in this repository).
   scratch, with an exercise: prove no-clobber yourself.
-- `proofs/` — proof work in progress, kept outside the `LeanSvg` library so
-  that unfinished proofs cannot reach `lake build`. `SizeBound.lean` is an
-  attempt at an output-size bound: the supporting lemmas check, the two
-  theorems that would establish the bound are still holes. Nothing here is a
-  claim yet.
+- `proofs/SizeBound.lean` — checked output-size bounds, verified separately
+  with `lake env lean proofs/SizeBound.lean`: the encoder returns at most
+  `5 * max(width, height)^2 + 132` bytes; a successful `render` returns at most
+  67,452,996 bytes under the current canvas limits. These concern returned
+  byte arrays, not filesystem behavior.
 - `ROADMAP.md` — features remaining, and difficulty estimates for the
   theorems not yet attempted.
 - `DESIGN.md` — what is proven, what is trusted, threat model, algorithms.

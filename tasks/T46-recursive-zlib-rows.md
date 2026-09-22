@@ -1,5 +1,9 @@
 # T46 — rewrite `zlibStoredRows` as explicit recursion, then close the size bound
 
+**Completed.** See the report below and `proofs/SizeBound.lean`. The original
+handoff follows for context. Its description of L5 as a complete proof meant
+an unelaborated candidate; only the replacement has been checked by Lean.
+
 Hand-off task. Everything needed is already written; what is missing is a
 restructure of one function so that Lean can actually check the proof.
 
@@ -105,3 +109,77 @@ but not at the cost of the encoder.
 Update `SPEC.md` section 4: the output-size entry moves from "not
 established" to section 1, stated as an upper bound on the `ByteArray` that
 `Png.encode` returns, and explicitly **not** a claim about the file on disk.
+
+## Report
+
+Implemented two structural-recursion helpers in `LeanSvg/Png.lean`, keeping
+stored-block bytes unchanged. The inner helper can stop once the row is
+exhausted; all remaining iterations of the original loop were no-ops.
+`LeanSvg/Effect.lean` is untouched. No dependencies or additional axioms added.
+
+`proofs/SizeBound.lean` now has checked proofs with no holes. It counts the
+remaining row bytes once, plus five header bytes per fragment iteration.
+This improves the old loose candidate to:
+
+- Encoder rectangular bound: `68 + h * (4*w + 16 + 5*(4*w / 65535))`.
+- Encoder square bound: `5 * max(w,h)^2 + 132`, for all dimensions and any
+  source array length, including empty or short sources.
+- Successful pure `render`: at most **67,452,996 bytes**, using both the
+  existing edge and area limits. Covers serial, parallel and tile output.
+
+These are function-output bounds only. The filesystem, OS and IO interpreter
+are outside their scope. `SPEC.md`, `README.md` and `ROADMAP.md` now reflect
+this; the superseded L5 file is a historical note rather than unchecked code.
+The generic loop lemmas from the earlier attempt remain available.
+
+Validation:
+
+- `lake build`: success, no new warnings.
+- Size proof plus axiom audit: about 1.3 seconds, default heartbeat limit.
+  Encoder bounds use `[propext, Quot.sound]`; renderer bounds use
+  `[propext, Classical.choice, Quot.sound]`; no `sorryAx`.
+- 54/54 corpus byte comparisons with the saved pre-change executable:
+  all 27 images at natural size and at width 800.
+- 8/8 additional byte comparisons: 1x1, 1x16384, 16384x1, 16383x2,
+  16384x2, 255x257, 256x256, 800x800.
+- `lake env lean --run tests/PngSizeTests.lean`: 256/256 writer comparisons
+  with the original loop implementation, covering zero dimensions, empty,
+  short and oversized sources, nonempty destinations, and 65535-byte block
+  boundaries (including rows spanning more than two blocks).
+- Fidelity harness: 23/27, the same four existing failures (badge, flower,
+  spiral, stress); byte identity establishes no regression.
+- Adversarial harness: 61/61 clean. Harness output redirected under
+  `/tmp/lean-svg-size-bound`; existing `tests/out` was not modified.
+- Interleaved whole-render timings, width 1600, median of three (ms):
+
+  | image | before | after |
+  |---|---:|---:|
+  | confetti | 229.83 | 230.75 |
+  | stress | 691.96 | 698.83 |
+  | gradients | 343.53 | 343.43 |
+
+  Changes range from -0.03% to +0.99%; no clear regression in this short
+  measurement. No commits made.
+
+### Follow-up: tighten the square coefficient
+
+Reduced the square bound from `8 * max(w,h)^2 + 100` to
+`5 * max(w,h)^2 + 132` using only arithmetic on the existing rectangular
+bound. No renderer or encoder implementation changes. The public theorem
+and renderer connection check in 1.49 seconds with the same standard axioms
+and no proof holes. A coefficient of three with a small constant cannot
+cover arbitrary squares: uncompressed RGBA already requires four bytes per
+pixel before framing.
+
+Quick recheck: build clean; 256/256 writer regressions and 15/15 byte
+comparisons against the pre-refactor binary for serial, parallel and viewport
+renders. The current executable SHA256 stayed unchanged throughout this
+proof-only tightening.
+
+Width-1600 median-of-three timing changes were +0.70% confetti, +3.36%
+stress and +0.10% gradients. Because stress was above the earlier noise
+range, it was rechecked after warmup with seven alternating pairs:
+696.70 ms before versus 700.30 ms after (+0.52% by medians; +0.76% median
+paired change). The larger initial change did not persist; no clear
+performance regression was detected. These timings compare the previous
+encoder refactor to its baseline, not a runtime change in this follow-up.

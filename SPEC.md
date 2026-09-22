@@ -21,8 +21,9 @@ EOF
 foundations. Lean has three standard axioms — `propext`, `Quot.sound` and
 `Classical.choice` — and any of the three is ordinary; Mathlib rests on all
 of them. `sorryAx` is the one that matters: it means a hole, and a theorem
-reporting it proves nothing. As of this writing every theorem in section 1
-reports `[propext]`.
+reporting it proves nothing. The six effect theorems report `[propext]`. The size bounds below report
+`[propext, Quot.sound]` for the encoder and
+`[propext, Classical.choice, Quot.sound]` for the renderer, with no `sorryAx`.
 
 ## These proofs have not been independently reviewed
 
@@ -39,15 +40,17 @@ So the statements themselves need checking by a human, line by line, against
 what a reader would take them to mean. That review has not happened yet.
 Until it does, treat section 1 as *claims whose proofs check*, not as
 *guarantees*. The model in `LeanSvg/Effect.lean` and the six-line
-`Prog.execIO` deserve the most scrutiny, because everything else is stated
-relative to them.
+`Prog.execIO` deserve the most scrutiny, because the effect claims are stated
+relative to them. The byte-array size bounds below concern pure functions
+and do not depend on the filesystem model or interpreter.
 
 ---
 
 ## 1. Proved
 
-All six live in `LeanSvg/Effect.lean` and are stated against a **model** of the
-filesystem, `FS`, which is a function from a path to its contents.
+The six effect theorems live in `LeanSvg/Effect.lean` and are stated against a
+**model** of the filesystem, `FS`, which is a function from a path to its
+contents. The separate output-size theorems live in `proofs/SizeBound.lean`.
 
 ### Nothing but the output file is touched
 
@@ -87,6 +90,38 @@ The remaining three are corollaries: `renderProgram_error_no_write` (on error,
 nothing changed), `renderProgram_ok_output` (on success, the output path holds
 the bytes), `renderProgram_ok_frame` (on success, nothing else moved).
 
+### Returned byte arrays have a bounded size
+
+`proofs/SizeBound.lean` proves, for every encoder input (even an RGBA array of
+an unexpected length):
+
+```lean
+theorem encode_size_le_square (w h : Nat) (rgba : ByteArray) :
+    (Png.encode w h rgba).size ≤ 5 * (max w h) * (max w h) + 132
+```
+
+This is 1.25 times the RGBA byte size of the enclosing square, plus **132 bytes**.
+A more informative rectangular bound is also proved:
+`68 + h * (4*w + 16 + 5 * (4*w / 65535))`, with natural-number division.
+
+`render_output_size_bound` connects both bounds to the dimensions checked by
+`render`, for serial, parallel and viewport output. Combining the rectangular
+bound with `maxDim = 16384` and `maxPixels = 16777216` proves:
+
+```lean
+theorem render_size_le_const (opts : Options) (input png : ByteArray)
+    (hr : render opts input = .ok png) : png.size ≤ 67452996
+```
+
+These are claims about **function outputs only**. The filesystem, operating
+system and `execIO` are outside these theorems; no disk-space or PNG-validity
+claim is implied. Check the proofs separately from the normal build:
+
+```bash
+lake build
+lake env lean proofs/SizeBound.lean
+```
+
 ---
 
 ## 2. Enforced without a theorem
@@ -105,7 +140,9 @@ the bytes), `renderProgram_ok_frame` (on success, nothing else moved).
 
 ## 3. Checked at runtime
 
-These are real protections, but they are `if` statements, not theorems.
+These protections are implemented as runtime checks. The output-size theorem
+above now uses the canvas checks; the other limits have no corresponding
+resource theorem here.
 
 - Canvas dimensions ≤ 16384 and total pixels ≤ 16777216.
 - XML nesting depth ≤ 64; element count ≤ 1000000.
@@ -120,17 +157,6 @@ Read this section as the specification's honest edge.
 
 **The output is not proved to be a valid PNG.** There is no PNG specification in
 Lean here. The encoder is ordinary code, tested against a real decoder.
-
-**The output size is not proved bounded.** `render` checks dimensions at
-runtime, but no theorem relates the returned `ByteArray`'s length to them.
-
-Work in progress in `proofs/SizeBound.lean`, which is deliberately outside the
-`LeanSvg` library so its holes cannot reach `lake build`. Current state: the
-supporting lemmas are proved, and the two theorems that would actually
-establish the bound are `sorry`, so they report `sorryAx` and prove nothing
-yet. The intended statement is about the `ByteArray` that `Png.encode`
-returns, not about the file on disk — what the operating system does with
-those bytes is outside the model either way.
 
 **No-clobber is not proved, and cannot currently be stated.** The model says
 `FS := String → ByteArray`: every path has contents, so a missing file reads as

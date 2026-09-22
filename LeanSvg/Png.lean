@@ -177,6 +177,32 @@ def zlibLen (rowBytes h : Nat) : Nat :=
   ((((out.push final).push (len &&& 0xFF).toUInt8).push ((len >>> 8) &&& 0xFF).toUInt8).push
     (nlen &&& 0xFF).toUInt8).push ((nlen >>> 8) &&& 0xFF).toUInt8
 
+/-- Copy the remaining fragments of one row. The fuel is the same fixed
+fragment count as the original range loop; keeping the loop separate also
+lets size proofs account for the remaining row bytes without unfolding the
+whole encoder. -/
+def storedPieces (rgba : ByteArray) (rawSize stop : Nat) :
+    Nat → ByteArray → Nat → Nat → ByteArray × Nat
+  | 0, out, pos, _ => (out, pos)
+  | fuel + 1, out, pos, off =>
+    if off < stop then
+      let out := if pos % 65535 == 0 then blockHeader out pos rawSize else out
+      let n := Nat.min (65535 - pos % 65535) (stop - off)
+      storedPieces rgba rawSize stop fuel
+        (rgba.copySlice off out out.size n false) (pos + n) (off + n)
+    else (out, pos)
+
+/-- Write a fixed number of rows, carrying the scanline-stream position.
+Both this loop and `storedPieces` recurse on structurally decreasing fuel. -/
+def storedRows (rgba : ByteArray) (rowBytes rawSize pieces : Nat) :
+    Nat → Nat → ByteArray → Nat → ByteArray
+  | 0, _, out, _ => out
+  | fuel + 1, y, out, pos =>
+    let out := if pos % 65535 == 0 then blockHeader out pos rawSize else out
+    let row := storedPieces rgba rawSize (y * rowBytes + rowBytes) pieces
+      (out.push 0) (pos + 1) (y * rowBytes)
+    storedRows rgba rowBytes rawSize pieces fuel (y + 1) row.1 row.2
+
 /-- Append to `out` the zlib stream for `h` scanlines of `rowBytes` bytes taken
 from `rgba`: filter byte 0 and then the row, cut into stored DEFLATE blocks of
 at most 65535 bytes.  Row boundaries and block boundaries do not line up, so a
@@ -184,27 +210,12 @@ row is copied in as many pieces as it straddles blocks — at most
 `rowBytes / 65535 + 2` of them, which bounds the inner loop.  Each piece goes
 straight from `rgba` into `out` with `ByteArray.copySlice`; nothing is copied
 twice, and `out` is expected to be sized for the whole file already. -/
-def zlibStoredRows (out : ByteArray) (rgba : ByteArray) (rowBytes h : Nat) : ByteArray := Id.run do
+def zlibStoredRows (out : ByteArray) (rgba : ByteArray) (rowBytes h : Nat) : ByteArray :=
   let rawSize := h * (rowBytes + 1)
   let pieces := rowBytes / 65535 + 2
-  let mut o := (out.push 0x78).push 0x01
-  let mut pos := 0
-  for y in [0:h] do
-    if pos % 65535 == 0 then o := blockHeader o pos rawSize
-    o := o.push 0
-    pos := pos + 1
-    let mut off := y * rowBytes
-    let stop := off + rowBytes
-    for _ in [0:pieces] do
-      if off < stop then
-        if pos % 65535 == 0 then o := blockHeader o pos rawSize
-        let n := Nat.min (65535 - pos % 65535) (stop - off)
-        let dst := o.size
-        o := rgba.copySlice off o dst n false
-        off := off + n
-        pos := pos + n
-  if rawSize == 0 then o := blockHeader o 0 0
-  return o ++ be32 (adler32Rows rgba rowBytes h)
+  let out := storedRows rgba rowBytes rawSize pieces h 0 ((out.push 0x78).push 0x01) 0
+  let out := if rawSize == 0 then blockHeader out 0 0 else out
+  out ++ be32 (adler32Rows rgba rowBytes h)
 
 def signature : ByteArray :=
   ⟨#[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]⟩

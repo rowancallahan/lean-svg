@@ -302,7 +302,7 @@ difficulty, since that is what was missing:
 | 1 | max input size | M3b.4 | ~half a day | a real theorem for almost no proof burden |
 | 2 | input ≠ output | M3b.0 | free | subsumed by no-clobber |
 | 3 | no clobbering | M3b.1 | 1–2 days | needs the model change |
-| 4 | output size upper bound | M3b.2 | ~2–3 days | skip M3; the bound is enough |
+| 4 | output size upper bound | M3b.2 | done | `proofs/SizeBound.lean`; pure returned bytes only |
 | 5 | bounded work | M3b.3 | dropped | halting is enough |
 
 **Start with (1).** `render` rejects an oversized input before parsing, and
@@ -317,6 +317,13 @@ re-proving against the new model, which is mechanical rather than hard. The
 trusted `execIO` grows from six lines to about eight, gaining one
 `pathExists` call. This is also the exercise sitting in
 `learn/hello-effects/Step3NoClobber.lean`.
+
+**(4) is now proved** in `proofs/SizeBound.lean`: the encoder returns at
+most `5 * max(w, h)^2 + 132` bytes, and the pure renderer's current limits
+imply a cap of 67,452,996 bytes on successful output. The filesystem is
+outside these statements. Check with `lake env lean proofs/SizeBound.lean`.
+The following records the original approach; the checked implementation
+uses recursive helpers and conservative per-row accounting.
 
 **(4) is an upper bound only.** Decided 2026-09-21: the exact size is not
 wanted, so `PLAN.md` M3 can be skipped and M3b.2 proved directly. The
@@ -400,7 +407,7 @@ back. Not before.
 1. T43, CI proofs. Small, protects the six theorems that already hold.
 2. M3b.4, max input size. Half a day, and a complete theorem.
 3. M3b.1, no-clobber, with the model change. The centrepiece.
-4. M3b.2, output size upper bound. Skip M3 — only the inequality is wanted.
+4. M3b.2, output size upper bound — completed; see `proofs/SizeBound.lean`.
 5. The PNG round trip, as a separate proof-time package per section 4.
 6. The locality theorem, cheap half. Shares the loop idiom with (4).
 
