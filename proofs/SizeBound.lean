@@ -3,7 +3,12 @@
 
 ## STATUS: NOT PROVED. DO NOT CITE THIS AS A GUARANTEE.
 
-**One hole remains: `zlibStoredRows_size_le`.** It is `sorry`, reports
+**One hole remains: `zlibStoredRows_size_le`.** A complete proof of it
+exists in `proofs/L5-wip.lean` with no `sorry`, but Lean does not finish
+elaborating it (over 400 s with no heartbeat limit) because the function
+inlines two nested loops. The fix is `tasks/T46-recursive-zlib-rows.md`:
+rewrite that one function as explicit recursion, then port the proof.
+ It is `sorry`, reports
 `sorryAx` and establishes nothing. `encode_size_le` and
 `encode_size_le_const` are now *derived* from it rather than being separate
 holes, so they inherit that one `sorryAx` and nothing else.
