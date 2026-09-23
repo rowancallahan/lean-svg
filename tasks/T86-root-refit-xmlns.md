@@ -13,6 +13,89 @@
    Keep the parser iterative and total, and keep every adversarial case
    clean; add cases for deeply nested namespace declarations.
 
+## Spec implemented
+
+### 1. Root size refit (`LeanSvg/RootFit.lean`, new)
+
+usvg `resolve_svg_size` + `calculate_svg_bbox` (`converter.rs`):
+
+* Condition (`restore_viewbox`): root has no `viewBox`, and `width` or
+  `height` is absent or a percentage (absent = `100%`).
+* Size = `(bbox.right, bbox.bottom)` of the root's absolute object bounding
+  box: every `Node.shape` in the finished `doc.nodes` (markers already
+  expanded), flattened in its own space and mapped through its `ctm`. Tight
+  bounds, no stroke, no filter/clip region, as `Group::abs_bounding_box`.
+* If that box has no positive right/bottom edge (or there is no content), the
+  pre-refit size is kept: each side resolved against the 100×100 default.
+* The result is written back as explicit `width`/`height` on `doc.root`;
+  `viewBox` stays none, so the root transform is still the identity.
+* `render` calls `RootFit.apply` after `Marker.expand` and before
+  `canvasSetup`, so the `maxDim`/`maxPixels` checks still run on the final
+  size before any allocation. `proofs/SizeBound.lean` only needed its
+  `canvasSetup` argument updated; `render_output_size_bound` and
+  `render_size_le_const` are unchanged in statement.
+* This also makes `width="N"` with no height/viewBox render (it used to fail
+  with "cannot determine image size"); usvg refits it too.
+
+### 2. Namespaces (`LeanSvg/Xml.lean`)
+
+As roxmltree + usvg `parse_tag_name`/`parse_svg_attribute`:
+
+* `xmlns` / `xmlns:p` declarations are scoped per element (flat binding
+  array plus a per-element mark restored on close); `xml` is predefined.
+  At most `maxNsBindings` = 64 bindings in scope, else the parse fails.
+* Unknown prefix (element or attribute) and `xmlns:p=""` are parse errors,
+  as in roxmltree.
+* An element whose namespace is neither none nor SVG is dropped with its
+  whole subtree (text/CDATA included) from the event stream, so every
+  consumer (`defsScan`, `Use.expand`, filters, patterns, CSS, text) sees the
+  same filtered tree. A non-SVG root element is an error (usvg `NoRootNode`).
+* Attribute names are canonicalised: SVG-namespace prefix stripped;
+  XLink-namespace attributes become `xlink:<local>` and XML-namespace ones
+  `xml:<local>` whatever the prefix; attributes in any other namespace and
+  the `xmlns*` declarations themselves are dropped.
+* End tags now match on the raw qualified name (roxmltree does too).
+* The parser stays a single bounded `for` loop; lookups are bounded by
+  `maxNsBindings`.
+
+## Skipped
+
+* Shapes usvg keeps but we drop before `doc.nodes` (e.g. `visibility="hidden"`
+  or no fill and no stroke) do not contribute to the refit box; usvg counts
+  them. No corpus file hits this.
+* Text bbox is the union of our glyph outlines, not usvg's text layout box.
+* Content percentages in the `width="N"`-only case still resolve against the
+  100×100 viewport (usvg uses `(N, 100)`); unchanged from before.
+
+## Report
+
+Target files, 200 px (`--dir structure/svg`), within-8:
+
+| file | before | after |
+|---|---|---|
+| `structure/svg/no-size.svg` | 0.674 | 1.000 |
+| `structure/svg/xmlns-validation.svg` | 0.360 | 1.000 |
+| `structure/svg/mixed-namespaces.svg` | 0.965 | 1.000 (same root cause) |
+
+Whole resvg suite, direct route:
+
+| pass | before | after |
+|---|---|---|
+| 100 px (`--fast`) | 1521 / 1679 | 1524 / 1679 |
+| 200 px | 1542 / 1679 | 1545 / 1679 |
+
+Zero pass→fail and zero within-8 drops at either width.
+
+* `lake build`: no errors, no warnings. `check-theorems.sh`: `theorems ok`.
+* `run_tests.py`: 48/52 (was 46/50; new `86_xmlns`, `86_root_refit` pass;
+  no score drops; the same 4 fail as before).
+* `run_adversarial.py`: 125/125 clean. New cases: `ns_nested_60` (renders),
+  `ns_nested_overflow` (rejected), `ns_rebind_30`, `ns_foreign_deep` (60-deep
+  non-SVG subtree dropped), `ns_unknown_prefix` (rejected), `ns_lookup_flood`
+  (63 bindings × 3·10^5 prefixed attributes, ~2.4 s), `refit_huge`
+  (refit canvas rejected by `maxDim`).
+* `run_tiles.py`: 52/52 byte-identical.
+
 ---
 
 ## Common rules (every lean-svg agent)

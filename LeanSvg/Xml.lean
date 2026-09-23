@@ -15,6 +15,13 @@ It is *not* a conforming XML parser, and that is the point:
 * Nesting depth is capped at `maxDepth` and element count at `maxElements`
   (the same cap librsvg uses).
 * Every loop is bounded by the input size.
+* Namespaces (T86) are resolved as roxmltree does, scoped per element: an
+  unknown prefix is an error, and an element outside the SVG namespace (usvg
+  accepts no namespace or SVG) is dropped with its whole subtree, text
+  included.  Attribute names come out canonical: SVG-namespace prefixes are
+  stripped, XLink and XML ones become `xlink:`/`xml:`, any other namespace and
+  the `xmlns` declarations themselves are dropped.  At most `maxNsBindings`
+  declarations may be in scope at once.
 -/
 
 namespace LeanSvg
@@ -41,11 +48,62 @@ deriving Inhabited
 def maxDepth : Nat := 64
 def maxElements : Nat := 1000000
 
-/-- Local part of a possibly prefixed name (`svg:rect` → `rect`). -/
-def localName (bs : ByteArray) : String :=
-  let i := findByte bs 0 58
-  let part := if i < bs.size then bs.extract (i + 1) bs.size else bs
-  toStr part
+def svgNs : String := "http://www.w3.org/2000/svg"
+def xlinkNs : String := "http://www.w3.org/1999/xlink"
+def xmlNs : String := "http://www.w3.org/XML/1998/namespace"
+/-- Namespace declarations in scope at once (every ancestor's plus the
+element's own); bounds each prefix lookup. -/
+def maxNsBindings : Nat := 64
+
+/-- `p:l` → `(p, l)`; an unprefixed name has prefix `""`. -/
+def splitQName (s : String) : String × String :=
+  if s.contains ':' then
+    let bs := s.toUTF8
+    let i := findByte bs 0 58
+    (toStr (bs.extract 0 i), toStr (bs.extract (i + 1) bs.size))
+  else ("", s)
+
+/-- The URI bound to prefix `p` (`""` is the default namespace; `""` as a URI
+is "no namespace"), innermost declaration first.  `none`: unbound prefix. -/
+def nsLookup (binds : Array (String × String)) (p : String) : Option String := Id.run do
+  if p == "xml" then return some xmlNs
+  for k in [0:binds.size] do
+    let (q, u) := binds.getD (binds.size - 1 - k) ("", "")
+    if q == p then return some u
+  return if p == "" then some "" else none
+
+/-- One start tag after namespace resolution. -/
+structure Scoped where
+  binds : Array (String × String)
+  name : String
+  foreign : Bool
+  attrs : Array Attr
+
+/-- Push the tag's own `xmlns`/`xmlns:p` declarations onto `binds`, then
+resolve the element's name and every attribute's against them. -/
+def resolveNs (binds : Array (String × String)) (qname : String) (raw : Array Attr) :
+    Except String Scoped := do
+  let mut b := binds
+  for a in raw do
+    let (p, l) := splitQName a.name
+    if p == "" && l == "xmlns" then b := b.push ("", toStr a.value)
+    else if p == "xmlns" then
+      if a.value.size == 0 then throw s!"empty namespace URI for prefix {l}"
+      b := b.push (l, toStr a.value)
+  if b.size > maxNsBindings then throw "too many namespace declarations in scope"
+  let (ep, el) := splitQName qname
+  let some eu := nsLookup b ep | throw s!"unknown namespace prefix {ep}"
+  let mut attrs : Array Attr := #[]
+  for a in raw do
+    let (p, l) := splitQName a.name
+    if p == "" then
+      if l != "xmlns" then attrs := attrs.push a
+    else if p != "xmlns" then
+      let some u := nsLookup b p | throw s!"unknown namespace prefix {p}"
+      if u == svgNs then attrs := attrs.push { a with name := l }
+      else if u == xlinkNs then attrs := attrs.push { a with name := "xlink:" ++ l }
+      else if u == xmlNs then attrs := attrs.push { a with name := "xml:" ++ l }
+  return ⟨b, el, eu != "" && eu != svgNs, attrs⟩
 
 /-- Parse `#NNN;` / `#xHHH;` (without the `&` and `;`). -/
 def parseCharRef (name : ByteArray) : Except String Nat := do
@@ -139,6 +197,13 @@ def decodeText (bs : ByteArray) (b e : Nat) : ByteArray := Id.run do
 def parse (bs : ByteArray) : Except String (Array Event) := do
   let mut events : Array Event := #[]
   let mut stack : Array String := #[]
+  -- Namespace scope: every declaration in scope, and per open element the
+  -- size `binds` had before it (restored on close).  `skip` is the depth of
+  -- the outermost open non-SVG element, `0` when none: nothing under it is
+  -- delivered.
+  let mut binds : Array (String × String) := #[]
+  let mut marks : Array Nat := #[]
+  let mut skip : Nat := 0
   let mut i := if at' bs 0 == 0xEF && at' bs 1 == 0xBB && at' bs 2 == 0xBF then 3 else 0
   let mut count := 0
   for _ in [0:bs.size + 1] do
@@ -146,7 +211,7 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
     i := findByte bs i 60
     if textStart < i then
       let txt := decodeText bs textStart i
-      if txt.size > 0 then events := events.push (.text txt)
+      if txt.size > 0 && skip == 0 then events := events.push (.text txt)
     if i ≥ bs.size then break
     if startsWith bs i "<?" then
       let e := findSeq bs (i + 2) "?>"
@@ -159,7 +224,7 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
     else if startsWith bs i "<![CDATA[" then
       let e := findSeq bs (i + 9) "]]>"
       if e ≥ bs.size then throw "unterminated CDATA section"
-      events := events.push (.text (bs.extract (i + 9) e))
+      if skip == 0 then events := events.push (.text (bs.extract (i + 9) e))
       i := e + 3
     else if startsWith bs i "<!DOCTYPE" || startsWith bs i "<!doctype" then
       let mut j := i + 9
@@ -179,21 +244,24 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
       let ns := i + 2
       let ne := skipWhile bs ns isNameChar
       if ne == ns then throw "malformed end tag"
-      let name := localName (bs.extract ns ne)
+      let name := toStr (bs.extract ns ne)
       let j := skipWs bs ne
       if at' bs j != 62 then throw "malformed end tag"
       match stack.back? with
       | none => throw "unexpected end tag"
       | some top =>
         if top != name then throw s!"mismatched end tag </{name}>, expected </{top}>"
+      if skip == 0 then events := events.push .close
+      if skip == stack.size then skip := 0
+      binds := binds.extract 0 (marks.back?.getD 0)
+      marks := marks.pop
       stack := stack.pop
-      events := events.push .close
       i := j + 1
     else
       let ns := i + 1
       let ne := skipWhile bs ns isNameChar
       if ne == ns then throw "malformed start tag"
-      let name := localName (bs.extract ns ne)
+      let name := toStr (bs.extract ns ne)
       let mut attrs : Array Attr := #[]
       let mut j := ne
       let mut selfClose := false
@@ -230,9 +298,17 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
       count := count + 1
       if count > maxElements then throw "too many elements"
       if stack.size ≥ maxDepth then throw "elements nested too deeply"
-      events := events.push (.open_ name attrs)
-      if selfClose then events := events.push .close
-      else stack := stack.push name
+      let sc ← resolveNs binds name attrs
+      if stack.size == 0 && sc.foreign then throw "root element is not in the SVG namespace"
+      let skipping := skip != 0 || sc.foreign
+      if !skipping then events := events.push (.open_ sc.name sc.attrs)
+      if selfClose then
+        if !skipping then events := events.push .close
+      else
+        stack := stack.push name
+        marks := marks.push binds.size
+        binds := sc.binds
+        if skip == 0 && sc.foreign then skip := stack.size
       i := j
   if stack.size != 0 then throw s!"unclosed element <{stack.back?.getD ""}>"
   -- `count` (not `events.isEmpty`): a tagless document now produces a single

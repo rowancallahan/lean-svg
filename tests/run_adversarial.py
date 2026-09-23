@@ -74,6 +74,58 @@ def generate_cases():
     write_text("deep_nesting_200.svg", nested(200))
     write_text("deep_nesting_60.svg", nested(60))
 
+    # --- T86 namespaces -----------------------------------------------------
+    # Namespace scopes nest with the elements.  60 levels each binding a
+    # fresh prefix stay under Xml.maxNsBindings (64) and render; two per level
+    # overflow it and are rejected; the default namespace and a prefix rebound
+    # at each of 30 levels (60 bindings), and a deep non-SVG subtree (dropped
+    # whole, text included) render.
+    ns_head = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n'
+    rect = '<rect x="10" y="10" width="80" height="80" fill="#3366cc"/>'
+
+    def ns_nested(depth, per):
+        opens = "".join(
+            "<g %s>" % " ".join(
+                'xmlns:p%d_%d="http://example.org/%d/%d"' % (d, k, d, k) for k in range(per))
+            for d in range(depth))
+        return ns_head + opens + rect + "</g>" * depth + "\n</svg>\n"
+
+    write_text("ns_nested_60.svg", ns_nested(60, 1))
+    write_text("ns_nested_overflow.svg", ns_nested(60, 2))
+    write_text(
+        "ns_rebind_30.svg",
+        ns_head
+        + '<s:g xmlns:s="http://www.w3.org/2000/svg" xmlns="http://example.org/x">' * 30
+        + '<s:rect x="10" y="10" width="80" height="80" fill="#3366cc"/><rect width="100" height="100"/>'
+        + "</s:g>" * 30
+        + "\n</svg>\n",
+    )
+    write_text(
+        "ns_foreign_deep.svg",
+        ns_head
+        + '<f:x xmlns:f="http://example.org/f">'
+        + "<g>" * 60 + "<text>t</text>" + rect + "</g>" * 60
+        + "</f:x>" + rect + "\n</svg>\n",
+    )
+    # A root with no size is refit to its content's box (usvg
+    # calculate_svg_bbox); a huge box must still hit the canvas caps.
+    write_text(
+        "refit_huge.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="100000" y="100000" width="10" height="10"/></svg>\n',
+    )
+    write_text("ns_unknown_prefix.svg", ns_head + "<q:rect/>\n</svg>\n")
+    # Worst case for prefix lookup: 63 bindings in scope and 10^5 elements
+    # whose prefixed attributes resolve through the outermost one.
+    binds = " ".join('xmlns:n%d="http://example.org/%d"' % (k, k) for k in range(62))
+    write_text(
+        "ns_lookup_flood.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+        + binds + ' width="100" height="100">\n'
+        + '<rect xlink:title="a" xlink:role="b" xlink:arcrole="c" width="1" height="1"/>' * 100_000
+        + "\n</svg>\n",
+    )
+
     # --- T22 compositing layers -------------------------------------------
     # Every one of these asks for far more layers than the renderer will
     # allocate; each must be answered with a clean exit, never a crash, a hang

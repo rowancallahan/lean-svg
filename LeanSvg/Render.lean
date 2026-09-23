@@ -5,6 +5,7 @@ import LeanSvg.Marker
 import LeanSvg.Filter.ImageRender
 import LeanSvg.PatternRender
 import LeanSvg.Png
+import LeanSvg.RootFit
 
 /-!
 # The pure renderer
@@ -1001,6 +1002,9 @@ def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
   -- so a marker instance is culled, tiled and banded exactly like any other
   -- shape, with no changes to any of that machinery.
   let doc := Marker.expand doc
+  -- T86: usvg's bounding-box refit of a root without a usable size, on the
+  -- finished nodes; the size it picks is checked below like any other.
+  let doc := RootFit.apply doc
   let (w, h, _, _) ← Render.canvasSetup doc.root opts
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"

@@ -285,9 +285,10 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
     | error e => simp [hd] at hr
     | ok doc =>
       simp only [hd] at hr
-      -- T52: `render` expands markers (a pure `Doc → Doc` transform that
-      -- leaves `root` untouched) between `Svg.interpret` and `canvasSetup`.
-      cases hs : Render.canvasSetup (Marker.expand doc).root opts with
+      -- T52/T86: `render` expands markers and refits the root size (pure
+      -- `Doc → Doc` transforms) between `Svg.interpret` and `canvasSetup`;
+      -- whatever size they lead to is checked below.
+      cases hs : Render.canvasSetup (RootFit.apply (Marker.expand doc)).root opts with
       | error e => simp [hs] at hr
       | ok setup =>
         rcases setup with ⟨w, h, mat, clip⟩
