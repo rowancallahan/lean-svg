@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1400">
+  <!-- T65: the most turbulence one render may do: two groups of 1400x1400
+       x 17 units, each just under Render.maxFilterWork, together just under
+       maxFilterTotal; huge frequencies and stitching on top. -->
+  <filter id="f" x="0" y="0" width="1" height="1">
+    <feTurbulence baseFrequency="1e30 0.37" numOctaves="99" stitchTiles="stitch" type="fractalNoise"/>
+  </filter>
+  <rect width="1400" height="1400" filter="url(#f)"/>
+  <rect width="1400" height="1400" filter="url(#f)" opacity="0.5"/>
+</svg>
