@@ -396,7 +396,7 @@ def expandContentList (doc : Doc) (idMap : Std.HashMap String Nat) :
                       budget := budget'
                       match entry.clipEntryIdx with
                       | some ceIdx =>
-                        usesAcc := usesAcc.push ⟨"", some ceIdx, instanceCtm, none⟩
+                        usesAcc := usesAcc.push ⟨"", some ceIdx, instanceCtm, none, none, none⟩
                         let useIdx := usesAcc.size - 1
                         outNodes := outNodes.push (.groupBegin { opacity := opacityOne, blend := .normal, isolate := false, clips := #[useIdx] })
                         outNodes := outNodes ++ inner

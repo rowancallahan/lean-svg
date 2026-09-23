@@ -23,6 +23,7 @@ import LeanSvg.Gzip
 import LeanSvg.SvgImage
 import LeanSvg.Pattern
 import LeanSvg.Units
+import LeanSvg.BasicShape
 import LeanSvg.Svg
 import LeanSvg.Clip
 import LeanSvg.Mask

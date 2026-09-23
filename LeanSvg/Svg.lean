@@ -10,6 +10,7 @@ import LeanSvg.Filter
 import LeanSvg.Image
 import LeanSvg.SvgImage
 import LeanSvg.Units
+import LeanSvg.BasicShape
 import Std.Data.HashMap
 
 /-!
@@ -211,6 +212,10 @@ structure Style where
   absent `clip-path`, an explicit `none`, an unparseable value (a CSS basic
   shape, say), all of which usvg treats alike: no clipping. -/
   clipRef : Option String := none
+  /-- T92: this element's own `clip-path` when it is not `url(#id)` or
+  `none`, raw: a candidate CSS basic shape (`BasicShape.parse`, run by
+  `addClipUse` once the element's font sizes are final).  Not inherited. -/
+  clipShapeRaw : Option ByteArray := none
   /-- The clip uses in force on this element, outermost first, as indices into
   `Doc.uses`.  Inherited; an element with its own `clip-path` appends one. -/
   clips : Array Nat := #[]
@@ -369,6 +374,12 @@ structure ClipUse where
   entry : Option Nat
   ctm : Mat
   bbox : Option Box
+  /-- T92: a CSS basic shape instead of an id, with the `view-box` reference
+  box; `interpret` builds its entry at the end, from `bbox`/`sbox`. -/
+  shape : Option (BasicShape.Spec × Box) := none
+  /-- T92: the stroke bounding box, filled in with `bbox` when a `stroke-box`
+  shape needs it. -/
+  sbox : Option Box := none
 deriving Inhabited
 
 /-- The largest number of `clipPath` elements collected; later ones are skipped
@@ -2018,13 +2029,24 @@ closes.  Returns the style with the use appended to `clips`, the table, and the
 new use's index. -/
 def addClipUse (st : Style) (uses : Array ClipUse) : Style × Array ClipUse × Option Nat :=
   match st.clipRef with
-  | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none⟩, some uses.size)
-  | none => (st, uses, none)
+  | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none, none, none⟩, some uses.size)
+  | none =>
+    let env : BasicShape.Env := ⟨parseTextLenAll st.fontSize 0 st.rootFontSize, parsePathData⟩
+    match st.clipShapeRaw.bind (BasicShape.parse env) with
+    | some spec =>
+      let vb : Box := ⟨0, 0, st.pctRefW, st.pctRefH⟩
+      ({ st with clips := st.clips.push uses.size },
+       uses.push { id := "", entry := none, ctm := st.ctm, bbox := none, shape := some (spec, vb) },
+       some uses.size)
+    | none => (st, uses, none)
 
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
-  | "clip-path" => { st with clipRef := parseClipRef v }
+  | "clip-path" =>
+    let r := parseClipRef v
+    { st with clipRef := r,
+              clipShapeRaw := if r.isNone && !eqAscii (trim v) "none" then some v else none }
   | "mask" => { st with maskRef := parseClipRef v }
   | "mask-type" => { st with maskAlpha := eqAscii (trim v) "alpha" }
   | "filter" => { st with filterRaw := some v }
@@ -3312,7 +3334,34 @@ structure Frame where
   filterOnly : Bool := false
   /-- T85: this `use`'s `ctxUses` slot; the box goes there on close. -/
   ctxUse : Option Nat := none
+  /-- T92: the stroke bounding box of this element's rendered content so far
+  (`bbox`'s counterpart), kept only while `wantS`: this element or an
+  ancestor has a `stroke-box` basic-shape `clip-path`. -/
+  sbox : Option Box := none
+  wantS : Bool := false
 deriving Inhabited
+
+/-- T92: whether clip use `slot` is a basic shape on the `stroke-box`. -/
+def strokeShapeUse (uses : Array ClipUse) (slot : Option Nat) : Bool :=
+  match slot.bind (fun k => uses[k]?) with
+  | some u => match u.shape with
+    | some (spec, _) => spec.ref == .stroke
+    | none => false
+  | none => false
+
+/-- T92: a shape's stroke bounding box, Chromium's `stroke-box`: the bounds of
+the exact stroke outline (`strokePoly`, without dashes) joined with the fill
+box; just the fill box when there is no stroke. -/
+def strokeBoxOf (st : Style) (cmds : Array PathCmd) : Option Box := Id.run do
+  let mut b := cmdsBox cmds
+  let painted := match st.stroke with | .none => false | _ => true
+  if !painted || st.strokeWidth ≤ 0 then return b
+  let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+  for poly in flatten Mat.identity cmds do
+    for ring in strokePoly ss poly #[] do
+      for p in ring do
+        b := Box.cover b p
+  return b
 
 /-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
 theorem use_maxDepth_le : Use.maxDepth ≤ maxLayerDepth := by decide
@@ -3579,7 +3628,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     let base := { base with ownOpacity := opacityOne, blend := .normal, isolate := false }
     -- `clip-path` and the element's own transform are per-element too, and for
     -- the same reason (T20).
-    let base := { base with clipRef := none, ownMat := Mat.identity, maskRef := none,
+    let base := { base with clipRef := none, clipShapeRaw := none, ownMat := Mat.identity, maskRef := none,
                             maskAlpha := false, filterRaw := none }
     -- `text-decoration` and `textLength`/`lengthAdjust` are per-element for
     -- the same reason (T55): see the field docs on `Style`.
@@ -3698,7 +3747,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         -- under `defs` or inside a `clipPath` is not a child of the parent
         -- group in usvg's tree and does not count towards its box.
         match fr.useSlot with
-        | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox })
+        | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox, sbox := fr.sbox })
         | none => pure ()
         match fr.maskUse with
         | some k => maskUses := maskUses.modify k (fun u => { u with bbox := fr.bbox })
@@ -3734,7 +3783,10 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         | .render, some pf =>
           if pf.want then
             frames := frames.pop.push
-              { pf with bbox := Box.union pf.bbox (fr.bbox.bind (Box.transformed st.ownMat)) }
+              { pf with bbox := Box.union pf.bbox (fr.bbox.bind (Box.transformed st.ownMat)),
+                        sbox := if pf.wantS then
+                            Box.union pf.sbox ((fr.sbox <|> fr.bbox).bind (Box.transformed st.ownMat))
+                          else pf.sbox }
         | _, _ => pure ()
     | .open_ name attrs =>
       if skip > 0 then
@@ -3828,7 +3880,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               clipTable := clipTable.modify k (fun e =>
                 { e with transform := stC.ctm, transformValid := Mat.hasScale stC.ctm,
                          objectBBox := obb, selfClipId := stC.clipRef, filled := true })
-              enter := some { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none }
+              enter := some { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none,
+                                       clipShapeRaw := none }
               frame := { mode := .clip k }
             | none => skip := 1
           else if name == "mask" then
@@ -3868,7 +3921,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               nodes := #[]
               layerDepth := 0
               enter := some { stM with ctm := Mat.identity, ownMat := Mat.identity,
-                                       clipRef := none, maskRef := none }
+                                       clipRef := none, clipShapeRaw := none, maskRef := none }
               frame := { mode := .render, maskSlot := some k,
                          fine := (maskTable.getD k default).contentBBox }
             | none => skip := 1
@@ -4010,7 +4063,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 clipTable := clipTable.push
                   { id := "", transform := Mat.identity, transformValid := true, objectBBox := false,
                     selfClipId := none, selfClip := none, children := #[child] }
-                uses := uses.push ⟨"", some (clipTable.size - 1), st0.ctm, none⟩
+                uses := uses.push ⟨"", some (clipTable.size - 1), st0.ctm, none, none, none⟩
                 st0 := { st0 with clips := st0.clips.push (uses.size - 1) }
                 viewportClip := some (uses.size - 1)
               let st1 := { st0 with ctm := st0.ctm.mul newTs, ownMat := st0.ownMat.mul newTs,
@@ -4104,7 +4157,9 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                   match frames.back? with
                   | some pf' =>
                     frames := frames.pop.push
-                      { pf' with bbox := Box.union pf'.bbox (tbox.bind (Box.transformed st.ownMat)) }
+                      { pf' with bbox := Box.union pf'.bbox (tbox.bind (Box.transformed st.ownMat)),
+                                 sbox := if pf'.wantS then Box.union pf'.sbox (tbox.bind (Box.transformed st.ownMat))
+                                   else pf'.sbox }
                   | none => pure ()
               | .defs => pure ()
               | .markerDef _ => pure ()  -- unreachable: gated above, kept for exhaustiveness
@@ -4188,10 +4243,12 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                     clipTable := clipTable.modify k fun e => { e with children := e.children.push child }
                 | none => pure ()
               let want := slot.isSome || mslot.isSome || pf.want || st.filterRaw.isSome
+              let wantS := pf.wantS || strokeShapeUse uses slot
               enter := some st
               frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
                          bbox := if want then cmds.bind cmdsBox else none,
-                         isShapeLeaf := true }
+                         sbox := if want && wantS then cmds.bind (strokeBoxOf st) else none,
+                         wantS, isShapeLeaf := true }
               renders := pf.mode.isRender
           else if name == "marker" then
             -- T52: like `clipPath`, a `<marker>` never renders itself -- only
@@ -4217,7 +4274,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               markerSlot := some k
               let stM := applyEffective
                 { parent with ctm := Mat.identity, ownMat := Mat.identity,
-                              clips := #[], clipRef := none } attrs chain
+                              clips := #[], clipRef := none, clipShapeRaw := none } attrs chain
               let refX := lengthOrPctAttr attrs "refX" 0 stM.pctRefW
               let refY := lengthOrPctAttr attrs "refY" 0 stM.pctRefH
               let width := lengthOrPctAttr attrs "markerWidth" (Fx.ofNat 3) stM.pctRefW
@@ -4304,7 +4361,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                   { id := "", transform := Mat.identity, transformValid := true,
                     objectBBox := false, selfClipId := none, selfClip := none,
                     children := #[child] }
-                uses := uses.push ⟨"", some (clipTable.size - 1), st.ctm, none⟩
+                uses := uses.push ⟨"", some (clipTable.size - 1), st.ctm, none, none, none⟩
                 -- Inside this element's own `clip-path` use, which stays last on
                 -- the chain because a layer takes it back off from there.
                 let k := uses.size - 1
@@ -4352,7 +4409,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           -- shape has nothing to overlap with, so its own `clip-path` keeps
           -- T20's cheaper per-coverage multiply unless the element is getting
           -- a layer anyway, in which case the clip rides it.
-          let clipLayer := container && (st.clipRef.isSome || viewportClip.isSome)
+          let clipLayer := container && (st.clipRef.isSome || frame.useSlot.isSome || viewportClip.isSome)
           let other := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer
             || frame.maskUse.isSome
           -- T51: a `filter` is `should_isolate`'s third case.  Whether it
@@ -4405,7 +4462,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           childCounts := childCounts.push 0
           switchSel := switchSel.push sel
           layerOpen := layerOpen.push layered
-          frames := frames.push frame
+          frames := frames.push { frame with wantS := frame.wantS || pf.wantS || strokeShapeUse uses frame.useSlot }
           markerOpenSlot := markerOpenSlot.push markerSlot
   -- T20: resolve the ids, over the slots the walk actually filled.  Like
   -- usvg's `links` map, a duplicated id resolves to the last such element.
@@ -4416,6 +4473,27 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
       if e.filled then m := m.insert e.id i
     return m
   let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
+  -- T92: a basic-shape use gets a synthetic one-child entry, like T48's
+  -- viewport clips, now that its element's boxes are known.  No box (an
+  -- empty group) means no outline, which clips everything away.
+  let mut shapeClips : Array ClipEntry := #[]
+  for i in [0:uses.size] do
+    let u := uses.getD i default
+    match u.shape with
+    | some (spec, vb) =>
+      let box := match spec.ref with
+        | .fill => u.bbox
+        | .stroke => u.sbox <|> u.bbox
+        | .view => some vb
+      let children := match box.map (BasicShape.build spec) with
+        | some (cmds, eo) => if cmds.size ≥ 2 then #[(⟨cmds, eo, Mat.identity, true, #[], false⟩ : ClipChild)] else #[]
+        | none => #[]
+      uses := uses.modify i fun x => { x with entry := some (clipsResolved.size + shapeClips.size) }
+      shapeClips := shapeClips.push
+        { id := "", transform := Mat.identity, transformValid := true, objectBBox := false,
+          selfClipId := none, selfClip := none, children, filled := false }
+    | none => pure ()
+  let clipsResolved := clipsResolved ++ shapeClips
   -- A use that already has its entry (T48's viewport clips) keeps it.
   let usesResolved := uses.map fun u =>
     { u with entry := match u.entry with | some k => some k | none => idMap.get? u.id }
