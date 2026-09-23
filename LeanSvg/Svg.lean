@@ -90,6 +90,9 @@ structure Style where
   the property's value never changes what gets drawn).  Inherited, like every
   other paint property. -/
   strokeFirst : Bool := false
+  /-- T95: where `markers` sits in `paint-order`'s resolved order (0, 1 or
+  2; default 2, after fill and stroke).  `Marker.expand` reads it. -/
+  markersPos : Nat := 2
   /-- This element's own `opacity` property; not inherited (reset to 1 for
   every element before its attributes apply). -/
   ownOpacity : Nat := opacityOne
@@ -250,6 +253,14 @@ structure Style where
   server against that `use`'s transform and content bbox, not the shape's. -/
   fillCtx : Option Nat := none
   strokeCtx : Option Nat := none
+  /-- T95: inside `<marker>` content with no `use` in between, where
+  `context-*` means the referencing shape's paint (usvg's
+  `ContextElement::PathNode`), known only once `Marker.expand` runs. -/
+  markerCtx : Bool := false
+  /-- T95: under `markerCtx`, `some stroke?` when `fill` (resp. `stroke`) was
+  `context-fill`/`context-stroke`; `Marker.expand` substitutes the paint. -/
+  fillCtxKind : Option Bool := none
+  strokeCtxKind : Option Bool := none
   /-- This element's own `mask` reference (T49), not inherited, like `clipRef`. -/
   maskRef : Option String := none
   /-- `mask-type: alpha` on this element (T49), not inherited; only a `mask`
@@ -1668,6 +1679,11 @@ def ctxSlotOf (st : Style) : PaintSpec → Option Nat
   | .context _ => st.ctxSlot
   | _ => none
 
+/-- T95: which `context-*` a paint is, when it is left for `Marker.expand`. -/
+def markerCtxKind (st : Style) : PaintSpec → Option Bool
+  | .context stroke => if st.markerCtx then some stroke else none
+  | _ => none
+
 /-- Parse the `color` property.  It is an ordinary colour, never `none` or
 `url(...)`; reusing `parsePaint` and rejecting anything but `.solid` gets that
 for free (`none`/`url()` parse to `PaintSpec.none`, and `currentcolor` to
@@ -1946,18 +1962,15 @@ def paintOrderKindOf (tok : ByteArray) : Option Nat :=
   else if eqAscii tok "markers" then some 2
   else none
 
-/-- Whether `paint-order`'s resolved order puts `stroke` before `fill` -- the
-only visible effect of the property here, since this renderer has no markers.
+/-- `paint-order`'s resolved order, as the three kinds of `paintOrderKindOf`.
 
 Mirrors svgtypes' `PaintOrder::from_str` (`src/paint_order.rs`) exactly: up to
 three whitespace-separated idents; `normal` short-circuits to the default
 order; any unrecognised ident, or anything left over after (at most) three
 idents, falls back to the default order; missing kinds are then appended in
 `fill stroke markers` order; and a duplicate among the resolved three slots
-*also* falls back to the default.  In the default order `stroke` never comes
-before `fill`, so every one of those fallbacks is the same `false` this
-returns directly. -/
-def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
+*also* falls back to the default `#[0, 1, 2]`. -/
+def paintOrderOf (bs : ByteArray) : Array Nat := Id.run do
   let t := trim bs
   let mut order : Array Nat := #[]
   let mut left : Array Nat := #[0, 1, 2]
@@ -1973,18 +1986,24 @@ def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
         match paintOrderKindOf tok with
         | some k => left := left.filter (· != k); order := order.push k
         | none => bad := true
-  if bad || order.isEmpty || i < t.size then false
+  if bad || order.isEmpty || i < t.size then #[0, 1, 2]
   else
     for k in left do
       if order.size < 3 then order := order.push k
     let o0 := order.getD 0 9
     let o1 := order.getD 1 9
     let o2 := order.getD 2 9
-    if o0 == o1 || o0 == o2 || o1 == o2 then false
-    else
-      let strokePos := if o0 == 1 then 0 else if o1 == 1 then 1 else 2
-      let fillPos := if o0 == 0 then 0 else if o1 == 0 then 1 else 2
-      decide (strokePos < fillPos)
+    if o0 == o1 || o0 == o2 || o1 == o2 then #[0, 1, 2] else order
+
+/-- Position of kind `k` in a resolved `paintOrderOf`. -/
+def paintOrderPos (order : Array Nat) (k : Nat) : Nat :=
+  if order.getD 0 9 == k then 0 else if order.getD 1 9 == k then 1 else 2
+
+/-- Whether `paint-order`'s resolved order puts `stroke` before `fill`
+(usvg's `svg_paint_order_to_usvg`). -/
+def strokeBeforeFill (bs : ByteArray) : Bool :=
+  let o := paintOrderOf bs
+  decide (paintOrderPos o 1 < paintOrderPos o 0)
 
 /-- Properties usvg honours only from CSS — a `style=""` declaration or a
 `<style>` rule — and ignores as presentation attributes
@@ -2142,9 +2161,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     if eqAscii t "evenodd" then { st with clipEvenOdd := true }
     else if eqAscii t "nonzero" then { st with clipEvenOdd := false } else st
   | "fill" => match parsePaint v with
-    | some p => { st with fill := resolvePaint st p, fillCtx := ctxSlotOf st p } | none => st
+    | some p => { st with fill := resolvePaint st p, fillCtx := ctxSlotOf st p,
+                          fillCtxKind := markerCtxKind st p } | none => st
   | "stroke" => match parsePaint v with
-    | some p => { st with stroke := resolvePaint st p, strokeCtx := ctxSlotOf st p } | none => st
+    | some p => { st with stroke := resolvePaint st p, strokeCtx := ctxSlotOf st p,
+                          strokeCtxKind := markerCtxKind st p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
   | "stroke-opacity" => match parseOpacity v with | some o => { st with strokeOpacity := o } | none => st
   -- `opacity` is not an inherited property: it belongs to this element alone
@@ -2349,7 +2370,8 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   -- it back on, and an absent attribute inherits (which is what not matching
   -- here does).
   | "xml:space" => { st with spacePreserve := eqAscii (trim v) "preserve" }
-  | "paint-order" => { st with strokeFirst := strokeBeforeFill v }
+  | "paint-order" =>
+    { st with strokeFirst := strokeBeforeFill v, markersPos := paintOrderPos (paintOrderOf v) 2 }
   | _ => st
 
 /-- Parse a `style="a:b; c:d"` attribute into (name, value) pairs. -/
@@ -4165,7 +4187,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 then some ctxUses.size else none
               let st := { st with ctm := st.ctm.mul tr, ownMat := st.ownMat.mul tr,
                                   ctxFill := noAlpha st.fill, ctxStroke := noAlpha st.stroke,
-                                  ctxSlot := cslot }
+                                  ctxSlot := cslot, markerCtx := false }
               if cslot.isSome then ctxUses := ctxUses.push ⟨st.ctm, none⟩
               let (st, uses', slot) := addClipUse st uses
               uses := uses'
@@ -4520,7 +4542,10 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               markerSlot := some k
               let stM := applyEffective
                 { parent with ctm := Mat.identity, ownMat := Mat.identity,
-                              clips := #[], clipRef := none, clipShapeRaw := none } attrs chain
+                              clips := #[], clipRef := none, clipShapeRaw := none,
+                              -- T95: `context-*` in here is the referencing shape's.
+                              ctxFill := .none, ctxStroke := .none, ctxSlot := none,
+                              markerCtx := true } attrs chain
               let refX := lengthOrPctAttr attrs "refX" 0 stM.pctRefW
               let refY := lengthOrPctAttr attrs "refY" 0 stM.pctRefH
               let width := lengthOrPctAttr attrs "markerWidth" (Fx.ofNat 3) stM.pctRefW
