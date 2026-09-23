@@ -837,6 +837,18 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       | none => #[]
     let mut x : Int := x0
     let mut y : Int := 0
+    -- SVG2's text-chunk algorithm computes the position handed to the next
+    -- chunk (when it has no explicit `x`/`y` of its own) "before applying
+    -- the text-anchor property" -- i.e. from this chunk's raw advance, not
+    -- from its anchor-shifted glyph positions. `x` above is deliberately
+    -- seeded with the anchor shift `x0` for glyph placement, so it can't
+    -- also serve as that unshifted total; `adv` mirrors every update `x`
+    -- receives but starts at 0, giving the next chunk's fallback pen the
+    -- same shift-free value browsers agree on (`coordinates-list.svg`: the
+    -- suite reference, Chrome and Safari all carry the raw advance forward,
+    -- not resvg/Firefox's anchor-shifted one -- `docs/resvg-wrong/
+    -- R5-text-props.md`).
+    let mut adv : Int := 0
     let mut pathEnd : Int × Int := (0, 0)
     -- A style run never crosses a chunk boundary (`collect_decoration_spans`
     -- runs per chunk): every buffer below starts fresh each chunk and is
@@ -921,9 +933,11 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         if vertical then
           y := y - p.dx * 256
           x := x + p.dy * 256
+          adv := adv + p.dy * 256
         else
           x := x + p.dx * 256
           y := y + p.dy * 256
+          adv := adv + p.dx * 256
         ox := chunkX + x
         oy := chunkY + y
         if !c.dropped then
@@ -953,6 +967,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
               mbox := Box.cover mbox pt
           | none => pure ()
         x := x + c.adv
+        adv := adv + c.adv
       let styleChanged := curStyle != some c.styleIdx
       let shiftBreak := p.dx != 0 || p.dy != 0 || p.rot != 0
       if styleChanged then
@@ -1008,9 +1023,11 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       lastY := pathEnd.2
     else
       -- usvg swaps (not rotates) the chunk's final pen position for the next
-      -- chunk's fallback anchor; see the `layout` docstring.
-      lastX := chunkX + (if vertical then y else x)
-      lastY := chunkY + (if vertical then x else y)
+      -- chunk's fallback anchor; see the `layout` docstring. Only the
+      -- primary (anchor-shiftable) axis needs `adv` in place of `x`: `y`
+      -- never receives `x0`, in either orientation.
+      lastX := chunkX + (if vertical then y else adv)
+      lastY := chunkY + (if vertical then adv else y)
     a := b
   return (placed, used, mbox)
 

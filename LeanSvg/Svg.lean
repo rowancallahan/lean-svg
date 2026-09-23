@@ -1716,7 +1716,16 @@ def parseFontWeight (parent : Nat) (bs : ByteArray) : Nat :=
   else if eqAscii t "700" then 700
   else if eqAscii t "800" then 800
   else if eqAscii t "900" then 900
-  else parent
+  -- usvg's own `resolve_font_weight` only matches these nine literals and a
+  -- number outside them falls through to `_ => weight` (the inherited
+  -- value, unchanged) -- a parsing bug, not a deliberate simplification:
+  -- fontdb's `find_best_match` already implements CSS Fonts 4's
+  -- nearest-installed-weight rule correctly once given a number (confirmed
+  -- against `fontdb`'s source), so e.g. `650` should resolve to the nearest
+  -- installed weight (`pickFace`, `≥ 600 → bold`) rather than being dropped.
+  else match parseNumberAll t with
+    | some n => if n ≥ 256 && n ≤ 256000 then (n / 256).toNat else parent
+    | none => parent
 
 /-- Strip one matching layer of straight quotes (CSS allows a quoted family
 name in a `font-family` list). -/
