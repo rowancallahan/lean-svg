@@ -212,6 +212,10 @@ structure Style where
   value per run. -/
   ownTextLength : Option Fx := none
   ownLengthAdjustGlyphs : Bool := false
+  /-- `direction: rtl` (T93), inherited. -/
+  textRtl : Bool := false
+  /-- `unicode-bidi: bidi-override`/`isolate-override` (T93): per element. -/
+  ownBidiOverride : Bool := false
   /-- `xml:space="preserve"`. -/
   spacePreserve : Bool := false
   /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
@@ -2250,6 +2254,13 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   -- the viewport width, the axis a left-to-right run measures along.
   | "textLength" => { st with ownTextLength := parseTextLength st.fontSize st.pctRefW st.rootFontSize v }
   | "lengthAdjust" => { st with ownLengthAdjustGlyphs := eqAscii (trim v) "spacingAndGlyphs" }
+  | "direction" =>
+    let t := trim v
+    if eqAscii t "rtl" then { st with textRtl := true }
+    else if eqAscii t "ltr" then { st with textRtl := false } else st
+  | "unicode-bidi" =>
+    let t := trim v
+    { st with ownBidiOverride := eqAscii t "bidi-override" || eqAscii t "isolate-override" }
   | "font-style" =>
     let t := trim v
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
@@ -2902,7 +2913,9 @@ def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
     baselineShiftSub := bsub,
     baselineShiftSuper := bsup,
     textLength := st.ownTextLength,
-    lengthAdjustGlyphs := st.ownLengthAdjustGlyphs }
+    lengthAdjustGlyphs := st.ownLengthAdjustGlyphs,
+    rtl := st.textRtl,
+    bidiOverride := st.ownBidiOverride }
 
 /-- The per-character position lists of one `text`/`tspan` element, resolved
 against that element's own font size and the viewport. -/
@@ -3812,7 +3825,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     -- `text-decoration` and `textLength`/`lengthAdjust` are per-element for
     -- the same reason (T55): see the field docs on `Style`.
     let base := { base with ownUnderline := false, ownOverline := false, ownLineThrough := false,
-                            ownTextLength := none, ownLengthAdjustGlyphs := false }
+                            ownTextLength := none, ownLengthAdjustGlyphs := false,
+                            ownBidiOverride := false }
     let early (n : String) := n == "color" || n == "transform-origin"
     -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
     -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and

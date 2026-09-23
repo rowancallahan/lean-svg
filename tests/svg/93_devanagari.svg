@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" font-family="Noto Sans Devanagari" font-size="28">
+  <!-- T93: Devanagari (Indic shaper): pre-base matra, reph, half forms, conjuncts -->
+  <text x="20" y="44" fill="#1d3557">नमस्ते दुनिया</text>
+  <text x="20" y="90" fill="#457b9d">हिन्दी कर्म धर्म प्रेम</text>
+  <text x="20" y="136" fill="#e63946">क्ष त्र ज्ञ श्र द्ध स्त्री</text>
+  <text x="20" y="182" fill="#2a9d8f">राष्ट्र पृथ्वी क़िला ॐ</text>
+  <!-- Noto Sans base font: the Devanagari falls back -->
+  <text x="20" y="228" font-family="Noto Sans" font-size="22" fill="#264653">Hindi: हिंदी भाषा १२३</text>
+</svg>

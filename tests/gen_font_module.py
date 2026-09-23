@@ -27,6 +27,8 @@ Options:
                            Punctuation)
     --chunk-chars N       base64 characters per chunk string, a multiple of 4
                            (default 20000, i.e. 15 KB of font data per chunk)
+    --layout-features F   passed to pyftsubset (default: kern; T93's shaped
+                           fonts keep every GSUB/GPOS feature with '*')
     --instance AXIS=V,..  instantiate a variable font at this location first
                            (fontTools.varLib.instancer; unlisted axes keep
                            their default)
@@ -76,14 +78,14 @@ def find_pyftsubset(explicit: str | None) -> str:
     )
 
 
-def subset_font(pyftsubset: str, src: Path, dst: Path, unicodes: str) -> list[str]:
+def subset_font(pyftsubset: str, src: Path, dst: Path, unicodes: str, features: str) -> list[str]:
     cmd = [
         pyftsubset,
         str(src),
         f"--output-file={dst}",
         f"--unicodes={unicodes}",
         "--no-hinting",
-        "--layout-features=kern",
+        f"--layout-features={features}",
         "--glyph-names",
         "--notdef-outline",
     ]
@@ -243,6 +245,7 @@ def main() -> None:
     ap.add_argument("--unicodes", default=DEFAULT_UNICODES)
     ap.add_argument("--chunk-chars", type=int, default=DEFAULT_CHUNK_CHARS)
     ap.add_argument("--instance", default=None)
+    ap.add_argument("--layout-features", default="kern")
     ap.add_argument("--header", action="append", default=[], help="extra comment line (source, version, licence)")
     ap.add_argument("--pyftsubset", default=None)
     ap.add_argument("--out", type=Path, default=None)
@@ -255,7 +258,7 @@ def main() -> None:
     if args.instance:
         src = Path(f"/tmp/{args.module}.instance.ttf")
         instantiate(args.ttf, args.instance, src)
-    cmd = subset_font(pyftsubset, src, subset_path, args.unicodes)
+    cmd = subset_font(pyftsubset, src, subset_path, args.unicodes, args.layout_features)
     data = subset_path.read_bytes()
 
     out = args.out or (REPO / "LeanSvg" / "Fonts" / f"{args.module}.lean")
