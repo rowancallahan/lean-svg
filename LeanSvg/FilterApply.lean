@@ -527,6 +527,8 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
   | .colorMatrix i m => Img.of (colorMatrix m ((inp i).into lin).cv) lin
   | .transfer i fr fg fb fa => Img.of (transfer fr fg fb fa ((inp i).into lin).cv) lin
   | .image s => Img.of (s.pre.getD (Canvas.new rw rh none)) false
+  -- the filter region's origin is `SourceGraphic`'s region
+  | .turbulence t => Img.of (Turbulence.render t ts.e ts.f scx scy (inp .source).rx (inp .source).ry rw rh) lin
 
 /-- `filter::apply`: run `f` on the layer `src`, whose user space maps to the
 layer's pixels by `ts`.  An invalid region clears the layer, as resvg does. -/

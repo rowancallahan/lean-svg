@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3000" height="3000">
+  <!-- T65: numOctaves is capped at 16 and each octave counts against the
+       filter budget: 9 Mpx x 17 units is past Render.maxFilterWork. -->
+  <filter id="f"><feTurbulence baseFrequency="0.01" numOctaves="1e9" seed="-1e30"/></filter>
+  <rect width="3000" height="3000" filter="url(#f)"/>
+</svg>
