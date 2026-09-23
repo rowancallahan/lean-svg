@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200">
+  <!-- A three-way reference cycle that usvg's direct recursion checks do not
+       catch (each check looks one link ahead).  usvg fails at its node depth
+       limit; Use.expand fails at Use.maxDepth. -->
+  <g id="a"><use xlink:href="#b"/></g>
+  <g id="b"><use xlink:href="#c"/></g>
+  <g id="c"><use xlink:href="#a"/><rect width="10" height="10"/></g>
+  <use id="self" xlink:href="#self"/>
+</svg>

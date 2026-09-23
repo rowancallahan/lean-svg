@@ -4,6 +4,7 @@ import LeanSvg.Shader
 import LeanSvg.Canvas
 import LeanSvg.Text
 import LeanSvg.Viewport
+import LeanSvg.Use
 import Std.Data.HashMap
 
 /-!
@@ -13,8 +14,9 @@ Turns the XML event stream into a flat list of shapes with fully resolved
 style and transform.  Supported: `svg g path rect circle ellipse line polygon
 polyline`, solid paints, opacity, fill rule, stroke width/cap/join/miter,
 `transform`, and the `style` attribute.  Everything else is skipped along with
-its subtree.  There is no code that follows a reference of any kind (`url()`,
-`href`, `use`, `image`, CSS), so the renderer cannot be made to look outside the
+its subtree.  References are followed only within the input: `url(#id)` and
+same-document `use` `href="#id"` (T47, `LeanSvg/Use.lean`); nothing resolves
+an external reference, so the renderer cannot be made to look outside the
 input bytes.
 -/
 
@@ -142,6 +144,12 @@ structure Style where
   inherited: what `ctm` gained on this element.  `Box.transformed` by it takes
   a child's object bounding box into the parent's user space (T20). -/
   ownMat : Mat := Mat.identity
+  /-- What `context-fill`/`context-stroke` resolve to (T47): the fill and
+  stroke of the nearest enclosing `use`, inherited; `none` outside any `use`,
+  as in usvg without a context element.  Only the paint is kept, not a
+  colour's alpha (usvg's `ContextElement` carries `Fill::paint` alone). -/
+  ctxFill : Paint := .none
+  ctxStroke : Paint := .none
 deriving Repr, Inhabited
 
 structure Shape where
@@ -597,6 +605,8 @@ inductive PaintSpec where
   /-- `url(#id)` with its fallback; `resolvePaint` looks `id` up in the
   style's gradient table (T18). -/
   | url (id : String) (fb : PaintFallback)
+  /-- `context-fill` (`false`) / `context-stroke` (`true`), SVG 2 (T47). -/
+  | context (stroke : Bool)
 deriving Repr, Inhabited
 
 /-- Parse a plain colour (no `none`, no `url()`, no `currentcolor`). -/
@@ -654,6 +664,8 @@ def parsePaint (bs : ByteArray) : Option PaintSpec :=
   if eqAscii t "none" then some .none
   else if eqAscii t "transparent" then some (.solid ⟨0, 0, 0, 0⟩)
   else if eqAscii t "currentcolor" then some .currentColor
+  else if eqAscii t "context-fill" then some (.context false)
+  else if eqAscii t "context-stroke" then some (.context true)
   else if startsWith t 0 "url(" then parseUrlPaint raw t
   else (parseSolidColor t).map .solid
 
@@ -1267,6 +1279,7 @@ def resolvePaint (st : Style) : PaintSpec → Paint
   | .none => .none
   | .solid c => .solid c
   | .currentColor => .solid st.color
+  | .context stroke => if stroke then st.ctxStroke else st.ctxFill
   | .url id fb =>
     let fallback : Paint := match fb with
       | .absent => .none
@@ -2187,6 +2200,21 @@ structure Frame where
   want : Bool := false
 deriving Inhabited
 
+/-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
+theorem use_maxDepth_le : Use.maxDepth ≤ maxLayerDepth := by decide
+
+/-- The rect percentages resolve against at the root, as `defsScan` computes
+it: the root's `viewBox` size, else its own resolved size (T47 hands it to
+`Use.expand`). -/
+def rootViewport (events : Array Xml.Event) : Fx × Fx :=
+  match events.find? (fun e => match e with | .open_ _ _ => true | _ => false) with
+  | some (.open_ "svg" attrs) =>
+    let r := parseRoot attrs
+    match r.viewBox with
+    | some (_, _, vw, vh) => (vw, vh)
+    | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+  | _ => (Fx.ofNat 100, Fx.ofNat 100)
+
 /-- Walk the event stream with a style stack.
 
 T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
@@ -2212,6 +2240,9 @@ recognises and whose own `passesConditions` holds; that index becomes its
 `switchSel` target.  All three stacks move together at every push/pop site
 so CSS resolution and switch selection never drift out of sync. -/
 def interpret (events : Array Xml.Event) : Except String Doc := do
+  -- T47: `use` references are copied in first; everything below sees the
+  -- expanded stream (see `LeanSvg/Use.lean`).
+  let events ← Use.expand events (rootViewport events) maxClipPaths
   let combinedCss : ByteArray := Id.run do
     let mut out := ByteArray.empty
     let mut curDepth : Nat := 0
@@ -2464,6 +2495,28 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               uses := uses'
               enter := some st
               frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
+              renders := pf.mode.isRender
+              container := true
+          else if name == "use" then
+            -- T47: `Use.expand` has put the linked content inside.  A `use` is a
+            -- group whose `x`/`y` translate after its own transform, and it
+            -- keeps its parent's mode: a `use` of a shape is a valid `clipPath`
+            -- child, while the `g` it may contain is not (`.inner`).
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let st := applyEffective parent attrs chain
+              let len := fun (n : String) (ref : Fx) =>
+                (((attr attrs n).bind parseLengthOrPercent).map (resolvePct · ref)).getD 0
+              let tr := Mat.translate (len "x" st.pctRefW) (len "y" st.pctRefH)
+              let noAlpha := fun (p : Paint) => match p with
+                | .solid c => Paint.solid { c with a := 255 }
+                | p => p
+              let st := { st with ctm := st.ctm.mul tr, ownMat := st.ownMat.mul tr,
+                                  ctxFill := noAlpha st.fill, ctxStroke := noAlpha st.stroke }
+              let (st, uses', slot) := addClipUse st uses
+              uses := uses'
+              enter := some st
+              frame := { mode := pf.mode, useSlot := slot, want := slot.isSome || pf.want }
               renders := pf.mode.isRender
               container := true
           else if name == "switch" then

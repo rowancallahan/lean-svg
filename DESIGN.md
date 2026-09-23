@@ -97,7 +97,9 @@ Text content is never interpreted.
 
 Elements: `svg g path rect circle ellipse line polygon polyline`, plus
 `defs`, `clipPath`, `switch`, `text`/`tspan`, `style` and the two gradient
-elements. Unknown elements and `use`, `image`, `mask`, `marker`, `pattern`,
+elements, and same-document `use`/`symbol` (T47: expanded on the event stream
+before interpretation, bounded by `Use.maxDepth` nesting and the parser's own
+element cap). Unknown elements and `image`, `mask`, `marker`, `pattern`,
 filters are skipped with their subtrees. Attributes: `fill stroke
 fill-opacity stroke-opacity opacity fill-rule stroke-width stroke-linecap
 stroke-linejoin stroke-miterlimit transform visibility display style`.
