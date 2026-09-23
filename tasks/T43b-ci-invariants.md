@@ -280,9 +280,12 @@ GitHub before finishing:
 
 - Did not open a pull request, per the T43b amendment overriding T43's
   original instruction.
-- Have not seen a run where the resvg/usvg *restore* actually hits (every
-  run so far has been a genuine miss, by construction — run 1 cold, run 2
-  because run 1 never saved, run 3 because run 2 never saved either). The
-  save path is now confirmed working (above), so the next push onto this
-  branch should show a real restore hit and the `cargo install` step
-  dropping close to 0s; worth a glance if this branch gets touched again.
+- ~~Have not seen a run where the resvg/usvg restore actually hits~~ —
+  closed by **run 4**
+  (https://github.com/rowancallahan/lean-svg/actions/runs/35806517693, the
+  very next push, docs-only): `Restore resvg/usvg 0.48.1 cache` hit, and
+  `Install resvg/usvg 0.48.1 (oracle)` dropped from the ~75-85s cold
+  install to under a second (`command -v resvg`/`usvg` both short-circuit).
+  `Save resvg/usvg cache` correctly shows `skipped` this time (exact hit,
+  nothing new to save). Full cold→save→restore lifecycle confirmed on real
+  CI for all three caches; nothing further to check.
