@@ -175,13 +175,14 @@ inductive CMKind where
   | lumToAlpha
 deriving Inhabited, Repr
 
-/-- One `feFuncX` (usvg `TransferFunction`), without `gamma`, which needs a
-`powf` and is left to the wave-2 task (a `gamma` makes the filter unsupported). -/
+/-- One `feFuncX` (usvg `TransferFunction`).  `gamma`'s `powF32` lives in
+`LeanSvg/Filter/Gamma.lean` (T70). -/
 inductive TF where
   | identity
   | table (vs : Array F32)
   | discrete (vs : Array F32)
   | linear (slope intercept : F32)
+  | gamma (amplitude exponent offset : F32)
 deriving Inhabited, Repr
 
 inductive CompOp where
@@ -211,6 +212,8 @@ inductive Kind where
   | convolveMatrix (i : Input) (order : Nat × Nat) (kernel : Array F32)
       (divisor bias : F32) (target : Nat × Nat) (edge : Nat) (preserveAlpha : Bool)
   | lighting (i : Input) (p : Lighting.Params)
+  | tile (i : Input)
+  | displacementMap (i1 i2 : Input) (chX chY : Nat) (scale : Int)
 deriving Inhabited
 
 /-- A primitive's per-pixel cost, in the same units `Render.lean`'s
@@ -526,14 +529,13 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 
 /-- The tags usvg converts but this renderer does not implement yet: a
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
-def isKnownUnsupported (name : String) : Bool :=
-  name == "feTile" || name == "feDisplacementMap"
+def isKnownUnsupported (_ : String) : Bool := false
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
   name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
-  name == "feImage" || name == "feTurbulence" || name == "feMorphology" || name == "feConvolveMatrix" || name == "feDiffuseLighting" || name == "feSpecularLighting"
+  name == "feImage" || name == "feTurbulence" || name == "feMorphology" || name == "feConvolveMatrix" || name == "feDiffuseLighting" || name == "feSpecularLighting" || name == "feTile" || name == "feDisplacementMap"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -679,7 +681,9 @@ def transferOf (attrs : Array Xml.Attr) : Option (Option TF) :=
       some (some (.discrete (((attr attrs "tableValues").bind f32List).getD #[])))
     else if eqAscii t "linear" then
       some (some (.linear (f32Attr attrs "slope" F32.one) (f32Attr attrs "intercept" 0)))
-    else if eqAscii t "gamma" then some none
+    else if eqAscii t "gamma" then
+      some (some (.gamma (f32Attr attrs "amplitude" F32.one) (f32Attr attrs "exponent" F32.one)
+        (f32Attr attrs "offset" 0)))
     else none
 
 /-- `parse_target`: an explicit number truncated toward zero, or `⌊order/2⌋`;
@@ -795,6 +799,15 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
   | "feDiffuseLighting" | "feSpecularLighting" =>
     some <| (Lighting.convert (p.name == "feSpecularLighting") (fun as n => (attr as n).bind f32All) a
       (prop a "lighting-color") p.children p.color P.color).elim (.flood 0 0 0 0) (.lighting inp)
+  | "feTile" => some (.tile inp)
+  | "feDisplacementMap" =>
+    let chanOf := fun (v : Option ByteArray) => match v.map trim with
+      | some t => if eqAscii t "R" then 0 else if eqAscii t "G" then 1
+        else if eqAscii t "B" then 2 else 3
+      | none => 3
+    let scAvg : Fx := (scx + scy) / 2
+    some (.displacementMap inp inp2 (chanOf (attr a "xChannelSelector"))
+      (chanOf (attr a "yChannelSelector")) (numAttrScaled a "scale" 0 scAvg))
   | _ => none
 
 /-- `resolve_primitive_region`.  Coordinates are `try_convert_length`s in

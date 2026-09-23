@@ -378,6 +378,11 @@ turbulence, morphology, convolution, tile, displacement, a `gamma`
 transfer function) make the whole `filter` value resolve to "no filter": the
 element renders exactly as before T51.
 
+turbulence, morphology, convolution, image) make the whole `filter` value
+resolve to "no filter": the element renders exactly as before T51. `feTile`,
+`feDisplacementMap` (`LeanSvg/Filter/Tile.lean`, `LeanSvg/Filter/DisplacementMap.lean`)
+and a `gamma` transfer function (`LeanSvg/Filter/Gamma.lean`) were added in T70.
+
 `feImage` (T67, `LeanSvg/Filter/Image.lean`, `Filter/ImageRender.lean`): a
 link to an element is rendered, at `groupEnd` just before the filter runs, by
 `renderNodes` on `fuel - 1` over a *sub-document* — the input events with the
