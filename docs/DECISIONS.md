@@ -107,3 +107,16 @@ happened to score 0.984 vs the suite PNG); now the Arabic is shaped and
 right-to-left, in Amiri, while the suite PNG uses Noto Sans Arabic (0.980).
 Visually correct; the remaining gap is the font. Follow-up option: embed Noto
 Sans Arabic (OFL, ~0.2 MB subset) for the "Noto Sans Arabic" family.
+
+## To think about (Rowan): exit codes and output destinations (2026-09-23)
+
+Current direction (T98b): no stdout/stderr; the output files and the exit
+code are the only effects. Open for Rowan to decide later:
+
+- **Which exit codes**, and how many distinct failure codes.
+- **Outputs as explicit destinations.** On Linux stdout and stderr are just
+  files (fd 1 and 2). Idea: the user names each output, and may name stdout
+  or stderr instead of a path (e.g. PNG to stdout for piping, warnings to
+  stderr). Nothing is written anywhere the user did not pick, and each
+  output goes to exactly one place. The theorems would then be about the
+  chosen destinations rather than fixed paths.
