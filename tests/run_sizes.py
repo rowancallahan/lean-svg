@@ -71,6 +71,7 @@ def time_runs(cmd, runs, out_path=None):
     for _ in range(runs):
         if out_path is not None:
             out_path.unlink(missing_ok=True)
+            Path(str(out_path) + ".warnings.txt").unlink(missing_ok=True)  # T98
         rc, ms, err, timed_out = run_renderer(cmd)
         if timed_out:
             return None, None, err, True
@@ -100,6 +101,7 @@ def measure_baseline(binary, tmp, runs):
     out = {}
     for key, (cmd, out_path) in cmds.items():
         out_path.unlink(missing_ok=True)
+        Path(str(out_path) + ".warnings.txt").unlink(missing_ok=True)  # T98
         run_renderer(cmd)  # warm-up, discarded
         ms, _, _, _ = time_runs(cmd, n, out_path)
         out[key] = ms or 0.0
@@ -209,6 +211,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
     cell.update(metrics)
 
     ours_png.unlink(missing_ok=True)
+    Path(str(ours_png) + ".warnings.txt").unlink(missing_ok=True)  # T98
     ref_png.unlink(missing_ok=True)
     return cell
 

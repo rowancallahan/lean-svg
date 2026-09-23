@@ -169,7 +169,9 @@ def run_one(svg, binary, tol, threshold, resvg_args=None):
 
     ref_png = OUT_DIR / result["ref_png"]
     ours_png = OUT_DIR / result["ours_png"]
-    for stale in (ref_png, ours_png, OUT_DIR / result["cmp_png"]):
+    # T98: lean-svg also refuses to run if `<out>.warnings.txt` exists.
+    ours_warn = OUT_DIR / (result["ours_png"] + ".warnings.txt")
+    for stale in (ref_png, ours_png, OUT_DIR / result["cmp_png"], ours_warn):
         stale.unlink(missing_ok=True)
 
     rc_ref, ms_ref, err_ref, to_ref = run_renderer(
