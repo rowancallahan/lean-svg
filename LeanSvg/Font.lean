@@ -525,6 +525,12 @@ def parseSimpleGlyph (bs : ByteArray) (off len numberOfContours maxPointsCap : N
     endPts := endPts.push (u16 bs (endPtsOff + 2 * i))
   let numPoints := endPts.getD (numberOfContours - 1) 0 + 1
   if numPoints == 0 || numPoints > maxPointsCap then return #[]
+  -- `endPtsOfContours` must increase strictly (the spec requires it).  A
+  -- corrupt glyph whose end points go back down would otherwise let every
+  -- contour below re-copy up to `numPoints` points: 25 603 contours × 10 000
+  -- points in the T91 fuzz run on Noto Sans KR.
+  for i in [1:numberOfContours] do
+    if endPts.getD i 0 ≤ endPts.getD (i - 1) 0 then return #[]
   let instructionLength := u16 bs (endPtsOff + 2 * numberOfContours)
   let flagsOff := endPtsOff + 2 * numberOfContours + 2 + instructionLength
   -- flags, expanding REPEAT_FLAG (bit 0x08) runs; exactly `numPoints` iterations.
@@ -589,30 +595,52 @@ def parseSimpleGlyph (bs : ByteArray) (off len numberOfContours maxPointsCap : N
 
 /-! ## `glyf`: composite glyphs, and the shared resolver -/
 
+/-- Component visits one glyph's composite resolution may make in total (T91).
+Real fonts use a handful (the most in any embedded font is 21, in Noto Sans;
+Noto Sans KR and SC have no composites); this only has to stop corrupted data. -/
+def compositeBudget : Nat := 256
+
+/-- A composite stops taking components once it holds more points than this
+(T91): 4× the per-simple-glyph cap. -/
+def compositePointCap : Nat := 40000
+
 /-- Resolve glyph `gid`'s contours to `(x, y, onCurve)` points in font units,
 following composite references with `fuel` levels of recursion left (each
 component uses one). `fuel = 0` stops and yields `#[]` for whatever
 composite is left unresolved — a safe, total fallback for a maliciously (or
 accidentally) self-referential font, never an infinite loop. The recursive
 call always passes the statically smaller `fuel` from the `fuel + 1` match,
-so this is ordinary structural recursion. -/
-def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int × Bool))
-  | 0 => #[]
-  | fuel + 1 =>
+so this is ordinary structural recursion.
+
+Fuel alone bounds the depth but not the work: 64 components per level over 8
+levels is 64^8 calls, which a corrupted large font reached in the T91 fuzz
+run (`tests/fuzz_font.py` on Noto Sans KR timed out).  So the recursion also
+threads `budget`, the number of components the whole glyph may still visit
+(each one costs 1, and the remainder comes back with the result), and a
+composite stops adding components once it holds more than `compositePointCap`
+points. -/
+def resolvedContours (f : Font) (gid : Nat) :
+    Nat → Nat → Array (Array (Int × Int × Bool)) × Nat
+  | 0, budget => (#[], budget)
+  | fuel + 1, budget =>
     match glyphSpan f gid with
-    | none => #[]
+    | none => (#[], budget)
     | some (off, len) =>
-      if len < 10 then #[]
+      if len < 10 then (#[], budget)
       else
         let numberOfContours := i16 f.data off
         if numberOfContours ≥ 0 then
-          parseSimpleGlyph f.data off len numberOfContours.toNat f.maxPointsCap
+          (parseSimpleGlyph f.data off len numberOfContours.toNat f.maxPointsCap, budget)
         else Id.run do
           -- composite: a sequence of component records, capped at 64 components.
           let mut out : Array (Array (Int × Int × Bool)) := #[]
+          let mut points := 0
+          let mut budget := budget
           let mut p := off + 10
           let endOff := off + len
           for _ in [0:64] do
+            if budget == 0 || points > compositePointCap then break
+            budget := budget - 1
             if p + 4 ≤ endOff then
               let flags := u16 f.data p
               let glyphIndex := u16 f.data (p + 2)
@@ -649,8 +677,10 @@ def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int �
                 c := i16 f.data (q + 4)
                 d := i16 f.data (q + 6)
                 q := q + 8
-              let sub := resolvedContours f glyphIndex fuel
+              let (sub, rest) := resolvedContours f glyphIndex fuel budget
+              budget := rest
               for contour in sub do
+                points := points + contour.size
                 let mut tc : Array (Int × Int × Bool) := Array.emptyWithCapacity contour.size
                 for pt in contour do
                   let nx := roundDiv14 (a * pt.1 + c * pt.2.1) + dx
@@ -660,16 +690,17 @@ def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int �
               p := q
               if flags &&& 0x0020 == 0 then break       -- no MORE_COMPONENTS
             else break
-          return out
+          return (out, budget)
 
 /-- Raw quadratic contours of glyph `gid`, in font units: each contour is an
 array of `(x, y, onCurve)` points, exactly as `glyf` encodes them (composite
 glyphs are resolved and their components' points transformed and
 concatenated, matching what `fontTools`' `Glyph.getCoordinates` returns).
 `#[]` for `.notdef`-like/empty glyphs, an out-of-range id, or anything the
-parser gave up on. Composite recursion gets fuel `8`. -/
+parser gave up on. Composite recursion gets fuel `8` and a budget of
+`compositeBudget` component visits. -/
 def rawContours (f : Font) (gid : Nat) : Array (Array (Int × Int × Bool)) :=
-  resolvedContours f gid 8
+  (resolvedContours f gid 8 compositeBudget).1
 
 /-! ## Quadratic contours → cubic `PathCmd`s -/
 
@@ -751,14 +782,15 @@ def outline (f : Font) (gid : Nat) : Array PathCmd := Id.run do
 /-! ## Top-level parse -/
 
 /-- Parse a TrueType font. `none` for anything this parser cannot make sense
-of: too large (over 8 MiB), too small to hold an offset table, an
+of: too large (over 16 MiB — T91 raised it from 8 MiB for the embedded
+Noto Sans SC, 10.4 MB), too small to hold an offset table, an
 unrecognised `sfnt` version (only `0x00010000` and `'true'`, i.e. `glyf`-based
 TrueType outlines — not `OTTO`/CFF, not a `ttcf` collection), or missing one
 of the tables `outline`/`advance`/`rawContours` need (`head`, `maxp`, `hhea`,
 `hmtx`, `loca`, `glyf`). `cmap`/`kern`/`GPOS` are optional: their absence
 just makes `glyphId`/`kern` return `0`. -/
 def parse (bs : ByteArray) : Option Font :=
-  if bs.size > 8 * 1024 * 1024 || bs.size < 12 then none
+  if bs.size > 16 * 1024 * 1024 || bs.size < 12 then none
   else
     let version := u32 bs 0
     if version != 0x00010000 && version != 0x74727565 then none
@@ -912,6 +944,70 @@ def hexDecodeChunks (chunks : Array String) : ByteArray := Id.run do
   for c in chunks do
     out := out.append (hexDecode c)
   return out
+
+/-- Value of a base64 digit (RFC 4648 standard alphabet), or 64 for any
+other byte.  A plain `UInt32` rather than an `Option`: this runs once per
+character of ~25 MB of embedded fonts, and an `Option` allocates. -/
+@[inline] def b64Digit (c : UInt8) : UInt32 :=
+  if 65 ≤ c && c ≤ 90 then c.toUInt32 - 65
+  else if 97 ≤ c && c ≤ 122 then c.toUInt32 - 71
+  else if 48 ≤ c && c ≤ 57 then c.toUInt32 + 4
+  else if c == 43 then 62
+  else if c == 47 then 63
+  else 64
+
+/-- Decode padded base64 into bytes, four characters (three bytes) at a time.
+Total: a quad with an invalid character stops decoding, and `=` padding in the
+third/fourth place emits only the bytes that precede it (T91: the embedded
+fonts are base64, 4/3 of the binary size instead of hex's 2×). -/
+def base64Decode (s : String) : ByteArray := Id.run do
+  let sb := s.toUTF8
+  let mut out := ByteArray.emptyWithCapacity (sb.size / 4 * 3)
+  for q in [0:sb.size / 4] do
+    let i := 4 * q
+    let a := b64Digit (at' sb i)
+    let b := b64Digit (at' sb (i + 1))
+    let c := b64Digit (at' sb (i + 2))
+    let d := b64Digit (at' sb (i + 3))
+    if a ≥ 64 || b ≥ 64 then break
+    out := out.push ((a <<< 2 ||| b >>> 4).toUInt8)
+    if c ≥ 64 then break
+    out := out.push (((b &&& 15) <<< 4 ||| c >>> 2).toUInt8)
+    if d ≥ 64 then break
+    out := out.push (((c &&& 3) <<< 6 ||| d).toUInt8)
+  return out
+
+/-- `base64Decode` over chunks, each a whole number of quads. -/
+def base64DecodeChunks (chunks : Array String) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity 0
+  for c in chunks do
+    out := out.append (base64Decode c)
+  return out
+
+/-- A font's codepoint coverage as sorted, disjoint, inclusive ranges, decoded
+from the generator's packed form: 6 bytes per range (24-bit big-endian first,
+then last codepoint), base64. -/
+def decodeRanges (s : String) : Array (Nat × Nat) := Id.run do
+  let bs := base64Decode s
+  let mut out : Array (Nat × Nat) := Array.emptyWithCapacity (bs.size / 6)
+  for k in [0:bs.size / 6] do
+    let i := 6 * k
+    out := out.push (u16 bs i * 256 + u8 bs (i + 2), u16 bs (i + 3) * 256 + u8 bs (i + 5))
+  return out
+
+/-- Whether `cp` lies in one of the sorted ranges: binary search, 32 halvings
+cover any array a `ByteArray` can produce. -/
+def inRanges (rs : Array (Nat × Nat)) (cp : Nat) : Bool := Id.run do
+  let mut lo := 0
+  let mut hi := rs.size
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let (a, b) := rs.getD mid (0, 0)
+    if cp < a then hi := mid
+    else if cp > b then lo := mid + 1
+    else return true
+  return false
 
 end Font
 end LeanSvg

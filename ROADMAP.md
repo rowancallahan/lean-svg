@@ -413,11 +413,14 @@ back. Not before.
 
 Features rank below all of these unless the goal changes.
 
-## 6. Later: fonts (Rowan, 2026-09-23; not started, after the current work lands)
+## 6. Later: fonts (Rowan, 2026-09-23)
 
 - Add non-European scripts and more open-source fonts, packaged the same way
   as the embedded Noto Sans subsets (check each font's licence permits it;
-  OFL does). Keep binary size in mind.
+  OFL does). Keep binary size in mind. **Done in T91** for Greek, Cyrillic,
+  Japanese, Chinese, Korean, Thai, Armenian, Georgian and Ethiopic (19 MB of
+  fonts, `LeanSvg/Fonts/README.md`); Arabic, Hebrew and Indic scripts wait on
+  shaping and bidi.
 - Longer term: rethink how text reaches the renderer, e.g. fonts as outline
   paths the document can carry, or a different handling of the `<text>`
   element. Design discussion first; no change yet.

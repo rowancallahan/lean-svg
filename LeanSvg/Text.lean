@@ -2,9 +2,7 @@ import LeanSvg.Geom
 import LeanSvg.TextPath
 import LeanSvg.Font
 import LeanSvg.Baseline
-import LeanSvg.Fonts.NotoSans
-import LeanSvg.Fonts.NotoSansBold
-import LeanSvg.Fonts.NotoSansItalic
+import LeanSvg.FontSet
 
 /-!
 # Text layout
@@ -48,9 +46,11 @@ open Bytes
 
 /-! ## Faces
 
-Only the three embedded Noto Sans subsets exist.  `font-family` selects
-nothing: every family falls back to Noto Sans (recorded as this task's
-fallback policy).  Weight and slant pick among the three. -/
+The embedded fonts are `FontSet.entries` (T91).  `font-family` picks a base
+font per span (`SpanProps.family`, resolved by `Svg.resolveFontFamily`); for
+the "Noto Sans" family, weight and slant pick among its three faces.  A
+character the base font does not map falls back through the other embedded
+fonts in `FontSet` order (`assignFonts`). -/
 
 inductive Face where
   | regular
@@ -61,30 +61,49 @@ deriving DecidableEq, Repr, Inhabited, BEq
 /-- usvg maps `font-weight` to a number (`bolder`/`lighter` step relative to
 the inherited one); we have no semibold face, so anything at 600 or above is
 bold.  Italic and oblique both pick the italic face, and bold wins over
-italic because there is no bold-italic subset. -/
+italic because there is no bold-italic face. -/
 def pickFace (weight : Nat) (italic : Bool) : Face :=
   if weight ≥ 600 then .bold else if italic then .italic else .regular
 
-/-- The three embedded faces, parsed at most once per render.  `Font.parse` is
-pure, so this is a plain function; `Svg.lean` calls it once and keeps the
-result in a `let`.  A face that no span asks for is never decoded: hex-decoding
-one subset costs about half a millisecond, which is worth skipping on the
-overwhelmingly common documents that use one face or none. -/
-structure Faces where
-  regular : Option Font := none
-  bold : Option Font := none
-  italic : Option Font := none
-deriving Inhabited
+/-- The `FontSet` index of a span's base font: `family` is a `FontSet` index
+(0 = "Noto Sans"); only Noto Sans has more than one face. -/
+def baseFont (family : Nat) (face : Face) : Nat :=
+  if family != 0 then family
+  else match face with
+    | .regular => 0
+    | .bold => 1
+    | .italic => 2
 
-def Faces.get (fs : Faces) : Face → Option Font
-  | .regular => fs.regular
-  | .bold => fs.bold
-  | .italic => fs.italic
-
-def loadFaces (needRegular needBold needItalic : Bool) : Faces :=
-  { regular := if needRegular then Font.parse (Fonts.NotoSans.bytes ()) else none,
-    bold := if needBold then Font.parse (Fonts.NotoSansBold.bytes ()) else none,
-    italic := if needItalic then Font.parse (Fonts.NotoSansItalic.bytes ()) else none }
+/-- usvg's `shape_text` fallback loop for one base font over one chunk's
+characters, with shaping reduced to one glyph per character: the base font
+keeps every character it maps; then, for the first still-missing character,
+the first font in `FontSet` order that has not been tried yet and maps it is
+tried; if it maps *every* character of the chunk it replaces them all,
+otherwise it fills the characters it maps and the loop goes on.  A character
+no font maps stays with the base font (its `.notdef`).  `covs` is each font's
+decoded coverage. -/
+def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Nat) :
+    Array Nat := Id.run do
+  let has := fun (k cp : Nat) => Font.inRanges (covs.getD k #[]) cp
+  let mut res : Array (Option Nat) := cps.map (fun cp => if has base cp then some base else none)
+  let mut tried : Array Nat := #[base]
+  for _ in [0:covs.size] do
+    match (List.range cps.size).find? (fun i => (res.getD i none).isNone) with
+    | none => break
+    | some i =>
+      let cp := cps.getD i 0
+      match (List.range covs.size).find? (fun k => !tried.contains k && has k cp) with
+      | none => break
+      | some k =>
+        if cps.all (has k) then
+          res := cps.map (fun _ => some k)
+          break
+        res := (List.range cps.size).toArray.map (fun j =>
+          match res.getD j none with
+          | some v => some v
+          | none => if has k (cps.getD j 0) then some k else none)
+        tried := tried.push k
+  return res.map (·.getD base)
 
 /-! ## What `Svg.lean` resolves for us -/
 
@@ -99,6 +118,8 @@ cascade by `Svg.lean`.  `size`, `letterSpacing` and `wordSpacing` are `Fx`
 (1/256 px) user-space lengths. -/
 structure SpanProps where
   face : Face := .regular
+  /-- The base font's family, as a `FontSet` index (T91). -/
+  family : Nat := 0
   size : Fx := Fx.ofNat 12
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
@@ -522,6 +543,11 @@ structure Cluster where
   but keeping the two numbers distinct costs nothing and is exact either
   way). -/
   natWidth : Int := 0
+  /-- The `FontSet` index of the font this character's glyph comes from
+  (`assignFonts`), and of its span's base font, whose metrics place the
+  baseline and decorations. -/
+  font : Nat := 0
+  base : Nat := 0
   /-- Cleared by the `letter-spacing` rule that drops a cluster whose advance
   went to zero or below. -/
   dropped : Bool := false
@@ -700,17 +726,11 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           if k < p.rots.size then lastRot := a
           pos := pos.setIfInBounds (o + k) { pos.getD (o + k) {} with rot := a }
     | _ => pure ()
-  -- ---- 6. faces
-  let mut needR := false
-  let mut needB := false
-  let mut needI := false
-  for i in [0:total] do
-    if cRend.getD i true then
-      match (cProps.getD i default).face with
-      | .regular => needR := true
-      | .bold => needB := true
-      | .italic => needI := true
-  let faces := loadFaces needR needB needI
+  -- ---- 6. fonts (T91): every font's coverage, for fallback; each font
+  -- itself is decoded and parsed the first time a character needs it
+  let covs : Array (Array (Nat × Nat)) := FontSet.entries.map (fun e => Font.decodeRanges e.coverage)
+  let mut fonts : Array (Option Font) := Array.replicate FontSet.count none
+  let mut loaded : Array Bool := Array.replicate FontSet.count false
   -- ---- 7. the renderable characters, in order
   let mut rend : Array Nat := Array.emptyWithCapacity total
   for i in [0:total] do
@@ -748,24 +768,46 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       b := q + 1
     let fk := cFlow.getD (rend.getD a 0) 0
     let flow := if fk == 0 then none else flows[fk - 1]?
-    -- advances, with kerning
+    -- font fallback (T91): usvg shapes the whole chunk's text once per span
+    -- font and keeps each span's own glyphs, so each distinct base font is
+    -- resolved against every character of the chunk
+    let cps : Array Nat := (List.range (b - a)).toArray.map (fun q => chars.getD (rend.getD (a + q) 0) 0)
+    let bases : Array Nat := (List.range (b - a)).toArray.map (fun q =>
+      let pr := cProps.getD (rend.getD (a + q) 0) default
+      baseFont pr.family pr.face)
+    let mut perBase : Array (Nat × Array Nat) := #[]
+    for bf in bases do
+      if !perBase.any (·.1 == bf) then perBase := perBase.push (bf, assignFonts covs bf cps)
+    let asgOf := fun (q : Nat) =>
+      let bf := bases.getD q 0
+      ((perBase.find? (·.1 == bf)).map (·.2)).getD #[]
+    let fis : Array Nat := (List.range (b - a)).toArray.map (fun q => (asgOf q).getD q (bases.getD q 0))
+    for k in fis ++ bases do
+      if !loaded.getD k true then
+        fonts := fonts.setIfInBounds k ((FontSet.entries[k]?).bind (fun e => Font.parse (e.bytes ())))
+        loaded := loaded.setIfInBounds k true
+    -- advances, with kerning: the pair is the next character as this
+    -- character's own base font's shaping pass saw it, kerned only when that
+    -- pass took both glyphs from the same font
     let mut cl : Array Cluster := Array.emptyWithCapacity (b - a)
     for q in [a:b] do
       let i := rend.getD q 0
       let cp := chars.getD i 0
       let pr := cProps.getD i default
+      let fi := fis.getD (q - a) 0
       let mut adv : Int := 0
-      match faces.get pr.face with
+      match fonts.getD fi none with
       | some f =>
         let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
         let gid := Font.glyphId f cp
         let mut fu : Int := Font.advance f gid
-        if pr.kerning && q + 1 < b then
+        if pr.kerning && q + 1 < b && (asgOf (q - a)).getD (q + 1 - a) fi == fi then
           let nextCp := chars.getD (rend.getD (q + 1) 0) 0
           fu := fu + Font.kern f gid (Font.glyphId f nextCp)
         adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
       | none => pure ()
-      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv, natWidth := adv }
+      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv,
+                      natWidth := adv, font := fi, base := bases.getD (q - a) 0 }
     -- `letter-spacing`, then `word-spacing` (usvg applies each only when some
     -- span of the chunk actually asks for it)
     if cl.any (fun c => c.props.letterSpacing != 0) then
@@ -900,8 +942,8 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           y := y + p.dy * 256
           pathEnd := (n.x + c.adv, n.y)
           if !c.dropped then
-            match faces.get c.props.face with
-            | some f =>
+            match fonts.getD c.font none, fonts.getD c.base none with
+            | some f, some fb =>
               -- T(n) · R(tangent) · T(-width/2, dy + baseline-shift) · R(rotate)
               --
               -- T54's `resolveBaseline16` gives the same pen offset the
@@ -913,7 +955,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
               -- the next character), just this glyph's own translation.
               let pr := c.props
               let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
-                pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
+                pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
               let yEff := y + bshift
               let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
                 else sinCos16 (degToRad16 p.rot)
@@ -928,7 +970,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
               let (top16, bot16) := metricTopBot f c.props.size
               for pt in metricCorners la lb lc la tox toy adv16 top16 bot16 do
                 mbox := Box.cover mbox pt
-            | none => pure ()
+            | _, _ => pure ()
       else
         if vertical then
           y := y - p.dx * 256
@@ -941,8 +983,8 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         ox := chunkX + x
         oy := chunkY + y
         if !c.dropped then
-          match faces.get c.props.face with
-          | some f =>
+          match fonts.getD c.font none, fonts.getD c.base none with
+          | some f, some fb =>
             let (rot, gx, gy) :=
               if vertical then
                 let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
@@ -957,7 +999,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
                 -- added to the pen position only, never to `x`/`y`/`lastX`/`lastY`.
                 let pr := c.props
                 let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
-                  pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
+                  pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
                 (p.rot, chunkX + x, chunkY + y + bshift)
             let (la, lb, lc, ld) := rotMat16 rot
             cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size la lb lc ld gx gy
@@ -965,7 +1007,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             let (top16, bot16) := metricTopBot f c.props.size
             for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
               mbox := Box.cover mbox pt
-          | none => pure ()
+          | _, _ => pure ()
         x := x + c.adv
         adv := adv + c.adv
       let styleChanged := curStyle != some c.styleIdx
@@ -994,7 +1036,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         thCmds := closeSub thCmds thRun
       if styleChanged || shiftBreak then
         let mkRun := fun (idx? : Option Nat) (metric : Font → Int) =>
-          match idx?, faces.get c.props.face with
+          match idx?, fonts.getD c.base none with
           | some idx, some f =>
             some { styleIdx := idx, ox := ox, oy := oy, rot := p.rot, width := 0,
                    unitsPerEm := f.unitsPerEm, size := c.props.size,

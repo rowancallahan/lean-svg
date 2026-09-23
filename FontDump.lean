@@ -1,7 +1,5 @@
 import LeanSvg.Font
-import LeanSvg.Fonts.NotoSans
-import LeanSvg.Fonts.NotoSansBold
-import LeanSvg.Fonts.NotoSansItalic
+import LeanSvg.FontSet
 
 /-!
 # `fontdump`: a debug/oracle tool over `LeanSvg.Font`
@@ -31,15 +29,11 @@ open LeanSvg
 
 def usage : String :=
   "usage: fontdump <font.ttf> <text>\n" ++
-  "       fontdump --embedded <NotoSans|NotoSansBold|NotoSansItalic> <text>\n" ++
+  "       fontdump --embedded <module in LeanSvg/Fonts> <text>\n" ++
   "       fontdump --metrics <font.ttf>\n" ++
-  "       fontdump --metrics --embedded <NotoSans|NotoSansBold|NotoSansItalic>\n"
+  "       fontdump --metrics --embedded <module in LeanSvg/Fonts>\n"
 
-def embeddedBytes (name : String) : Option ByteArray :=
-  if name == "NotoSans" then some (LeanSvg.Fonts.NotoSans.bytes ())
-  else if name == "NotoSansBold" then some (LeanSvg.Fonts.NotoSansBold.bytes ())
-  else if name == "NotoSansItalic" then some (LeanSvg.Fonts.NotoSansItalic.bytes ())
-  else none
+def embeddedBytes (name : String) : Option ByteArray := LeanSvg.FontSet.byModule name
 
 /-! ## Minimal JSON writer (no library dependency) -/
 

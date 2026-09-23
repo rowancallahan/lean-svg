@@ -93,7 +93,7 @@ files and package manifests on 2026-09-21.
 
 | component | licence |
 |---|---|
-| **Noto Sans** Regular, Bold and Italic — Latin subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1. Copyright 2015 Google Inc. All Rights Reserved. Noto is a trademark of Google Inc.; trademarks are not licensed under the OFL. Version 2.000 (GOOG). Full text and copyright notice in `LeanSvg/Fonts/LICENSE-OFL.txt`. The faces are subsetted, which the OFL permits; Noto declares no Reserved Font Name. |
+| **Noto Sans** Regular, Bold and Italic (Latin/Greek/Cyrillic), **Mplus 1p**, **Noto Sans SC/KR/Thai/Armenian/Georgian/Ethiopic** — subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1, all of them. Copyright 2015 Google Inc. (Noto Sans; Noto is a trademark of Google Inc., not licensed under the OFL), 2016 The M+ Project Authors (Mplus 1p), 2014-2021 Adobe with Reserved Font Name 'Source' (Noto Sans SC/KR), 2022 The Noto Project Authors (Thai/Armenian/Georgian/Ethiopic). Versions, sources and licence texts: `LeanSvg/Fonts/README.md` and `LeanSvg/Fonts/LICENSE-OFL*.txt`. The fonts are subsetted and instanced, which the OFL permits; no embedded font uses a Reserved Font Name. |
 | **Original artwork and renders** — `tests/svg/*.svg`, `docs/readme/*.svg`, and the PNG images in this README | Apache-2.0. Authored for this project. |
 
 ### Not redistributed

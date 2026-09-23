@@ -183,6 +183,9 @@ structure Style where
   usvg's own default `font-family` ("Times New Roman"), which is not in the
   embedded set either. -/
   fontAvailable : Bool := false
+  /-- Which embedded font `font-family` resolved to, as a `FontSet` index
+  (meaningful only when `fontAvailable`; 0 = "Noto Sans"). -/
+  fontFamily : Nat := 0
   /-- `text-decoration`, *not* inherited: `applyEffective` resets all three to
   `false` for every element, and only that element's own raw attribute value
   (from any cascade layer) can set them back.  usvg's decoration search
@@ -1753,27 +1756,39 @@ def stripQuotes (bs : ByteArray) : ByteArray :=
     bs.extract 1 (bs.size - 1)
   else bs
 
-/-- `font-family`, restricted to what this renderer can actually draw: the
-one embedded family, "Noto Sans".  usvg resolves the comma-separated family
-list against `fontdb`'s installed fonts (here, the resvg-test-suite's pinned
+/-- Families installed in the resvg test suite's font directory (the
+reference's `fontdb`) that this renderer does not embed: usvg would select
+one of these, so a family list that names one before any embedded family
+resolves to a font we cannot draw. -/
+def suiteOnlyFamilies : Array String :=
+  #["Source Sans Pro", "Amiri", "Noto Serif", "Noto Mono", "Noto Sans Devanagari",
+    "Noto Color Emoji", "Noto Emoji", "Sedgwick Ave Display", "Yellowtail"]
+
+/-- `font-family`, resolved against the embedded fonts (`FontSet`, T91) to
+the index of the font usvg would pick, or `none` when it would pick no font
+or one we do not embed.  usvg resolves the comma-separated family list
+against `fontdb`'s installed fonts (here, the resvg-test-suite's pinned
 directory) in list order, stopping at the first name that matches an
 installed font; a CSS generic keyword (`serif`, `sans-serif`, …) maps to an
 `Options` generic-family name (`Times New Roman`, `Arial`, …) that is never
 installed either, and an unmatched list falls back to that same default
-family — also never installed. With exactly one family embedded, the only
-thing that can go wrong is a *different* installed family sitting earlier in
-the list than "Noto Sans": the only such name the corpus uses is "Source
-Sans Pro" (its own file is in the pinned fonts dir). Every other name the
-suite tries (Amiri, Mplus 1p, Noto Color Emoji, Noto Sans Devanagari, …)
-either stands alone or already follows "Noto Sans" wherever both appear, so
-treating any other unrecognised name as a non-match (keep looking) matches
-`fontdb::Database::query` exactly for every file in the suite. -/
-def resolveFontFamily (bs : ByteArray) : Bool := Id.run do
+family — also never installed.  A name that is installed there but not
+embedded here (`suiteOnlyFamilies`) ends the search with `none`; any other
+unrecognised name is skipped, as `fontdb::Database::query` does.  An unquoted
+name must be a sequence of CSS identifiers: svgtypes rejects the whole value
+when a word starts with a digit (`Mplus 1p`), and usvg then uses its default
+family, so that is `none` too. -/
+def resolveFontFamily (bs : ByteArray) : Option Nat := Id.run do
   for tok in Bytes.splitTrim bs 44 do
     let name := stripQuotes tok
-    if eqAscii name "Noto Sans" then return true
-    if eqAscii name "Source Sans Pro" then return false
-  return false
+    if name.size == tok.size then
+      for w in Bytes.splitTrim name 32 do
+        let c := Bytes.at' w 0
+        if 48 ≤ c && c ≤ 57 then return none
+    match FontSet.familyIndex name with
+    | some k => return some k
+    | none => if suiteOnlyFamilies.any (eqAscii name ·) then return none
+  return none
 
 /-- One item of an `x`/`y`/`dx`/`dy` list: `convert_user_length`, which
 resolves `em`/`ex` against the element's own font size, `rem` against the
@@ -2127,7 +2142,10 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   -- `Svg.textShapes` ever reads them.
   | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
-  | "font-family" => { st with fontAvailable := resolveFontFamily v }
+  | "font-family" =>
+    match resolveFontFamily v with
+    | some k => { st with fontAvailable := true, fontFamily := k }
+    | none => { st with fontAvailable := false, fontFamily := 0 }
   -- `find_decoration`: space-separated tokens of this element's own raw
   -- value, freshly parsed (not merged with whatever the parent had).
   | "text-decoration" =>
@@ -2756,6 +2774,7 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 `bsStack`, not from `st`: see `baselineShiftDelta`). -/
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
+    family := st.fontFamily,
     size := st.fontSize,
     letterSpacing := st.letterSpacing,
     wordSpacing := st.wordSpacing,
