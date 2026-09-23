@@ -20,6 +20,137 @@ Files (within-8 at 200 px):
 - `structure/svg/no-size.svg` (0.674)
 - `structure/svg/xmlns-validation.svg` (0.360)
 
+## Report
+
+Diagnosed both; neither fix is small/safe, so nothing was changed in
+`LeanSvg/*.lean`. Confirmed current scores unchanged at 200 px, `--corpus
+resvg --route direct --dir structure/svg`:
+
+| file | within-8 |
+|---|---|
+| `structure/svg/no-size.svg` | 0.674400 |
+| `structure/svg/xmlns-validation.svg` | 0.359975 |
+
+Both were already triaged and explicitly skipped for the same reason in
+`tasks/T64-structure-tail-2.md` ("Skipped" section); this re-diagnoses each
+from scratch against the actual usvg/resvg 0.48.1 source and pixel evidence,
+and reaches the same conclusion.
+
+### `structure/svg/no-size.svg` — root cause
+
+The root `<svg>` has no `width`, `height` or `viewBox` at all. Rendered
+natively (no `--width`) with plain `resvg`, the reference PNG is **199×199**,
+not the 100×100 usvg's own stated default would suggest.
+
+usvg's `resolve_svg_size` (`crates/usvg/src/parser/converter.rs:523`)
+resolves the missing `width="100%"`/`height="100%"` against its
+`Options::default_size` (100×100) when there is no `viewBox`, setting
+`restore_viewbox = true` in that case (line 540). After the whole tree is
+built, `convert` (line 497) then calls `calculate_svg_bbox` (line 600) *only*
+when `restore_viewbox` was set:
+
+```rust
+fn calculate_svg_bbox(tree: &mut Tree) {
+    let bbox = tree.root.abs_bounding_box();
+    if let Some(size) = Size::from_wh(bbox.right(), bbox.bottom()) {
+        tree.size = size;
+    }
+}
+```
+
+i.e. the document's *reported* size is replaced by `(bbox.right, bbox.bottom)`
+of the whole tree's absolute (canvas-space, pre-zoom) bounding box —
+`Group`/`Path`/`Image`/`Text::abs_bounding_box()` (`crates/usvg/src/tree/
+mod.rs`), each precomputed recursively while the tree is built. For this file
+the frame rect (`x=1 y=1 width=198 height=198`) puts `bbox.right() =
+bbox.bottom() = 199`, matching the observed 199×199 native render exactly.
+
+Our renderer (per `T24a`'s Report, which first hit this file) already
+matches usvg's *pre*-refit fallback — `Svg.resolveRootSize`'s `none, none,
+none => some (100, 100)` arm (`LeanSvg/Svg.lean:1372`), wired straight into
+`Render.canvasSetup` (`LeanSvg/Render.lean:113`) — but never performs the
+bbox-refit afterward, so our 100×100 canvas (then scaled to 200×200 for
+`--width 200`) does not match resvg's 199×199-native canvas (also scaled to
+200×200, but with different content placement relative to the frame), which
+is the whole of the 0.674 gap: the green rect lands in the same place either
+way, but the frame border and the margin around it do not.
+
+Implementing the refit is a second, document-wide pass that has to run
+*before* `canvasSetup` can even pick `(W, H)` — walk `Doc.nodes` and compute
+a bounding box over every shape's own geometry (fill bbox, not stroke:
+`Node::abs_bounding_box`, not `abs_stroke_bounding_box`), composed through
+every ancestor's transform, matching each element kind's own bbox rule
+(path/text/image/nested-group), *before* any zoom is known. That is a new
+subsystem, not a local patch, and it also reaches into `proofs/
+SizeBound.lean`: the size bound currently derives entirely from `root`'s
+declared `width`/`height`/`viewBox`, decided before any content is walked;
+making the canvas size a function of the fully-interpreted content would
+need the proof re-derived, not just patched. Out of proportion for one file;
+skipped, matching T64.
+
+### `structure/svg/xmlns-validation.svg` — root cause
+
+The file redefines the default XML namespace inside a group to a
+non-SVG URI while binding a prefix to the real SVG namespace:
+
+```xml
+<s:g id="g1" xmlns="http://www.example.org/notsvg" xmlns:s="http://www.w3.org/2000/svg">
+    <s:rect id="rect1" ... fill="green"/>
+    <rect id="rect2" ... fill="red"/>
+</s:g>
+```
+
+Per XML namespaces, `<s:rect>` resolves to the SVG namespace (via the `s:`
+binding) and is a real SVG element; the unprefixed `<rect>` resolves to
+`http://www.example.org/notsvg` (the `xmlns=""` on the same `<g>` shadows the
+outer default) and is *not* an SVG element, so a conforming renderer must
+drop it and everything under it. `resvg -w 200` on this file is solid green
+(rect1 only) — confirmed by rendering and diffing both PNGs: our output's
+centre pixel is `(255,0,0,255)` (red/rect2) against resvg's `(0,128,0,255)`
+(green/rect1).
+
+Our XML layer erases this information before `Svg.lean` ever sees it:
+`Xml.localName` (`LeanSvg/Xml.lean:45`) strips everything up to and
+including `:` unconditionally at tokenise time, for *element* names only
+(`Xml.parse`, lines 182 and 196), and nothing downstream tracks `xmlns`/
+`xmlns:*` bindings at all — attributes keep their raw (possibly prefixed)
+name, but there is no namespace resolver anywhere in `Svg.lean`. So
+`interpret` (`LeanSvg/Svg.lean:3306`) sees two indistinguishable local names
+`rect`, paints both in document order, and the one drawn second (`rect2`,
+red) wins — exactly the observed failure.
+
+Fixing this for real means:
+
+1. `Xml.lean`: stop discarding the prefix at parse time (keep the raw
+   qualified name, or emit prefix and local name both) — a parser-level
+   change to the `Event.open_`/`.close` shape every consumer pattern-matches
+   on.
+2. `Svg.lean`: track a default-namespace/prefix-map per element through
+   `interpret`'s walk (inherited like `xml:space`, reset by any `xmlns*`
+   attribute on that element), resolve every element's *and* every
+   namespaced attribute's (`xlink:href` et al.) effective namespace against
+   it, and drop anything that resolves outside the SVG (or, for attributes,
+   XLink) namespace.
+3. Every other pass that shares the same flat event stream and currently
+   dispatches on bare local name would need the same gating to stay
+   consistent with the main walk: `defsScan`, `Use.expand`, `Filter.scan`,
+   `Pat.Defs.build`, `textPathTables`, and CSS element-chain matching — an
+   `id`/`href` inside a namespace-shadowed subtree must not be
+   referenceable, exactly as it must not be paintable.
+
+That is a cross-cutting change to the parser and to every dispatch site
+against a stream that today carries no namespace concept whatsoever, for one
+file's worth of behaviour (this is the only file in the whole `resvg-test-
+suite` corpus whose default namespace is shadowed like this). Out of
+proportion for one file; skipped, matching T64's identical conclusion for
+this same file (and `mixed-namespaces.svg`, which is not in this task's
+list but shares the identical root cause and fix).
+
+No `LeanSvg/*.lean` files changed. No corpus run needed beyond the two
+`--dir structure/svg` runs above (100 px fast and 200 px full), which
+reproduce the task's stated baseline exactly and confirm nothing regressed
+because nothing was touched.
+
 ---
 
 ## Common rules (every lean-svg agent)
