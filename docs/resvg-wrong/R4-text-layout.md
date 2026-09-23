@@ -61,7 +61,7 @@ renders nothing, same as above. **Class (c).**
 
 ### `text/text/xml-lang=ja.svg`
 
-Three copies of `刃直海角骨入`ac (Han-unification test: default,
+Three copies of `刃直海角骨入` (Han-unification test: default,
 `xml:lang="ja"`, `xml:lang="zh-HANT"` — glyph shapes for some of these
 characters legitimately differ between Japanese and Chinese type). resvg,
 suite and Chromium each render three visually-distinct rows (subtly, since
