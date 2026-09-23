@@ -206,7 +206,7 @@ def render(binary, svg_path, out, width=None):
     if width:
         cmd += ["--width", str(width)]
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
-    return r.returncode == 0
+    return r.returncode in (0, 2)  # T98b: 2 = PNG written, with warnings
 
 
 def render_resvg(svg_path, out, width=None):

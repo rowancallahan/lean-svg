@@ -186,7 +186,7 @@ def run_one(svg, binary, tol, threshold, resvg_args=None):
     if to_ref or rc_ref != 0:
         result["error"] = "resvg failed: " + (err_ref or "rc=%s" % rc_ref)
         return result
-    if to_ours or rc_ours != 0:
+    if to_ours or rc_ours not in (0, 2):  # T98b: 2 = PNG written, with warnings
         result["error"] = "lean-svg failed: " + (err_ours or "rc=%s" % rc_ours)
         return result
 

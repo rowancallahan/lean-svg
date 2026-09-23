@@ -14,13 +14,15 @@
     path unchanged.
   - `runFS_input_only`: the result depends only on the input path's contents
     and on whether the output path is present.
-  - `renderProgram_spec`: the renderer program's run equals
-    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok png => (ok, fs[out ↦ png]) | error e => (error e, fs)`.
+  - `renderProgram_spec`: the default (strict, T98b) renderer program's run equals
+    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok (png, warn) => (ok (warn ≠ ∅), fs[out ↦ png]) | error e => (error e, fs)`.
+    `renderProgramWarn_*` state the same for `--warnings` (T98), which also
+    writes `<out>.warnings.txt` and refuses if either path exists.
   - `renderProgram_no_clobber`: if the output path already holds something,
     running the program changes the file system not at all.
   - Corollaries (each additionally given `fs out = none`): on error nothing is
     written; on success the output path holds exactly `some (render input)`.
-- `#print axioms` on all seven of these: `propext` only. No `sorry`, no `Classical`.
+- `#print axioms` on all of these: `propext` only. No `sorry`, no `Classical`.
 
 **Claimed by construction** (enforced by the language, checked by grep):
 
@@ -41,7 +43,8 @@ semantics. Fidelity is measured against resvg (`tests/run_tests.py`).
 **Trusted:** the Lean compiler and runtime (C), the C compiler, the OS,
 `Prog.execIO` (eleven lines mapping the three ops to
 `System.FilePath.pathExists` / `IO.FS.readBinFile` / `writeBinFile`), and
-`Main.lean` (argument parsing, stderr message).
+`Main.lean` (argument parsing, exit code; it writes nothing to stdout or
+stderr, T98b).
 
 ## 2. Threat model
 

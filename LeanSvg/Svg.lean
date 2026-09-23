@@ -1841,7 +1841,9 @@ directory) in list order, stopping at the first name that matches an
 installed font; a CSS generic keyword (`serif`, `sans-serif`, …) maps to an
 `Options` generic-family name (`Times New Roman`, `Arial`, …) that is never
 installed either, and an unmatched list falls back to that same default
-family — also never installed.  A name that is installed there but not
+family — also never installed.  Exception (T98b): the unquoted generics
+`sans-serif` and `system-ui` resolve to Noto Sans (index 0), which is what the
+text is drawn in anyway, so they raise no warning.  A name that is installed there but not
 embedded here (`suiteOnlyFamilies`) ends the search with `none`; any other
 unrecognised name is skipped, as `fontdb::Database::query` does.  An unquoted
 name must be a sequence of CSS identifiers: svgtypes rejects the whole value
@@ -1854,6 +1856,9 @@ def resolveFontFamily (bs : ByteArray) : Option Nat := Id.run do
       for w in Bytes.splitTrim name 32 do
         let c := Bytes.at' w 0
         if 48 ≤ c && c ≤ 57 then return none
+      -- T98b: the unquoted generic `sans-serif` (and `system-ui`) is a real
+      -- match for Noto Sans, not a fallback, so it raises no warning.
+      if eqAscii name "sans-serif" || eqAscii name "system-ui" then return some 0
     match FontSet.familyIndex name with
     | some k => return some k
     | none => if suiteOnlyFamilies.any (eqAscii name ·) then return none

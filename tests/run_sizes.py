@@ -76,7 +76,7 @@ def time_runs(cmd, runs, out_path=None):
         if timed_out:
             return None, None, err, True
         samples.append(ms)
-        if rc != 0:
+        if rc not in (0, 2):  # T98b: lean-svg exits 2 on success with warnings
             return statistics.median(samples), rc, err, False
     return statistics.median(samples), rc, err, False
 
@@ -157,7 +157,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
     # Not clamped: at small widths our render cost is below the process-start
     # baseline, and a small negative net says exactly that.
     cell["ours_net_ms"] = ms_ours - base_ours
-    if rc_ours != 0:
+    if rc_ours not in (0, 2):
         cell["status"] = "error"
         cell["note"] = "lean-svg failed: " + (err_ours or "rc=%s" % rc_ours)
         return cell

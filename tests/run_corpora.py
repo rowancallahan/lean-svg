@@ -392,7 +392,7 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
     row["ours_rc"] = "timeout" if to_ours else rc_ours
     row["ours_err"] = first_line(err_ours)
     row["ms_ours"] = "%.1f" % ms_ours
-    if to_ours or rc_ours != 0:
+    if to_ours or rc_ours not in (0, 2):  # T98b: 2 = PNG written, with warnings
         row["status"] = "timeout" if to_ours else "unsupported"
         cleanup()
         return row
