@@ -1,0 +1,16 @@
+# Reference for tests/check_jpeg_decode.py (T62): `jref` is resvg 0.48.1's
+# decode_jpeg with the zune-jpeg version its Cargo.lock pins; `jgen` makes
+# test JPEGs with sampling layouts Pillow cannot write.
+[package]
+name = "jpeg_ref"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "jref"
+path = "src/main.rs"
+
+[dependencies]
+zune-jpeg = "=0.5.15"
+zune-core = "=0.5.1"
+jpeg-encoder = "=0.6.1"
