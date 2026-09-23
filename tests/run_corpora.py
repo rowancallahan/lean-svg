@@ -318,6 +318,15 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
             for path in scratch:
                 path.unlink(missing_ok=True)
 
+    # `--ref suite`: the suite's PNGs are 500 px renders, and a resampled
+    # reference never matches a native render (every file fails), so under
+    # `suite` both sides are compared at the PNG's own width instead.
+    if ref_mode == "suite":
+        native = load_rgba(svg.with_suffix(".png"))
+        if native is not None:
+            width = native.shape[1]
+            row["width"] = width
+
     # reference: resvg on the ORIGINAL file, for both routes -- except that
     # external resources are removed first (see `strip_external_refs`). Under
     # `--ref chrome`/`--ref suite` a different reference is substituted below,
