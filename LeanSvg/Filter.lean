@@ -825,7 +825,15 @@ def primRegion (p : RawPrim) (obb : Bool) (bbox : Option URect) (region : URect)
   let w := get "width" vbW
   let h := get "height" vbH
   let f16 := fun (v : Int) => Int.ediv (v + 128) 256
-  if (p.name == "feFlood" || p.name == "feImage") && obb then
+  if p.name == "feFlood" && obb then
+    -- T90: the spec's defaults (the filter region), not usvg's `0 0 1 1` of
+    -- the bbox; a given number is still a fraction of the bbox.
+    match bbox with
+    | none => none
+    | some b =>
+      mkRect ((x.map (mul16 · b.w + b.x)).getD region.x) ((y.map (mul16 · b.h + b.y)).getD region.y)
+        ((w.map (mul16 · b.w)).getD region.w) ((h.map (mul16 · b.h)).getD region.h)
+  else if p.name == "feImage" && obb then
     match bbox with
     | none => none
     | some b => bboxT16 (x.getD 0) (y.getD 0) (w.getD 65536) (h.getD 65536) b
