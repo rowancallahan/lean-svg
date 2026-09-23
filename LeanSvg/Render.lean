@@ -271,7 +271,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
     match p with
     | .none => cv
     | .solid c => cv.fillMask m c (opacityToU8 c.a op st.opacity)
-    | .gradient i =>
+    | .gradient i _ =>
       match Grad.build st.defs i s.cmds gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
               op st.opacity with
       | .skip => cv
