@@ -5,6 +5,7 @@ import LeanSvg.Canvas
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use
+import LeanSvg.Filter
 import Std.Data.HashMap
 
 /-!
@@ -171,6 +172,8 @@ structure Style where
   /-- `mask-type: alpha` on this element (T49), not inherited; only a `mask`
   element reads it. -/
   maskAlpha : Bool := false
+  /-- This element's own `filter` value, raw (T51); not inherited. -/
+  filterRaw : Option ByteArray := none
 deriving Repr, Inhabited
 
 structure Shape where
@@ -312,7 +315,17 @@ structure GroupInfo where
   /-- T49: this group's `mask` use (an index into `Doc.maskUses`), applied to the
   finished layer after the clip and before the composite (`render_group`). -/
   mask : Option Nat := none
-deriving Repr, Inhabited
+  /-- T51: the element's resolved `filter` list, in the user space `filterCtm`
+  maps to the root.  Filled in when the element closes (the object bounding
+  box is needed); non-empty makes the layer a filter layer (`Render`). -/
+  filters : Array Filter.Resolved := #[]
+  filterCtm : Mat := Mat.identity
+  /-- T51: the layer was opened only for a `filter` that resolved to nothing
+  (unsupported, or a parse error): no layer at all, as before this task. -/
+  passthrough : Bool := false
+  /-- T51: usvg drops the element (an invalid filter reference or region). -/
+  dropped : Bool := false
+deriving Inhabited
 
 /-- The document as a flat, ordered instruction stream.
 
@@ -1637,6 +1650,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "clip-path" => { st with clipRef := parseClipRef v }
   | "mask" => { st with maskRef := parseClipRef v }
   | "mask-type" => { st with maskAlpha := eqAscii (trim v) "alpha" }
+  | "filter" => { st with filterRaw := some v }
   | "clip-rule" =>
     let t := trim v
     if eqAscii t "evenodd" then { st with clipEvenOdd := true }
@@ -2463,6 +2477,11 @@ structure Frame where
   Checked at the very top of the next `.open_`, before any other branch, so
   such a child is dropped exactly like a `switch`'s non-selected child. -/
   isShapeLeaf : Bool := false
+  /-- T51: the index in `nodes` of this element's `groupBegin` when it opened
+  a layer for a `filter`, patched with the resolved filters on close. -/
+  filterAt : Option Nat := none
+  /-- T51: whether that layer has a reason besides the filter. -/
+  filterOnly : Bool := false
 deriving Inhabited
 
 /-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
@@ -2585,6 +2604,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let scan := defsScan events
   let textPaths := textPathTables events
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
+  -- T51: every `<filter>` element, collected up front like the gradients.
+  let fparsers : Filter.Parsers := ⟨parseColor, parseOpacity, opacityOne⟩
+  let ftab := Filter.scan fparsers events
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
     -- `transform-origin` percentages resolve against usvg's per-element
     -- `state.view_box`: the root's `viewBox` if it has one, else the root's
@@ -2644,7 +2666,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     -- `clip-path` and the element's own transform are per-element too, and for
     -- the same reason (T20).
     let base := { base with clipRef := none, ownMat := Mat.identity, maskRef := none,
-                            maskAlpha := false }
+                            maskAlpha := false, filterRaw := none }
     let early (n : String) := n == "color" || n == "transform-origin"
     -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
     -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and
@@ -2730,6 +2752,21 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           maskSaved := maskSaved.pop
           openMasks := openMasks.pop
         | none => pure ()
+        -- T51: the object bounding box is complete, so the `filter` can be
+        -- resolved; the layer's `groupBegin` is patched with the outcome.
+        match fr.filterAt, st.filterRaw with
+        | some k, some raw =>
+          let bbox : Option Filter.URect := fr.bbox.bind fun b =>
+            if Box.nonZero b then some ⟨b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0⟩ else none
+          let cx : Filter.ElemCtx := ⟨bbox, st.color, st.fontSize, st.pctRefW, st.pctRefH⟩
+          nodes := nodes.modify k fun n => match n with
+            | .groupBegin g =>
+              match Filter.resolve fparsers ftab raw cx with
+              | .filters fs => .groupBegin { g with filters := fs, filterCtm := st.ctm }
+              | .drop => .groupBegin { g with dropped := true }
+              | .noFilter => .groupBegin { g with passthrough := fr.filterOnly }
+            | n => n
+        | _, _ => pure ()
         match fr.mode, frames.back? with
         | .render, some pf =>
           if pf.want then
@@ -3045,8 +3082,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
               if layered then
-                nodes := nodes.push
-                  (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips, mslot⟩)
+                nodes := nodes.push (.groupBegin
+                  { opacity := st.ownOpacity, blend := st.blend, isolate := st.isolate,
+                    clips := layerClips, mask := mslot })
               let (shs, used) := textShapes applyEffective events idx st chain textBudget textPaths
               textBudget := textBudget - used
               -- The laid-out glyph outlines are in this `<text>`'s own user
@@ -3125,7 +3163,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                     let child : ClipChild := ⟨cmds, st.clipEvenOdd, st.ctm, st.visible, st.clips, fine⟩
                     clipTable := clipTable.modify k fun e => { e with children := e.children.push child }
                 | none => pure ()
-              let want := slot.isSome || mslot.isSome || pf.want
+              let want := slot.isSome || mslot.isSome || pf.want || st.filterRaw.isSome
               enter := some st
               frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
                          bbox := if want then cmds.bind cmdsBox else none,
@@ -3151,9 +3189,14 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           -- T20's cheaper per-coverage multiply unless the element is getting
           -- a layer anyway, in which case the clip rides it.
           let clipLayer := container && (st.clipRef.isSome || viewportClip.isSome)
-          let needs := renders &&
-            (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer
-             || frame.maskUse.isSome)
+          let other := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer
+            || frame.maskUse.isSome
+          -- T51: a `filter` is `should_isolate`'s third case.  Whether it
+          -- resolves to anything is only known on close (it needs the box).
+          let hasFilter := renders && match st.filterRaw with
+            | some v => !(eqAscii (trim v) "none")
+            | none => false
+          let needs := renders && (other || hasFilter)
           -- Past `maxLayerDepth` the layer is dropped: the opacity is folded
           -- into the subtree's paint the way it was before T22 (wrong where
           -- children overlap, but bounded and never an error) and the blend
@@ -3174,8 +3217,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             | none => layerClips
           let st := if layered && viewportClip.isSome then { st with clips := st.clips.pop } else st
           if layered then
+            if hasFilter then
+              frame := { frame with filterAt := some nodes.size, filterOnly := !other,
+                                    want := true }
             nodes := nodes.push (.groupBegin
-              ⟨st.ownOpacity, st.blend, st.isolate, layerClips, if layered then frame.maskUse else none⟩)
+              { opacity := st.ownOpacity, blend := st.blend, isolate := st.isolate,
+                clips := layerClips, mask := if layered then frame.maskUse else none })
             layerDepth := layerDepth + 1
           match shapeNode with
           | some s =>

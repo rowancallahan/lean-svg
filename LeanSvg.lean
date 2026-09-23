@@ -19,4 +19,6 @@ import LeanSvg.JpegDecode
 import LeanSvg.Svg
 import LeanSvg.Clip
 import LeanSvg.Mask
+import LeanSvg.Filter
+import LeanSvg.FilterApply
 import LeanSvg.Render

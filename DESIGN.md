@@ -344,6 +344,40 @@ Known gaps: `use` children of a `clipPath` (needs `use` support), the legacy
 `clipPathUnits="objectBoundingBox"`, whose glyph outlines are already on the
 `Fx` grid when the box is taken.
 
+### 3.11 Filters (T51)
+
+`filter` is `should_isolate`'s third case.  `LeanSvg/Filter.lean` ports usvg's
+`parser/filter.rs`: one bounded pre-pass collects every `<filter>` with its
+primitives, and when the referencing element *closes* (its object bounding box
+is known) `Filter.resolve` turns the `filter` value — `url(#id)` lists and the
+CSS functions — into user-space regions, subregions and wired inputs, with
+usvg's three outcomes: filters, no filter, or "element not rendered".  The
+`groupBegin` pushed at open is patched with the outcome.
+
+`LeanSvg/FilterApply.lean` ports resvg's `filter/mod.rs` on the premultiplied
+canvas, quirks included (images anchored at the layer origin, per-result colour
+spaces converted through resvg's 8-bit tables, subregions cleared by whole
+pixels).  The box blur is exact integer arithmetic; the IIR blur is 2^-16 fixed
+point; formulas that end in resvg's truncating `as u8` (colour matrix, transfer
+functions, arithmetic composite) run on the `F32` emulation, since a one-level
+truncation difference in linearRGB is up to thirteen levels in sRGB.
+
+A filter layer is a coordinate frame of its own: its canvas is the filter
+region in whole-image pixels, cut to resvg's `max_filter_bbox` (the canvas and
+twice its size past each edge), and the subtree is rasterised with the root
+matrix shifted onto it.  That shift is a whole number of pixels, so coverage is
+unchanged (§3.5), and a blur or offset sees content that lies off the band:
+tiles and `--threads` stay byte-identical.  Past `Render.maxFilterPixels` the
+region is cut to the enclosing canvas instead (bounded, no longer
+tile-invariant); primitives × area is capped per group (`maxFilterWork`) and
+per render (`maxFilterTotal`), and a `<filter>` has at most `Filter.maxPrims`
+primitives.
+
+Primitives usvg knows but this renderer does not implement (lighting,
+turbulence, morphology, convolution, tile, image, displacement, a `gamma`
+transfer function) make the whole `filter` value resolve to "no filter": the
+element renders exactly as before T51.
+
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
 | file | exact | ≤ 8 | ≤ 32 | max d |
@@ -389,6 +423,8 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/Text.lean` | text layout: runs, glyph outlines, anchoring |
 | `LeanSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo`, defs pre-pass |
 | `LeanSvg/Clip.lean` | `clipPath` → device masks, cache, coverage and layer application |
+| `LeanSvg/Filter.lean` | filter model, `<filter>` pre-pass, usvg's `filter` resolution |
+| `LeanSvg/FilterApply.lean` | filter primitives on pixels (resvg `filter/`) |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |

@@ -1,4 +1,6 @@
 import LeanSvg.Mask
+import LeanSvg.Clip
+import LeanSvg.FilterApply
 import LeanSvg.Png
 
 /-!
@@ -335,6 +337,27 @@ document uses (the whole resvg suite peaks at one), and a document that asks
 for more is rejected rather than allocating. -/
 def maxLayerPixels : Nat := 4 * maxPixels
 
+/-- T51: the layer rectangle of a filter group, resvg's `render_group` for a
+group with filters: the union of the filters' regions (`filters_bounding_box`,
+user space), transformed by `dev` into device space and made an integer rect
+as `x.floor()`, `y.floor()`, `width.ceil().max(1)`, `height.ceil().max(1)` —
+note the width is the ceiling of the *width*, not of the right edge.  Returned
+as `(x0, y0, x1, y1)`; `none` for no filters. -/
+def filterBox (dev : Mat) (fs : Array Filter.Resolved) : Option (Int × Int × Int × Int) := Id.run do
+  let mut b : Option Box := none
+  for f in fs do
+    let r := f.region
+    b := Box.union b (some ⟨r.x, r.y, r.x + r.w, r.y + r.h⟩)
+  match b with
+  | none => return none
+  | some u =>
+    match Box.transformed dev u with
+    | none => return none
+    | some d =>
+      let x0 := Fx.floor d.x0
+      let y0 := Fx.floor d.y0
+      return some (x0, y0, x0 + max 1 (Fx.ceil (d.x1 - d.x0)), y0 + max 1 (Fx.ceil (d.y1 - d.y0)))
+
 /-- The layer rectangle for the group that opens at `nodes[i]` (a `groupBegin`):
 the union of the device boxes of every shape in its subtree, in whole canvas
 pixels, widened like resvg's (`render.rs`: `floor`/`ceil` then two pixels of
@@ -355,7 +378,16 @@ def nodeBox (rootMat : Mat) (nodes : Array Svg.Node) (i : Nat) (clip : Clip) : O
     let mut depth : Nat := 0
     for j in [i + 1 : nodes.size] do
       match nodes.getD j default with
-      | .groupBegin _ => depth := depth + 1
+      | .groupBegin g =>
+        depth := depth + 1
+        -- T51: a nested filter paints its whole region, not just its shapes.
+        match filterBox (rootMat.mul g.filterCtm) g.filters with
+        | some (x0, y0, x1, y1) =>
+          lo := match lo with
+            | none => some (x0 - 2, y0 - 2, x1 + 2, y1 + 2)
+            | some (a0, b0, a1, b1) =>
+              some (min a0 (x0 - 2), min b0 (y0 - 2), max a1 (x1 + 2), max b1 (y1 + 2))
+        | none => pure ()
       | .groupEnd => if depth == 0 then break else depth := depth - 1
       | .shape s =>
         let ctm := rootMat.mul s.style.ctm
@@ -423,7 +455,56 @@ structure Layer where
   device matrix of the masked element's user space. -/
   masks : Array Mask.Step := #[]
   maskMat : Mat := Mat.identity
+  /-- T51: set for a *filter* layer.  Its canvas is the filter region, in a
+  coordinate frame of its own (`root`/`fw`/`fh`/`cache` save the enclosing
+  frame's), sitting at `(lx, ly)` of the enclosing frame — possibly off it,
+  since resvg's filter region reaches past the canvas. -/
+  filters : Array Filter.Resolved := #[]
+  /-- The filters' user space to the filter layer's pixels. -/
+  fts : Mat := Mat.identity
+  root : Mat := Mat.identity
+  fw : Nat := 0
+  fh : Nat := 0
+  cache : Clip.Cache := {}
+  lx : Int := 0
+  ly : Int := 0
 deriving Inhabited
+
+/-- Largest filter layer, in pixels.  resvg lets the region reach 2× the canvas
+past each edge (`max_filter_bbox`); past this area the region is cut to the
+enclosing canvas instead. -/
+def maxFilterPixels : Nat := maxPixels
+
+/-- Bound on `primitives × filter-layer pixels` for one filter group: each
+primitive keeps a result the size of the layer. -/
+def maxFilterWork : Nat := 33554432
+
+/-- Bound on the same product summed over every filter group of a render:
+nesting could otherwise multiply `maxFilterWork` by `Svg.maxLayerDepth`.  A
+primitive costs at most a few dozen passes over its layer (a blur is ten), so
+this caps filter time at tens of seconds whatever the input. -/
+def maxFilterTotal : Nat := 67108864
+
+/-- Crop `c`, placed at `(dx, dy)`, to `[0, w) × [0, h)`: the part that lands
+there and its (now non-negative) position; `none` if nothing does. -/
+def cropTo (c : Canvas) (dx dy : Int) (w h : Nat) : Option (Canvas × Nat × Nat) := Id.run do
+  let x0 := max dx 0
+  let y0 := max dy 0
+  let x1 := min (dx + c.w) w
+  let y1 := min (dy + c.h) h
+  if x1 ≤ x0 || y1 ≤ y0 then return none
+  if x0 == dx && y0 == dy && x1 == dx + c.w && y1 == dy + c.h then
+    return some (c, x0.toNat, y0.toNat)
+  let cw := (x1 - x0).toNat
+  let ch := (y1 - y0).toNat
+  let sx := (x0 - dx).toNat
+  let sy := (y0 - dy).toNat
+  let mut px : Array Nat := Array.replicate (cw * ch) 0
+  for j in [0:ch] do
+    for i in [0:cw] do
+      px := px.setIfInBounds (j * cw + i) (c.px.getD ((sy + j) * c.w + sx + i) 0)
+  return some (⟨cw, ch, px⟩, x0.toNat, y0.toNat)
+
 
 /-- How deeply mask content may itself use masks (T49): each level renders the
 content of the masks one level up.  Past it, a mask's content renders nothing. -/
@@ -453,13 +534,16 @@ element is not rendered"; T49 a third, an invalid `mask`.
 T20's clip-mask cache lives for one canvas, so a clip shared by many shapes —
 or by a group's layer and its descendants — is rasterized once.
 
+T51: a group with a `filter` is a layer in a frame of its own (`Layer.filters`).
+
 T49: a group with a `mask` renders each mask's content by calling this function
 again, on `fuel - 1`, over the mask's own node stream (`Mask` module comment). -/
-def renderNodes (doc : Svg.Doc) (w h : Nat) : (fuel : Nat) → (rootMat : Mat) →
+def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (rootMat : Mat) →
     (nodes : Array Svg.Node) → (cv0 : Canvas) → (clip0 : Clip) → (ox0 oy0 : Nat) →
-    Clip.Cache → (live0 : Nat) → (renders0 : Nat) → Except String (Canvas × Clip.Cache × Nat)
-  | 0, _, _, cv0, _, _, _, cache, _, renders => .ok (cv0, cache, renders)
-  | fuel + 1, rootMat, nodes, cv0, clip0, ox0, oy0, cache0, live0, renders0 => Id.run do
+    Clip.Cache → (live0 : Nat) → (renders0 : Nat) → (fwork0 : Nat) →
+    Except String (Canvas × Clip.Cache × Nat × Nat)
+  | 0, _, _, cv0, _, _, _, cache, _, renders, fwork => .ok (cv0, cache, renders, fwork)
+  | fuel + 1, rootMat, nodes, cv0, clip0, ox0, oy0, cache0, live0, renders0, fwork0 => Id.run do
   let mut cur : Canvas := cv0
   let mut stack : Array Layer := #[]
   let mut cache : Clip.Cache := cache0
@@ -470,23 +554,37 @@ def renderNodes (doc : Svg.Doc) (w h : Nat) : (fuel : Nat) → (rootMat : Mat) �
   let mut renders : Nat := renders0
   let mut skipDepth : Nat := 0
   let mut err : Option String := none
+  -- T51: the coordinate frame shapes are rasterised in.  It is the band
+  -- (`rootMat`, `w × h`) except inside a filter layer, which is a frame of its
+  -- own: its canvas is the filter region, placed in whole-image pixels, so a
+  -- blur or an offset sees what lies outside the band and a tile stays
+  -- byte-identical to the full render.
+  let mut curRoot := rootMat
+  let mut curW := w
+  let mut curH := h
+  -- T51: one entry per open, unskipped `groupBegin`: `true` when it opened no
+  -- layer (a filter that resolved to nothing), so its `groupEnd` pops nothing.
+  let mut passStack : Array Bool := #[]
+  let mut filterWork : Nat := fwork0
   for i in [0:nodes.size] do
     match nodes.getD i default with
     | .shape s =>
       if skipDepth == 0 then
-        let (cv', cache') := drawShape rootMat ⟨w, h, curClip, curOx, curOy⟩ doc cur cache s
+        let (cv', cache') := drawShape curRoot ⟨curW, curH, curClip, curOx, curOy⟩ doc cur cache s
         cur := cv'
         cache := cache'
     | .groupBegin g =>
       if skipDepth > 0 then skipDepth := skipDepth + 1
+      else if g.dropped then skipDepth := 1
+      else if g.passthrough then passStack := passStack.push true
       else
         -- The group's own `clip-path`, resolved once here rather than once per
         -- descendant shape, and applied to the finished layer at `groupEnd`.
-        let (chain?, cache') := Clip.resolve doc w h rootMat cache g.clips
+        let (chain?, cache') := Clip.resolve doc curW curH curRoot cache g.clips
         cache := cache'
         -- T49: the group's `mask` chain; `none` is "not rendered".
         let mu := doc.maskUses.getD (g.mask.getD 0) default
-        let maskMat := rootMat.mul mu.ctm
+        let maskMat := curRoot.mul mu.ctm
         let steps? : Option (Array Mask.Step) := match g.mask with
           | none => some #[]
           | some _ => match Mask.resolve doc mu with
@@ -496,10 +594,61 @@ def renderNodes (doc : Svg.Doc) (w h : Nat) : (fuel : Nat) → (rootMat : Mat) �
         | none, _ => skipDepth := 1
         | _, none => skipDepth := 1
         | some chain, some steps =>
+        if !g.filters.isEmpty then
+          -- T51: a filter layer.  Its rectangle is the filter region, not the
+          -- ink, cut to resvg's `max_filter_bbox` (the canvas and twice its
+          -- size past every edge) — and, past `maxFilterPixels`, to the canvas
+          -- being painted, which bounds it by what already exists.
+          let dev := curRoot.mul g.filterCtm
+          match filterBox dev g.filters with
+          | none => skipDepth := 1
+          | some (fx0, fy0, fx1, fy1) =>
+            let mx0 : Int := -(2 * (fullW : Int)) - curClip.vx
+            let my0 : Int := -(2 * (fullH : Int)) - curClip.vy
+            let mut bx0 := max fx0 mx0
+            let mut by0 := max fy0 my0
+            let mut bx1 := min fx1 (mx0 + 5 * (fullW : Int))
+            let mut by1 := min fy1 (my0 + 5 * (fullH : Int))
+            if bx1 > bx0 && by1 > by0 && (bx1 - bx0) * (by1 - by0) > (maxFilterPixels : Int) then
+              bx0 := max bx0 curOx
+              by0 := max by0 curOy
+              bx1 := min bx1 (curOx + cur.w)
+              by1 := min by1 (curOy + cur.h)
+            if bx1 ≤ bx0 || by1 ≤ by0 then skipDepth := 1
+            else
+              let lw := (bx1 - bx0).toNat
+              let lh := (by1 - by0).toNat
+              let nprims := g.filters.foldl (fun n f => n + f.prims.size) 0
+              filterWork := filterWork + nprims * lw * lh
+              if nprims * lw * lh > maxFilterWork || filterWork > maxFilterTotal then
+                err := some "filter budget"
+                break
+              if livePixels + lw * lh > maxLayerPixels then
+                err := some "layer budget"
+                break
+              livePixels := livePixels + lw * lh
+              let shift := Mat.translate (-(bx0 * 256)) (-(by0 * 256))
+              stack := stack.push
+                { cv := cur, ox := curOx, oy := curOy, clip := curClip,
+                  opacity := opacityF32 g.opacity, opacityQ := opacityQ g.opacity,
+                  blend := g.blend, clips := chain, masks := steps, maskMat,
+                  filters := g.filters, fts := shift.mul dev, root := curRoot,
+                  fw := curW, fh := curH, cache, lx := bx0, ly := by0 }
+              passStack := passStack.push false
+              cur := Canvas.new lw lh none
+              curRoot := shift.mul curRoot
+              curW := lw
+              curH := lh
+              curClip := { curClip with x0 := 0, y0 := 0, x1 := lw, y1 := lh,
+                                        vx := curClip.vx + bx0, vy := curClip.vy + by0 }
+              curOx := 0
+              curOy := 0
+              cache := {}
+        else
         -- Nothing of the layer outside the clip survives, so the allocation
         -- shrinks to the clip's own box; an empty intersection skips the group.
         -- The same holds for every mask region.
-        match nodeBox rootMat nodes i curClip with
+        match nodeBox curRoot nodes i curClip with
         | none => skipDepth := 1
         | some r0 =>
           let r? : Option Clip := match Clip.chainBox chain with
@@ -528,54 +677,80 @@ def renderNodes (doc : Svg.Doc) (w h : Nat) : (fuel : Nat) → (rootMat : Mat) �
             err := some "layer budget"
             break
           livePixels := livePixels + lw * lh
-          stack := stack.push ⟨cur, curOx, curOy, curClip, opacityF32 g.opacity,
-            opacityQ g.opacity, g.blend, chain, steps, maskMat⟩
+          stack := stack.push
+            { cv := cur, ox := curOx, oy := curOy, clip := curClip,
+              opacity := opacityF32 g.opacity, opacityQ := opacityQ g.opacity,
+              blend := g.blend, clips := chain, masks := steps, maskMat,
+              root := curRoot, fw := curW, fh := curH }
+          passStack := passStack.push false
           cur := Canvas.new lw lh none
           curClip := r
           curOx := r.x0
           curOy := r.y0
     | .groupEnd =>
       if skipDepth > 0 then skipDepth := skipDepth - 1
+      else if passStack.back?.getD false then passStack := passStack.pop
       else
+        passStack := passStack.pop
         match stack.back? with
         | none => pure ()
         | some parent =>
-          let lx := curOx - parent.ox
-          let ly := curOy - parent.oy
-          -- resvg's order: the clip multiplies the layer, *then* the mask,
-          -- *then* the opacity and blend mode composite it onto the backdrop
-          -- (`render_group`).
-          let mut done := Clip.applyToCanvas parent.clips cur curOx curOy
-          -- T49: each mask's content, rendered over the layer's rectangle and
-          -- multiplied by its region, becomes a coverage mask; they multiply
-          -- the layer deepest link first (`mask::apply` recurses before it
-          -- multiplies).
-          let mut covs : Array Clip.Mask := #[]
-          for st in parent.masks do
-            let e := doc.masks.getD st.entry default
-            renders := renders + 1
-            if renders > maxMaskRenders then
-              err := some "mask budget"
-              break
-            match renderNodes doc w h fuel (parent.maskMat.mul st.content) e.nodes
-                (Canvas.new cur.w cur.h none) curClip curOx curOy cache
-                (livePixels + cur.w * cur.h) renders with
-            | .error msg =>
-              err := some msg
-              break
-            | .ok (mcv, c', n) =>
-              cache := c'
-              renders := n
-              let mcv := Clip.applyToCanvas #[Mask.regionMask w h parent.maskMat st.region]
-                mcv curOx curOy
-              covs := covs.push (Mask.toClipMask mcv curOx curOy e.alpha)
-          if err.isSome then break
-          done := Clip.applyToCanvas covs.reverse done curOx curOy
           livePixels := livePixels - cur.w * cur.h
-          -- Popped *before* the composite so that the parent's pixel array is
-          -- uniquely referenced and `compositeLayer` can update it in place.
-          stack := stack.pop
-          cur := parent.cv.compositeLayer done lx ly parent.opacity parent.opacityQ parent.blend
+          -- resvg's order (`render_group`): the filter, then the clip, then the
+          -- mask, then the opacity and blend mode composite.  A filter layer is
+          -- filtered in its own frame and cropped back into the parent's.
+          let placed : Option (Canvas × Nat × Nat × Clip) :=
+            if parent.filters.isEmpty then some (cur, curOx, curOy, curClip)
+            else
+              let out := parent.filters.foldl (fun c f => FilterApply.run f parent.fts c) cur
+              (cropTo out (parent.lx - parent.ox) (parent.ly - parent.oy)
+                  parent.cv.w parent.cv.h).map fun (c, nx, ny) =>
+                let ax := nx + parent.ox
+                let ay := ny + parent.oy
+                (c, ax, ay, { parent.clip with x0 := ax, y0 := ay, x1 := ax + c.w, y1 := ay + c.h })
+          if !parent.filters.isEmpty then
+            curRoot := parent.root
+            curW := parent.fw
+            curH := parent.fh
+            cache := parent.cache
+          match placed with
+          | none =>
+            stack := stack.pop
+            cur := parent.cv
+          | some (lay, lox, loy, lclip) =>
+            let mut done := Clip.applyToCanvas parent.clips lay lox loy
+            -- T49: each mask's content, rendered over the layer's rectangle and
+            -- multiplied by its region, becomes a coverage mask; they multiply
+            -- the layer deepest link first (`mask::apply` recurses before it
+            -- multiplies).
+            let mut covs : Array Clip.Mask := #[]
+            for st in parent.masks do
+              let e := doc.masks.getD st.entry default
+              renders := renders + 1
+              if renders > maxMaskRenders then
+                err := some "mask budget"
+                break
+              match renderNodes doc parent.fw parent.fh fullW fullH fuel
+                  (parent.maskMat.mul st.content) e.nodes
+                  (Canvas.new lay.w lay.h none) lclip lox loy cache
+                  (livePixels + lay.w * lay.h) renders filterWork with
+              | .error msg =>
+                err := some msg
+                break
+              | .ok (mcv, c', n, fw') =>
+                cache := c'
+                renders := n
+                filterWork := fw'
+                let mcv := Clip.applyToCanvas
+                  #[Mask.regionMask parent.fw parent.fh parent.maskMat st.region] mcv lox loy
+                covs := covs.push (Mask.toClipMask mcv lox loy e.alpha)
+            if err.isSome then break
+            done := Clip.applyToCanvas covs.reverse done lox loy
+            -- Popped *before* the composite so that the parent's pixel array is
+            -- uniquely referenced and `compositeLayer` can update it in place.
+            stack := stack.pop
+            cur := parent.cv.compositeLayer done (lox - parent.ox) (loy - parent.oy)
+              parent.opacity parent.opacityQ parent.blend
           curOx := parent.ox
           curOy := parent.oy
           curClip := parent.clip
@@ -584,18 +759,21 @@ def renderNodes (doc : Svg.Doc) (w h : Nat) : (fuel : Nat) → (rootMat : Mat) �
   | none => pure ()
   -- A `groupEnd` is emitted for every `groupBegin` (`Svg.interpret` pushes both
   -- from one place), so the stack is empty here; composite anything left over
-  -- rather than dropping it if that ever stops being true.
+  -- rather than dropping it if that ever stops being true (filters and masks
+  -- of such a layer are not applied).
   for _ in [0:stack.size] do
     match stack.back? with
     | none => pure ()
     | some parent =>
       stack := stack.pop
-      let done := Clip.applyToCanvas parent.clips cur curOx curOy
-      cur := parent.cv.compositeLayer done (curOx - parent.ox) (curOy - parent.oy)
-        parent.opacity parent.opacityQ parent.blend
+      if parent.filters.isEmpty then
+        let done := Clip.applyToCanvas parent.clips cur curOx curOy
+        cur := parent.cv.compositeLayer done (curOx - parent.ox) (curOy - parent.oy)
+          parent.opacity parent.opacityQ parent.blend
+      else cur := parent.cv
       curOx := parent.ox
       curOy := parent.oy
-  return .ok (cur, cache, renders)
+  return .ok (cur, cache, renders, filterWork)
 
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.
@@ -611,8 +789,10 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
   if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
-  let (cv, _, _) ← renderNodes doc w h (maskFuel + 1) rootMat doc.nodes
-    (Canvas.new w h opts.background) clip 0 0 {} 0 0
+  -- The whole image's size, for resvg's `max_filter_bbox` (T51).
+  let (fullW, fullH, _, _) ← canvasSetup doc.root { opts with viewport := none }
+  let (cv, _, _, _) ← renderNodes doc w h fullW fullH (maskFuel + 1) rootMat doc.nodes
+    (Canvas.new w h opts.background) clip 0 0 {} 0 0 0
   return (w, h, cv.toRgbaBytes)
 
 /-- Bands per worker thread.
