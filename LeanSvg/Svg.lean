@@ -126,6 +126,11 @@ structure Style where
   /-- `font-kerning: none`, or SVG 1.1 `kerning="0"`, turns pair kerning off. -/
   textKerning : Bool := true
   textAnchor : Text.Anchor := .start
+  /-- `dominant-baseline`/`alignment-baseline` (T54): ordinary CSS-inherited
+  properties, unlike `baseline-shift` (`LeanSvg/Baseline.lean`, `textShapes`'s
+  `bsStack`), which is not carried on `Style` at all. -/
+  dominantBaseline : Text.AlignmentBaseline := .auto
+  alignmentBaseline : Text.AlignmentBaseline := .auto
   /-- `xml:space="preserve"`. -/
   spacePreserve : Bool := false
   /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
@@ -1661,6 +1666,39 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     if eqAscii t "middle" then { st with textAnchor := .middle }
     else if eqAscii t "end" then { st with textAnchor := .atEnd }
     else if eqAscii t "start" then { st with textAnchor := .start } else st
+  -- T54: `dominant-baseline`/`alignment-baseline`.  Ordinary CSS inheritance
+  -- (nearest ancestor's own value wins, like every other property here);
+  -- `no-change` (and any other unrecognised token) is a no-op, which is
+  -- exactly usvg's "use the parent's own value" for `no-change` — see
+  -- `LeanSvg/Baseline.lean`'s module docs for the one case that differs.
+  | "dominant-baseline" =>
+    let t := trim v
+    if eqAscii t "auto" || eqAscii t "use-script" || eqAscii t "reset-size" then
+      { st with dominantBaseline := .auto }
+    else if eqAscii t "ideographic" then { st with dominantBaseline := .ideographic }
+    else if eqAscii t "alphabetic" then { st with dominantBaseline := .alphabetic }
+    else if eqAscii t "hanging" then { st with dominantBaseline := .hanging }
+    else if eqAscii t "mathematical" then { st with dominantBaseline := .mathematical }
+    else if eqAscii t "central" then { st with dominantBaseline := .central }
+    else if eqAscii t "middle" then { st with dominantBaseline := .middle }
+    else if eqAscii t "text-after-edge" then { st with dominantBaseline := .textAfterEdge }
+    else if eqAscii t "text-before-edge" then { st with dominantBaseline := .textBeforeEdge }
+    else st
+  | "alignment-baseline" =>
+    let t := trim v
+    if eqAscii t "auto" then { st with alignmentBaseline := .auto }
+    else if eqAscii t "baseline" then { st with alignmentBaseline := .baseline }
+    else if eqAscii t "before-edge" then { st with alignmentBaseline := .beforeEdge }
+    else if eqAscii t "text-before-edge" then { st with alignmentBaseline := .textBeforeEdge }
+    else if eqAscii t "middle" then { st with alignmentBaseline := .middle }
+    else if eqAscii t "central" then { st with alignmentBaseline := .central }
+    else if eqAscii t "after-edge" then { st with alignmentBaseline := .afterEdge }
+    else if eqAscii t "text-after-edge" then { st with alignmentBaseline := .textAfterEdge }
+    else if eqAscii t "ideographic" then { st with alignmentBaseline := .ideographic }
+    else if eqAscii t "alphabetic" then { st with alignmentBaseline := .alphabetic }
+    else if eqAscii t "hanging" then { st with alignmentBaseline := .hanging }
+    else if eqAscii t "mathematical" then { st with alignmentBaseline := .mathematical }
+    else st
   -- `get_xmlspace`: `preserve` turns collapsing off, any *other* value turns
   -- it back on, and an absent attribute inherits (which is what not matching
   -- here does).
@@ -2031,14 +2069,47 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
 
 /-! ## `text` (T36) -/
 
-/-- The text-layout properties of a resolved `Style`. -/
-def spanPropsOf (st : Style) : Text.SpanProps :=
+/-- `baseline-shift`'s own contribution from *one* element (a `tspan`, or the
+`<text>` element for its own direct text — though `textShapes` never actually
+calls this for `<text>` itself, see its `bsStack`), as `(px, isSub, isSuper)`:
+usvg's `convert_baseline_shift` first tries the value as a CSS
+`<length-percentage>` (a percentage of *this* element's own `font-size`,
+`fontSize`); if that fails to parse, it falls back to matching `sub`/`super`
+literally, and anything else (`baseline`, `inherit`, an invalid token, or no
+attribute at all) contributes nothing — the actual `sub`/`super` pixel offset
+needs the *leaf* span's font metrics, not available here, so `textShapes`
+only counts them (`LeanSvg/Baseline.lean`'s `resolveBaseline16` scales the
+count). -/
+def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × Bool :=
+  match attrOrStyle attrs "baseline-shift" with
+  | none => (0, false, false)
+  | some v =>
+    let t := trim v
+    match parseNumber t 0 with
+    | some (n, j) =>
+      match applyFontUnit (t.extract j t.size) n fontSize with
+      | some px => (px, false, false)
+      | none => (0, false, false)
+    | none =>
+      if eqAscii t "sub" then (0, true, false)
+      else if eqAscii t "super" then (0, false, true)
+      else (0, false, false)
+
+/-- The text-layout properties of a resolved `Style`, plus this run's
+`baseline-shift` accumulation (`bpx`/`bsub`/`bsup` — from `textShapes`'s
+`bsStack`, not from `st`: see `baselineShiftDelta`). -/
+def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     size := st.fontSize,
     letterSpacing := st.letterSpacing,
     wordSpacing := st.wordSpacing,
     kerning := st.textKerning,
-    anchor := st.textAnchor }
+    anchor := st.textAnchor,
+    dominantBaseline := st.dominantBaseline,
+    alignmentBaseline := st.alignmentBaseline,
+    baselineShiftPx := bpx,
+    baselineShiftSub := bsub,
+    baselineShiftSuper := bsup }
 
 /-- The per-character position lists of one `text`/`tspan` element, resolved
 against that element's own font size and the viewport. -/
@@ -2084,6 +2155,13 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   let mut chStack : Array (Array Css.ElemInfo) := #[chain]
   let mut ccStack : Array Nat := #[0]
   let mut rendStack : Array Bool := #[true]
+  -- `baseline-shift`'s own accumulator (T54): seeded at `(0, 0, 0)` for the
+  -- `<text>` element itself and pushed to only by a `tspan`'s own attribute
+  -- — deliberately not derived from `Style`, which is what keeps a
+  -- `baseline-shift` set on `<text>` itself, or on some non-`tspan` ancestor
+  -- reached through `textStyle`, from ever contributing.  See
+  -- `LeanSvg/Baseline.lean`'s module docs and `baselineShiftDelta`.
+  let mut bsStack : Array (Fx × Nat × Nat) := #[(0, 0, 0)]
   let mut skip : Nat := 0
   let mut depth : Nat := 1
   for j in [idx + 1 : events.size] do
@@ -2098,6 +2176,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         chStack := chStack.pop
         ccStack := ccStack.pop
         rendStack := rendStack.pop
+        bsStack := bsStack.pop
     | .open_ nm attrs =>
       depth := depth + 1
       if skip > 0 then skip := skip + 1
@@ -2115,14 +2194,19 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
         -- while its characters keep their slots in the position lists.
         rendStack := rendStack.push ((rendStack.back?.getD true) && !isDisplayNone attrs)
+        let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
+        let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
+        bsStack := bsStack.push
+          (bpx + dpx, bsub + (if dsub then 1 else 0), bsup + (if dsup then 1 else 0))
         evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
       else skip := skip + 1
     | .text bs =>
       if skip == 0 then
         let st := stStack.back?.getD default
         styles := styles.push st
+        let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         evs := evs.push
-          (Text.Ev.text bs st.spacePreserve (styles.size - 1) (spanPropsOf st)
+          (Text.Ev.text bs st.spacePreserve (styles.size - 1) (spanPropsOf st bpx bsub bsup)
             -- usvg's zero-`font-size` guard is per text node (the span's own
             -- size), not inherited: `<text font-size="0"><tspan
             -- font-size="40">` still draws the tspan.

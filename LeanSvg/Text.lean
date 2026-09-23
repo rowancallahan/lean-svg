@@ -1,5 +1,6 @@
 import LeanSvg.Geom
 import LeanSvg.Font
+import LeanSvg.Baseline
 import LeanSvg.Fonts.NotoSans
 import LeanSvg.Fonts.NotoSansBold
 import LeanSvg.Fonts.NotoSansItalic
@@ -23,9 +24,12 @@ anchoring), simplified to what one Latin face per span can do:
 * one glyph per character (no ligatures, no complex-script shaping, no BiDi
   reordering — every run is left to right);
 * kerning from `Font.kern` (GPOS pairs, or a legacy `kern` table) between
-  adjacent characters of the same chunk;
-* the alphabetic baseline only (`dominant-baseline`, `alignment-baseline` and
-  `baseline-shift` are not applied).
+  adjacent characters of the same chunk.
+
+`dominant-baseline`, `alignment-baseline` and `baseline-shift` (T54,
+`LeanSvg/Baseline.lean`) shift each glyph vertically off the alphabetic
+baseline; `Svg.lean` resolves them into `SpanProps` and `resolveBaseline16`
+computes the per-glyph offset here.
 
 Precision: pen positions and advances are carried in 16.16 fixed point (units
 of 1/65536 px) and only rounded to `Fx` once, when a glyph's control points
@@ -97,6 +101,17 @@ structure SpanProps where
   /-- `font-kerning: none` (or SVG 1.1 `kerning="0"`) turns pair kerning off. -/
   kerning : Bool := true
   anchor : Anchor := .start
+  /-- `dominant-baseline`/`alignment-baseline`, ordinary CSS-inherited `Style`
+  fields (`LeanSvg/Baseline.lean`). -/
+  dominantBaseline : AlignmentBaseline := .auto
+  alignmentBaseline : AlignmentBaseline := .auto
+  /-- `baseline-shift`'s accumulated absolute-length contributions (`Fx`,
+  1/256 px) and `sub`/`super` keyword counts, from `Svg.textShapes`'s
+  tspan-local walk — *not* inherited through the ordinary cascade, see
+  `LeanSvg/Baseline.lean`. -/
+  baselineShiftPx : Fx := 0
+  baselineShiftSub : Nat := 0
+  baselineShiftSuper : Nat := 0
 deriving Inhabited, Repr
 
 /-- The per-character position lists of one `text`/`tspan` element. -/
@@ -552,7 +567,17 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
       if !c.dropped then
         match faces.get c.props.face with
         | some f =>
-          let cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot (chunkX + x) (chunkY + y)
+          -- `resolve_baseline`: a per-span vertical offset (`dominant-
+          -- baseline`/`alignment-baseline`/`baseline-shift`), added to the
+          -- pen position only — it never feeds back into `x`/`y`/`lastX`/
+          -- `lastY`, exactly as usvg's `span_ts.pre_translate(0, shift)` is
+          -- a rendering-only transform layered on top of `resolve_clusters_
+          -- positions`'s already-computed advances.
+          let pr := c.props
+          let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
+            pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
+          let cmds :=
+            glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot (chunkX + x) (chunkY + y + bshift)
           if cmds.size > 0 then
             if curStyle == some c.styleIdx then curCmds := curCmds ++ cmds
             else
