@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="240" viewBox="0 0 400 240">
+  <!-- T95: paint-order places markers (before, between, after fill and
+       stroke), and context-fill/context-stroke in marker content resolve to
+       the referencing shape's paint, a gradient included. -->
+  <linearGradient id="lg">
+    <stop offset="0" stop-color="gold"/>
+    <stop offset="1" stop-color="purple"/>
+  </linearGradient>
+  <marker id="sq" refX="10" refY="10" markerWidth="20" markerHeight="20" markerUnits="userSpaceOnUse">
+    <rect width="20" height="20" fill="orange"/>
+  </marker>
+  <marker id="ctx" refX="6" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse">
+    <path d="M 6 0 12 12 H 0 Z" fill="context-stroke" stroke="context-fill" stroke-width="2"/>
+  </marker>
+  <g fill="green" stroke="blue" stroke-width="8" marker-start="url(#sq)" marker-mid="url(#sq)" marker-end="url(#sq)">
+    <path d="M 20 20 H 110 V 100 H 20 Z" paint-order="markers"/>
+    <path d="M 150 20 H 240 V 100 H 150 Z" paint-order="fill markers stroke"/>
+    <path d="M 280 20 H 370 V 100 H 280 Z" paint-order="stroke markers"/>
+  </g>
+  <path d="M 30 140 L 110 220 L 190 140 L 270 220 L 350 140" fill="none" stroke="crimson" stroke-width="4"
+        marker-start="url(#ctx)" marker-mid="url(#ctx)" marker-end="url(#ctx)"/>
+  <path d="M 30 200 H 370 V 230 H 30 Z" fill="url(#lg)" stroke="black" stroke-width="1"
+        marker-mid="url(#ctx)"/>
+</svg>
