@@ -2,6 +2,7 @@ import LeanSvg.Canvas
 import LeanSvg.Xml
 import LeanSvg.Fixed
 import LeanSvg.Geom
+import LeanSvg.Filter.Turbulence
 import Std.Data.HashMap
 
 /-!
@@ -183,6 +184,7 @@ inductive Kind where
   | composite (i1 i2 : Input) (op : CompOp)
   | colorMatrix (i : Input) (k : CMKind)
   | transfer (i : Input) (fr fg fb fa : TF)
+  | turbulence (t : Turbulence.Params)
 deriving Inhabited
 
 /-- A rectangle in user space, `Fx`; `w` and `h` positive (`NonZeroRect`). -/
@@ -200,6 +202,10 @@ structure Prim where
   linear : Bool
   kind : Kind
 deriving Inhabited
+
+/-- `Render`'s filter-budget units: one per primitive, plus one per
+`feTurbulence` octave (a full noise pass over the layer each). -/
+def Prim.cost (p : Prim) : Nat := match p.kind with | .turbulence t => 1 + t.octaves | _ => 1
 
 /-- One filter of an element's `filter` list, in its user space. -/
 structure Resolved where
@@ -477,13 +483,14 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
   name == "feTile" || name == "feImage" || name == "feConvolveMatrix" ||
-  name == "feMorphology" || name == "feDisplacementMap" || name == "feTurbulence" ||
+  name == "feMorphology" || name == "feDisplacementMap" ||
   name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
-  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix"
+  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
+  name == "feTurbulence"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -665,6 +672,8 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
       | none => .over
     some (.composite inp inp2 op)
   | "feColorMatrix" => some (.colorMatrix inp (colorMatrixOf a))
+  | "feTurbulence" => some (.turbulence (Turbulence.params ((attr a "baseFrequency").bind f32List)
+      (f32Attr a "numOctaves" F32.one) (f32Attr a "seed" 0) (attr a "stitchTiles") (attr a "type")))
   | "feComponentTransfer" => Id.run do
     let mut fs : Array TF := #[.identity, .identity, .identity, .identity]
     for (cn, ca) in p.children do

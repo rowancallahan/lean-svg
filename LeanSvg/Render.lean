@@ -618,7 +618,7 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
             else
               let lw := (bx1 - bx0).toNat
               let lh := (by1 - by0).toNat
-              let nprims := g.filters.foldl (fun n f => n + f.prims.size) 0
+              let nprims := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
               filterWork := filterWork + nprims * lw * lh
               if nprims * lw * lh > maxFilterWork || filterWork > maxFilterTotal then
                 err := some "filter budget"
