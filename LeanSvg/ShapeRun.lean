@@ -119,8 +119,8 @@ def hasFeature (l : Layout) (tags : Array Nat) (t : Nat) : Bool :=
     | none => false
 
 /-- `collect_features` (common, horizontal, and the shaper's own). -/
-def buildFeatures (l : Layout) (tags : Array Nat) (sh : Shaper) (iso : String) (rtl kerning : Bool) :
-    Builder := Id.run do
+def buildFeatures (l : Layout) (tags : Array Nat) (sh : Shaper) (iso : String) (rtl kerning : Bool)
+    (smallCaps : Bool := false) : Builder := Id.run do
   let mut b : Builder := {}
   b := b.enable (tag "rvrn") 0
   b := b.pause .none
@@ -174,6 +174,9 @@ def buildFeatures (l : Layout) (tags : Array Nat) (sh : Shaper) (iso : String) (
   for f in ["calt", "clig", "curs", "dist"] do b := b.add (tag f) fGlobal
   b := b.add (tag "kern") (fGlobal ||| fHasFallback)
   for f in ["liga", "rclt"] do b := b.add (tag f) fGlobal
+  -- usvg's user features: `smcp` for `font-variant: small-caps` (T97), then
+  -- `kern` off for `font-kerning: none`
+  if smallCaps then b := b.add (tag "smcp") fGlobal
   if !kerning then b := b.add (tag "kern") fGlobal 0
   if sh == .indic then
     b := b.disable (tag "liga")
@@ -1099,15 +1102,17 @@ def propagate (rtl : Bool) : Nat → Array GPos → Nat → Array GPos
 
 /-- Shape one bidi run of `cps` with font `f` (whose layout tables are `l`)
 in direction `rtl`, as harfrust does for usvg.  `kerning = false` is
-`font-kerning: none`. Glyphs come out in visual (left-to-right) order. -/
-def shapeRun (f : Font) (l : Layout) (cps : Array Nat) (rtl kerning : Bool) : Array Glyph := Id.run do
+`font-kerning: none`, `smallCaps` is `font-variant: small-caps` (the font's
+`smcp` feature, T97). Glyphs come out in visual (left-to-right) order. -/
+def shapeRun (f : Font) (l : Layout) (cps : Array Nat) (rtl kerning : Bool) (smallCaps : Bool := false) :
+    Array Glyph := Id.run do
   let n := cps.size
   if n == 0 then return #[]
   let iso := guessScript cps
   let tags := otScriptTags iso
   let gsubScript := ((l.selectScript false tags).map (·.2)).getD 0
   let sh := pickShaper iso gsubScript
-  let plan := compilePlan l tags (buildFeatures l tags sh iso rtl kerning)
+  let plan := compilePlan l tags (buildFeatures l tags sh iso rtl kerning smallCaps)
   -- the buffer
   let mut info : Array GInfo := Array.emptyWithCapacity n
   for i in [0:n] do
