@@ -86,13 +86,14 @@ def lineHeight (m : Metrics) (fs : Fx) : Fx :=
 
 /-- One font-metric length: `v` of `unit` at font size `fs`. -/
 def fontLen (m : Metrics) (v fs : Fx) (unit : String) : Fx :=
-  let one : Fx :=
-    if unit == "ch" then scaleUnits m m.zero fs
-    else if unit == "ic" then scaleUnits m m.ideo fs
-    else if unit == "cap" then scaleUnits m m.cap fs
-    else if unit == "ex" then scaleUnits m m.xHeight fs
-    else lineHeight m fs
-  Fx.clamp (Int.ediv (v * one) 256)
+  let n : Int :=
+    if unit == "ch" then m.zero
+    else if unit == "ic" then m.ideo
+    else if unit == "cap" then m.cap
+    else m.xHeight
+  if unit == "lh" then Fx.clamp (Int.ediv (v * lineHeight m fs) 256)
+  else if m.upem == 0 then 0
+  else Fx.clamp (Int.ediv (v * n * fs) (256 * m.upem))
 
 /-- The viewport units, longest spelling first within a shared prefix;
 `(name, axis)` with axis 0 = width, 1 = height, 2 = min, 3 = max. -/

@@ -117,3 +117,106 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## Spec implemented
+
+**Units** (`LeanSvg/Units.lean`, hooked into `Svg.parseTextLen`, so every
+geometry length, text `x/y/dx/dy`, `stroke-width`, dashes, `rx/ry`, plus
+`font-size` and `letter-/word-spacing` via `Svg.applyNewUnit`):
+`vw vh vmin vmax vi vb` and all `sv*`/`lv*`/`dv*` variants; `ch ic cap lh`;
+`rch ric rcap rlh rex` (`rem`, `Q` already existed). Choices, all measured
+against Chromium through `tests/render_chrome.py` and written into
+`DESIGN.md` §3.12:
+
+- viewport = the **output canvas in px**, taken as user units (Chromium's
+  `<img>` viewport: `vw-and-vh-values.svg` at width 100 puts `5vw` at 5 user
+  units, at width 400 at 20). Computed by `Render.outSize` from the root
+  before `interpret` (`SubCfg.outSize`); natural size when the root has no
+  usable size or for nested SVG images;
+- font metrics from embedded Noto Sans regular: `ch` = advance of `0`,
+  `ic` = `1em` (no `水` in the subset), `cap` = `sCapHeight`, `lh` =
+  Chromium's rounded `LineSpacing` (`line-height` property not read), `rex`
+  = x-height; `ex` stays usvg's `0.5em` for resvg compatibility.
+  `Style.rootFontSize` became a `Units.RootLen` (root size + canvas) instead
+  of adding a parameter to every parser (no renames).
+
+**Basic shapes** (`LeanSvg/BasicShape.lean`) in `clip-path`: `circle()`,
+`ellipse()`, `inset()`, `rect()`, `xywh()` (with `round` radii incl. `/`),
+`polygon()` and `path()` (with fill rule), box keyword alone, reference boxes
+`fill-box`/`stroke-box`/`view-box` and the CSS aliases
+(`content`/`padding` → fill, `border`/`margin`/default → stroke). Each use
+becomes a synthetic one-child `ClipEntry` built at the end of `interpret`
+(like T48's viewport clips), so `Clip.lean` is unchanged. `stroke-box` is the
+exact stroked-outline bounds (`Geom.strokePoly`), tracked in a new
+`Frame.sbox` only while a stroke-box shape is in force; groups union their
+children. Caps: 10 000 polygon points, 100 000 path commands. Grammar details
+(unitless numbers ok, case-insensitive, 3-value positions / two box keywords /
+negative radii invalid → no clip) were each probed in Chromium.
+
+## Skipped, and why
+
+- Units in context-free parsers (`parseLengthOrPercent`: root/nested `svg`,
+  `image`, marker/pattern geometry): they have no style context; the root's
+  own `width="50vw"` is circular anyway. Unchanged behaviour (skip).
+- `line-height` property for `lh`/`rlh`: only `normal` exists here.
+- Per-weight/italic metrics for `ch`/`cap`: regular face only.
+- Default font size stays usvg's 12 px (Chromium 16 px), so `em`-based shape
+  lengths differ from Chromium only where no `font-size` is set.
+- Basic shapes outside `clip-path` (`shape-outside`, `offset-path`): not an
+  SVG renderer feature. A basic shape as a `<clipPath>` element's *own*
+  `clip-path` is ignored (as before).
+- `calc()` and the newer `shape()` function.
+
+## Report
+
+Files: `LeanSvg/Units.lean` (new), `LeanSvg/BasicShape.lean` (new),
+`LeanSvg/Svg.lean`, `LeanSvg/Render.lean` (`outSize`), `LeanSvg/Marker.lean`
+(one constructor), `LeanSvg.lean`, `proofs/SizeBound.lean` (the case split
+follows `render`'s `interpretWith` call; statement unchanged),
+`tests/svg/92_css_units.svg`, `tests/svg/92_basic_shapes.svg`,
+`tests/UnitsTests.lean` (`#guard`s; `lake env lean tests/UnitsTests.lean`
+prints nothing), `DESIGN.md` §3.12.
+
+Checks: `lake build` no warnings; `check-theorems.sh` → `theorems ok`;
+`run_adversarial.py` 137/137 clean; `run_tiles.py` 61/61 byte-identical;
+`run_tests.py` 55/61 (was 55/59): no existing file's score changed, the two
+new `92_*` files fail against resvg only because resvg lacks the features.
+
+Corpus vs live resvg (`--route direct`):
+
+| width | pass before | pass after | resvg-correct before → after | pass→fail |
+|---|---|---|---|---|
+| 100 (`--fast`) | 1553 | 1543 | 1418/1522 → 1418/1522 | 10, none resvg-correct |
+| 200 | 1578 | 1568 | 1440/1522 → 1440/1522 | 10, none resvg-correct |
+
+The 10 movers (same set at both widths) are exactly the target files, where
+resvg draws nothing / no clip: `shapes/rect/{ch,ic,lh,rlh,vi-and-vb,
+vmin-and-vmax,vw-and-vh}-values.svg` (resvg "known wrong"/unrated) and
+`masking/clipPath/circle-shorthand{,-with-view-box,-with-stroke-box}.svg`.
+Zero pass→fail on resvg-correct files at either width.
+
+Chromium scores (within-8, same width; Chromium given the real Noto Sans via
+an injected `@font-face` because this container has none):
+
+| file | 100 px | 200 px |
+|---|---|---|
+| `vw-and-vh`, `vmin-and-vmax`, `vi-and-vb`, `ic`, `lh`, `rlh`, `cap` | 99.96 | 99.99 |
+| `ch-values` | 98.31 | 98.34 |
+| `circle-shorthand` | 97.66 | 99.00 |
+| `circle-shorthand-with-view-box` | 99.48 | 99.76 |
+| `circle-shorthand-with-stroke-box` | 98.06 | 99.28 |
+| `tests/svg/92_css_units.svg` | 96.19 | 97.21 (98.30 at natural size) |
+| `tests/svg/92_basic_shapes.svg` | 97.03 | 98.67 (99.22 at natural size) |
+
+The remaining Chromium differences are rasterization, not geometry: `ch-values`
+has the rect edge exactly at x = 18.304 in both, but our (resvg-compatible)
+4× supersampling gives coverage 0.75 where Chromium gives 0.70;
+`circle-shorthand` differs from Chromium by the same ~375 px as a plain
+`<circle r=80>` does; the `92_*` files add glyph rasterization. Unit values
+match Chromium-with-Noto to within 0.1 px (`10ch` 57.25/57.2, `10cap`
+71.5/71.4, `10lh` 140/140, `10rlh` 270/270, `10rex` 107.25/107.2), and every
+basic-shape probe's clip bbox matched Chromium to within 1 px.
+Against the suite PNGs `circle-shorthand.svg`, `ch-values`, `cap-values`,
+`vw`/`vmin` pass; `ic`/`lh`/`rlh`/`vi-and-vb` and the two circle box variants
+disagree with the suite PNG, which itself disagrees with Chromium there
+(R6/R7 notes).

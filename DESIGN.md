@@ -405,6 +405,55 @@ arithmetic operation for operation on `F32`, with a scalar correctly-rounded
 falls back to an exact 2^-80 computation only near a rounding tie (at most
 `exactBudget` times per primitive).
 
+### 3.12 CSS Values 4 units and CSS basic shapes (T92)
+
+usvg 0.48.1 knows neither, so these follow Chromium as `tests/render_chrome.py`
+runs it (the SVG in an `<img>`), measured probe by probe. The choices a
+standalone renderer has to make:
+
+* **Viewport units** (`vw vh vmin vmax vi vb`, and the `sv*`/`lv*`/`dv*`
+  variants, all equal for a static image) are a percentage of the **output
+  canvas in px**, taken as user units with no `viewBox` scaling. That is what
+  Chromium does: an `<img>`'s viewport is its box on the page, so `50vw` in a
+  file rendered 800 px wide is 400 user units whatever the `viewBox`. The
+  geometry therefore depends on `--width`/`--zoom` (never on `--viewport`,
+  so tiles still stitch). `Render.outSize` computes the canvas from the root
+  element before `interpret`; a root without a usable size (refit later by
+  `RootFit`) and nested SVG images use their natural size instead.
+* **Font units** use the embedded Noto Sans regular face (the only family
+  drawn, whatever the weight/style): `ch` = advance of `0`, `ic` = advance of
+  `水` (not in the subset, so CSS's `1em` fallback), `cap` = `OS/2.sCapHeight`,
+  `lh` = `line-height: normal` as Chromium's `FontMetrics::LineSpacing`
+  (ascent, descent and line gap each rounded to whole px, then summed; the
+  `line-height` property itself is not read). `rch ric rcap rlh rex` are the
+  same against the root's font size; `rex` is Chromium's x-height, while
+  `ex` keeps usvg's `0.5em`. Measured against Chromium with the real Noto
+  Sans embedded via `@font-face` (this container's Chromium lacks it and
+  falls back to `ch = 0.5em`), `10ch`, `10cap`, `10lh`, `10rch`, `10rex` and
+  `10rlh` all agree to within 0.1 px. Default font
+  size remains usvg's 12 px (Chromium's is 16).
+* The units work in every length `parseTextLen` reads (geometry, text
+  positions, `stroke-width`, dashes) plus `font-size` and
+  `letter-/word-spacing`; context-free parsers (`width`/`height` of the root,
+  nested `svg`, `image`, pattern and marker attributes) do not take them.
+* **Basic shapes** (`LeanSvg/BasicShape.lean`) are accepted where SVG 2 takes
+  them in a renderer: `clip-path`. `circle() ellipse() inset() rect() xywh()`
+  (with `round`), `polygon()`/`path()` (with a fill rule), and a reference
+  box keyword alone. Reference boxes: `fill-box` (= `content-box`,
+  `padding-box`), `stroke-box` (= `border-box`, `margin-box`, and the default)
+  and `view-box` (user-space `(0, 0)` with the nearest viewport's `viewBox`
+  size). Chromium's `stroke-box` is the bounds of the exact stroke outline
+  (a square-capped diagonal line inflates by `hw·√2`), so it is computed with
+  `Geom.strokePoly` (without dashes), only while a `stroke-box` shape is in
+  force; a group's is the union of its children's. `round` percentages
+  resolve against the reference box, adjacent radii are scaled down like
+  `border-radius`, and insets that overlap shrink proportionally to nothing.
+  Coordinates (including `path()`'s) are offsets from the box origin;
+  unitless numbers are px; keywords are case-insensitive. An invalid value is
+  no clip, as in usvg. Each shape becomes a synthetic one-child `ClipEntry`
+  built at the end of `interpret`, so `Clip.lean` needed no change. Caps:
+  10 000 polygon points, 100 000 path commands (beyond: invalid).
+
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
 | file | exact | ≤ 8 | ≤ 32 | max d |
@@ -454,6 +503,8 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/FilterApply.lean` | filter primitives on pixels (resvg `filter/`) |
 | `LeanSvg/Filter/Image.lean` | `feImage` spec, `fix_recursive_fe_image`, link sub-documents |
 | `LeanSvg/Filter/ImageRender.lean` | `feImage` jobs and geometry for `Render` |
+| `LeanSvg/Units.lean` | CSS Values 4 units (T92): viewport and Noto Sans font metrics |
+| `LeanSvg/BasicShape.lean` | CSS basic shapes for `clip-path` (T92) |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |
