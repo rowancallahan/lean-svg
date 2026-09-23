@@ -4,6 +4,7 @@ import LeanSvg.Font
 import LeanSvg.Baseline
 import LeanSvg.FontSet
 import LeanSvg.ShapeText
+import LeanSvg.VertOrient
 
 /-!
 # Text layout
@@ -643,12 +644,9 @@ rotation angle and a single pen position:
   `(ascent + descent) / 2` along local `y` before the rotation
   (`apply_writing_mode`'s "could not find a spec that explains this" shift,
   applied to every "Rotated" — i.e. not `Vertical_Orientation=Upright` —
-  character); Noto Sans is Latin-only and every codepoint outside the ranges
-  `unicode-vo` lists as `Upright` defaults to `Rotated` (all of Basic Latin
-  is: the table's lowest entry is U+00A7), so every glyph this renderer can
-  ever place in vertical text takes this branch and the `Upright` branch
-  (which counter-rotates a CJK-style glyph back to standing upright) is not
-  implemented — it would be dead code with no character able to reach it;
+  character); an `Upright` one (T96, `LeanSvg/VertOrient.lean`: CJK, kana,
+  hangul, ...) instead counter-rotates back to standing upright, centred on
+  the column (see the `upright` branch below);
 * the local-space point `(x, y)` a glyph would sit at in the horizontal
   layout maps to final position `(chunkX - y, chunkY + x)`, i.e. `(x, y)`
   rotated 90° about the origin (usvg: `rotate(90)` is `x' = -y, y' = x`)
@@ -658,8 +656,14 @@ rotation angle and a single pen position:
   but *not* rotated (usvg's `layout_text` does a plain
   `std::mem::swap(&mut curr_pos.0, &mut curr_pos.1)` on the chunk's final pen
   position, not the same 90° rotation every glyph gets — `tb-with-dx-on-
-  second-tspan.svg` exercises exactly this fallback). -/
-def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool) :
+  second-tspan.svg` exercises exactly this fallback).
+
+`outK` (T96) scales every emitted outline and decoration by `outK` (the
+caller draws them through `ctm · scale(1 / outK)`), so text under a large
+`transform` keeps sub-`Fx` precision in its outlines
+(`textPath/dy-with-tiny-coordinates.svg`).  The returned boxes stay unscaled. -/
+def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool)
+    (outK : Int := 1) :
     Array Placed × Nat × Option Box × Array (Option Box) :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
@@ -925,6 +929,35 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             fu := fu + Font.kern f gid (Font.glyphId f nextCp)
           adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
         | none => pure ()
+        -- T96: a nonspacing mark joins the cluster before it (usvg shapes
+        -- every chunk, and a mark never starts a cluster), so it takes that
+        -- cluster's position-list slot and turns with its `rotate`
+        -- (`rotate-with-multiple-values-and-complex-text.svg`).  Without
+        -- GPOS anchors in our fonts it is centred over the base glyph's
+        -- extents, HarfBuzz's fallback mark position; a base with no outline
+        -- keeps the mark at the base's advance
+        let prev := cl.back?.getD default
+        if q > a && Bidi.bidiClass cp == .NSM && prev.font == fi && prev.styleIdx == cStyle.getD i 0 then
+          match fonts.getD fi none with
+          | some f =>
+            let gs := if prev.glyphs.isEmpty then #[(fi, Font.glyphId f prev.cp, (0 : Int), (0 : Int))]
+              else prev.glyphs
+            -- twice the centre of a glyph's `x` extents, if it has points
+            let mid2 := fun (g : Nat) => Id.run do
+              let mut lo : Option (Int × Int) := none
+              for ctr in Font.rawContours f g do
+                for (px, _, _) in ctr do
+                  lo := some (match lo with | some (l, h) => (min l px, max h px) | none => (px, px))
+              return lo.map (fun (l, h) => l + h)
+            let mg := Font.glyphId f cp
+            let xfu := match mid2 ((gs.getD 0 default).2.1), mid2 mg with
+              | some b2, some m2 => Int.ediv (b2 - m2) 2
+              | _, _ => gs.foldl (fun s (_, g, _, _) => s + Font.advance f g) 0
+            cl := cl.setIfInBounds (cl.size - 1)
+              { prev with adv := prev.adv + adv, width := prev.width + adv, natWidth := prev.natWidth + adv,
+                          glyphs := gs.push (fi, mg, xfu, 0) }
+          | none => pure ()
+          continue
         cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv,
                         natWidth := adv, font := fi, base := bases.getD (q - a) 0, off := q - a }
     -- `letter-spacing`, then `word-spacing` (usvg applies each only when some
@@ -1104,7 +1137,8 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
               let toy := n.y + Int.ediv (n.cos * yEff - n.sin * hw) 65536
               let lsa := Int.ediv (la * c.sx) 65536
               let lsb := Int.ediv (lb * c.sx) 65536
-              cmds := clusterCmds fonts f c lsa lsb lc la tox toy
+              cmds := clusterCmds fonts f c (lsa * outK) (lsb * outK) (lc * outK) (la * outK)
+                (tox * outK) (toy * outK)
               let adv16 := if c.adv ≤ 0 then 65536 else c.adv
               let (top16, bot16) := metricTopBot f c.props.size
               for pt in metricCorners lsa lsb lc la tox toy adv16 top16 bot16 do
@@ -1122,16 +1156,38 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           adv := adv + p.dx * 256
         ox := chunkX + x
         oy := chunkY + y
+        -- T96: `Vertical_Orientation=U` clusters (CJK) stand upright in
+        -- vertical text; every other one turns sideways (`apply_writing_mode`)
+        let upright := vertical && VertOrient.isUpright c.cp
+        -- usvg's `(ascent + descent) / 2`, the cluster's own font
+        let half : Int := match fonts.getD c.font none with
+          | some f =>
+            let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+            Int.ediv ((f.ascent + f.descent) * (c.props.size * 256)) (2 * upem)
+          | none => 0
+        if vertical then
+          -- a decoration run starts at the cluster's own transform (without
+          -- an upright glyph's path transform), turned by the chunk's 90°
+          ox := chunkX - (y + (if upright then 0 else half))
+          oy := chunkY + x
         if !c.dropped then
           match fonts.getD c.font none, fonts.getD c.base none with
           | some f, some fb =>
             let (rot, gx, gy) :=
-              if vertical then
-                let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+              if upright then
+                -- `path_transform = T(w/2, 0) · R(-90) · T(-w/2, h)` under the
+                -- cluster's `T(x, y) · R(rotate)` and the chunk's `R(90)`: the
+                -- linear part is just `R(rotate)`, the glyph's origin lands at
+                -- `(x, y) + R(rotate) · (w/2 + h, w/2)` before the column turn
+                let hw := Int.ediv c.width 2
+                let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int))
+                  else sinCos16 (degToRad16 p.rot)
+                let px := x + Int.ediv (cs * (hw + half) - sn * hw) 65536
+                let py := y + Int.ediv (sn * (hw + half) + cs * hw) 65536
+                (p.rot, chunkX - py, chunkY + px)
+              else if vertical then
                 -- centers the (rotated-sideways) glyph on the column, usvg's
                 -- `apply_writing_mode` shift, before the 90° chunk rotation
-                let half : Int := Int.ediv ((f.ascent + f.descent) * (c.props.size * 256))
-                  (2 * upem)
                 (p.rot + Fx.ofNat 90, chunkX - (y + half), chunkY + Int.ediv (x * c.sx) 65536)
               else
                 -- T54 `resolve_baseline`: a per-span vertical offset
@@ -1144,14 +1200,17 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             -- `spacingAndGlyphs` (T93): the chunk-local scale `S` sits outside the
             -- glyph's own rotation, `S · R(rotate)` (then the 90° column turn)
             let (la, lb, lc, ld) :=
-              if c.sx == 65536 then rotMat16 rot
+              if c.sx == 65536 || upright then rotMat16 rot
               else
                 let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int)) else sinCos16 (degToRad16 p.rot)
                 if vertical then (-sn, Int.ediv (cs * c.sx) 65536, -cs, -(Int.ediv (sn * c.sx) 65536))
                 else (Int.ediv (cs * c.sx) 65536, sn, -(Int.ediv (sn * c.sx) 65536), cs)
-            cmds := clusterCmds fonts f c la lb lc ld gx gy
+            cmds := clusterCmds fonts f c (la * outK) (lb * outK) (lc * outK) (ld * outK)
+              (gx * outK) (gy * outK)
             let adv16 := if c.adv ≤ 0 then 65536 else c.adv
-            let (top16, bot16) := metricTopBot f c.props.size
+            -- an upright cluster's metric box is `width` tall, centred
+            let (top16, bot16) := if upright then (-(Int.ediv c.width 2), c.width - Int.ediv c.width 2)
+              else metricTopBot f c.props.size
             for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
               mbox := Box.cover mbox pt
               sbox := coverAt sbox c.styleIdx pt
@@ -1186,18 +1245,23 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         let mkRun := fun (idx? : Option Nat) (metric : Font → Int) (dsz : Fx) =>
           match idx?, fonts.getD c.base none with
           | some idx, some f =>
-            some { styleIdx := idx, ox := ox, oy := oy, rot := p.rot, width := 0,
-                   unitsPerEm := f.unitsPerEm, size := if dsz > 0 then dsz else c.props.size,
+            some { styleIdx := idx, ox := ox * outK, oy := oy * outK,
+                   rot := if vertical then p.rot + Fx.ofNat 90 else p.rot, width := 0,
+                   unitsPerEm := f.unitsPerEm, size := (if dsz > 0 then dsz else c.props.size) * outK,
                    dyUnits := metric f, thicknessUnits := f.underlineThickness : DecorRun }
           | _, _ => none
-        olRun := mkRun olIdx (·.ascent) c.props.overlineSize
-        ulRun := mkRun ulIdx (·.underlinePosition) c.props.underlineSize
-        thRun := mkRun thIdx (·.strikeoutPosition) c.props.throughSize
+        -- T96: in vertical text usvg puts the lines half the font's height
+        -- (`ascent - descent`) either side of the column's centre line
+        let halfH := fun (f : Font) => Int.ediv (f.ascent - f.descent) 2
+        olRun := mkRun olIdx (if vertical then halfH else (·.ascent)) c.props.overlineSize
+        ulRun := mkRun ulIdx (if vertical then (fun f => -(halfH f)) else (·.underlinePosition))
+          c.props.underlineSize
+        thRun := mkRun thIdx (if vertical then (fun _ => 0) else (·.strikeoutPosition)) c.props.throughSize
       -- the run's width counts every character's advance, dropped or not,
       -- the same way the pen itself always moves on.
-      olRun := olRun.map (fun r => { r with width := r.width + c.adv })
-      ulRun := ulRun.map (fun r => { r with width := r.width + c.adv })
-      thRun := thRun.map (fun r => { r with width := r.width + c.adv })
+      olRun := olRun.map (fun r => { r with width := r.width + c.adv * outK })
+      ulRun := ulRun.map (fun r => { r with width := r.width + c.adv * outK })
+      thRun := thRun.map (fun r => { r with width := r.width + c.adv * outK })
       curCmds := curCmds ++ cmds
     olCmds := closeSub olCmds olRun
     ulCmds := closeSub ulCmds ulRun

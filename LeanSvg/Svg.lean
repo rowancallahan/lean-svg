@@ -2961,8 +2961,11 @@ def textPathTable (paths : Std.HashMap String TextPath.Table) (attrs : Array Xml
 keyed by id, built once per document.  The first element carrying an id wins,
 as in usvg's `svgtree`; an id whose element is not a shape, or whose shape
 draws nothing, gets no table, which makes the `textPath` invalid.  The shape
-is taken with its own `transform` and nothing above it (`resolve_text_flow`). -/
-def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Table := Id.run do
+is taken with its own `transform` and nothing above it (`resolve_text_flow`),
+wrapped by its own `transform-origin` (T96: `resolve_transform`, the same
+viewport rect `pctRefW`/`pctRefH` as everywhere else). -/
+def textPathTables (events : Array Xml.Event) (pctRefW pctRefH : Fx) :
+    Std.HashMap String TextPath.Table := Id.run do
   let mut wanted : Std.HashMap String Bool := {}
   for ev in events do
     match ev with
@@ -2993,7 +2996,7 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
         if wanted.get? id == some false then
           wanted := wanted.insert id true
           let m := match attr attrs "transform" with
-            | some t => parseTransform t
+            | some t => wrapTransformOrigin attrs pctRefW pctRefH (parseTransform t)
             | none => Mat.identity
           match (shapeCmds nm attrs 0 0 0 { size := 0 }).bind (fun cmds => TextPath.build cmds m) with
           | some tbl => out := out.insert id tbl
@@ -3325,7 +3328,23 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             -- does not resolve to an installed font draws nothing either
             -- (`process_chunk`'s `None => continue`), same as `display:none`.
             ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
-  let (placed, used, mbox, sbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
+  -- T96: under a large scale (`transform="scale(100)"` on tiny text) an
+  -- outline rounded to `Fx` user units is visibly jagged, so it is laid out
+  -- `outK` times larger and drawn through `ctm · scale(1 / outK)`; only for
+  -- plain paints, whose meaning does not depend on the user-space scale.
+  let m := textStyle.ctm
+  let sc := Nat.sqrt (Nat.sqrt (m.a.natAbs * m.a.natAbs + m.b.natAbs * m.b.natAbs)
+    * Nat.sqrt (m.c.natAbs * m.c.natAbs + m.d.natAbs * m.d.natAbs))
+  let plain := fun (p : Paint) => match p with | .none | .solid _ => true | _ => false
+  let outK : Nat := Id.run do
+    let mut k := 1
+    for _ in [0:8] do
+      if 2 * k * 65536 ≤ sc then k := 2 * k
+    return if k < 16 || !(styles.all fun s => plain s.fill && plain s.stroke) then 1 else k
+  let (placed, used, mbox, sbox) :=
+    Text.layout evs textStyle.spacePreserve budget textStyle.writingMode outK
+  let outCtm := if outK == 1 then textStyle.ctm
+    else textStyle.ctm.mul (Mat.scale16 (65536 / outK) (65536 / outK))
   let mut out : Array Shape := #[]
   let mut chains : Array (Array Nat) := #[]
   let mut oboxes : Array (Option Box) := owners.map fun _ => none
@@ -3339,7 +3358,10 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
       -- that property, so glyphs stay antialiased regardless of an ambient
       -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
+      let st := if outK == 1 then st else
+        { st with strokeWidth := st.strokeWidth * outK, dashes := st.dashes.map (· * outK),
+                  dashOffset := st.dashOffset * outK }
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := false }, false, none, none⟩
       chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
@@ -3740,7 +3762,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
   -- copying, and T20's `clipPath` slots, which the walk below fills in
   -- because their contents need the cascade.  See "the shape of a defs table".
   let scan := defsScan events
-  let textPaths := textPathTables events
+  let textPaths := textPathTables events (Int.ediv scan.pctRef.w 256) (Int.ediv scan.pctRef.h 256)
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
   -- T51: every `<filter>` element, collected up front like the gradients.
   let fparsers : Filter.Parsers := ⟨parseColor, parseOpacity, opacityOne⟩

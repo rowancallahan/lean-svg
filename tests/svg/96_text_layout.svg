@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="400" height="260" viewBox="0 0 400 260" font-family="Noto Sans" font-size="22">
+  <!-- T96: vertical text, CJK upright and Latin sideways, underline and overline following the column -->
+  <text x="40" y="20" writing-mode="tb" font-family="'Mplus 1p'" font-size="20" fill="#1d3557"
+        text-decoration="underline">日本語 Text</text>
+  <text x="90" y="20" writing-mode="tb" font-family="'Mplus 1p'" font-size="20" fill="#457b9d"
+        rotate="-20" text-decoration="overline">かな abc</text>
+  <!-- T96: combining marks join their base's cluster and turn with its rotate value -->
+  <text x="140" y="60" font-size="40" fill="#e63946" rotate="15 0 -15 0 25">a̐ é ö̲</text>
+  <!-- T96: the textPath follows its path's transform-origin -->
+  <path id="arc" d="M 150 150 A 60 40 0 0 1 270 150" fill="none" stroke="#999"
+        transform="rotate(30)" transform-origin="210 150"/>
+  <text fill="#2a9d8f"><textPath xlink:href="#arc">on a rotated arc</textPath></text>
+  <!-- T96: tiny user units under a large scale -->
+  <g transform="scale(50)">
+    <text x="6.2" y="4.9" font-size="0.4" fill="#6a4c93">tiny units</text>
+  </g>
+</svg>
