@@ -932,6 +932,35 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             fu := fu + Font.kern f gid (Font.glyphId f nextCp)
           adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
         | none => pure ()
+        -- T96: a nonspacing mark joins the cluster before it (usvg shapes
+        -- every chunk, and a mark never starts a cluster), so it takes that
+        -- cluster's position-list slot and turns with its `rotate`
+        -- (`rotate-with-multiple-values-and-complex-text.svg`).  Without
+        -- GPOS anchors in our fonts it is centred over the base glyph's
+        -- extents, HarfBuzz's fallback mark position; a base with no outline
+        -- keeps the mark at the base's advance
+        let prev := cl.back?.getD default
+        if q > a && Bidi.bidiClass cp == .NSM && prev.font == fi && prev.styleIdx == cStyle.getD i 0 then
+          match fonts.getD fi none with
+          | some f =>
+            let gs := if prev.glyphs.isEmpty then #[(fi, Font.glyphId f prev.cp, (0 : Int), (0 : Int))]
+              else prev.glyphs
+            -- twice the centre of a glyph's `x` extents, if it has points
+            let mid2 := fun (g : Nat) => Id.run do
+              let mut lo : Option (Int × Int) := none
+              for ctr in Font.rawContours f g do
+                for (px, _, _) in ctr do
+                  lo := some (match lo with | some (l, h) => (min l px, max h px) | none => (px, px))
+              return lo.map (fun (l, h) => l + h)
+            let mg := Font.glyphId f cp
+            let xfu := match mid2 ((gs.getD 0 default).2.1), mid2 mg with
+              | some b2, some m2 => Int.ediv (b2 - m2) 2
+              | _, _ => gs.foldl (fun s (_, g, _, _) => s + Font.advance f g) 0
+            cl := cl.setIfInBounds (cl.size - 1)
+              { prev with adv := prev.adv + adv, width := prev.width + adv, natWidth := prev.natWidth + adv,
+                          glyphs := gs.push (fi, mg, xfu, 0) }
+          | none => pure ()
+          continue
         cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv,
                         natWidth := adv, font := fi, base := bases.getD (q - a) 0, off := q - a }
     -- `letter-spacing`, then `word-spacing` (usvg applies each only when some
