@@ -668,14 +668,24 @@ def compIsPercent (bs : ByteArray) : Bool :=
   | some (_, j) => at' t j == 37
   | none => false
 
-/-- Alpha component of `rgb()`/`rgba()`/`hsl()`/`hsla()`: a plain number in
-0..1, *not* a percentage -- svgtypes 0.16.1 (the version resvg 0.48.1
-actually embeds; confirmed against the compiled binary, which falls back to
-black on `rgba(0, 127, 0, 50%)`) parses this argument with `parse_number`,
-not `parse_number_or_percent`, in every one of the four functions, unlike
-the R/G/B or S/L arguments that share this same call site's neighbours.  A
-trailing `%` is therefore not stripped, it invalidates the value, the same
-as any other leftover byte.
+/-- Alpha component of `rgb()`/`rgba()`/`hsl()`/`hsla()`: a number in 0..1 or a
+percentage, CSS Color 4 `<alpha-value>` (`resvg-test-suite`'s
+`painting/fill/rgba-0-127-0-50percent.svg`: the suite PNG, Chromium, Firefox
+and Safari all render `rgba(0, 127, 0, 50%)` as translucent green).
+
+svgtypes 0.16.1 (the version resvg 0.48.1 actually embeds; confirmed against
+the compiled binary) parses this argument with `parse_number`, not
+`parse_number_or_percent`, in every one of the four functions, unlike the
+R/G/B or S/L arguments that share this same call site's neighbours, so a
+trailing `%` invalidates the value there and resvg 0.48.1 falls back to
+black -- a real, verified bug in the exact svgtypes release resvg pins (a
+later, unreleased svgtypes accepts it, matching every browser). Only this one
+file in the whole corpus uses a percentage alpha, so accepting it here does
+not touch resvg parity anywhere else.
+
+Percent-or-not otherwise shares one scale, exactly as `hslFracOf` below
+handles S/L: a trailing `%` divides the decimal by 100 by lowering its
+exponent 2, before the same `scaleDecimal` call the plain form uses.
 
 svgtypes stores it as a `u8` with `round (a * 255)`, and usvg then unpacks it
 again as an opacity (`Color::split_alpha` → `a / 255`), so this has to land on
@@ -686,8 +696,9 @@ def alphaOf (bs : ByteArray) : Option Nat :=
   match parseDecimal t 0 with
   | none => none
   | some (neg, mant, exp10, j) =>
-    if j != t.size then none
-    else some (if neg then 0 else scaleDecimal mant exp10 255 255)
+    let isPct := at' t j == 37
+    if (if isPct then j + 1 else j) != t.size then none
+    else some (if neg then 0 else scaleDecimal mant (if isPct then exp10 - 2 else exp10) 255 255)
 
 def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
   let close := findByte bs start 41
