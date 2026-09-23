@@ -101,12 +101,14 @@ structure Font where
   exercised by the three embedded faces (all three carry a real `OS/2`). -/
   strikeoutPosition : Int
   data : ByteArray
-  /-- T94: an embedded font's `glyf` table as base64 chunks of
-  `glyfChunkBytes` bytes each, decoded one glyph record at a time
-  (`parseEmbedded`); then `data` stops where `glyf` starts. `#[]` for a font
-  parsed from a whole file, whose `glyf` is in `data`. -/
-  glyfChunks : Array String := #[]
-  glyfChunkBytes : Nat := 0
+  /-- T94: the rest of an embedded font, from byte `data.size` on, as base64
+  chunks of `tailChunkBytes` bytes each, `tailLen` bytes in all
+  (`parseEmbedded`).  The generator puts `loca`, `hmtx`, `vmtx` and `glyf`
+  there, which are read a few bytes per glyph (`byteAt`, `glyphRecord`); every
+  other table is in `data`.  `#[]` for a font parsed from a whole file. -/
+  tailChunks : Array String := #[]
+  tailChunkBytes : Nat := 0
+  tailLen : Nat := 0
 
 namespace Font
 
@@ -178,10 +180,11 @@ structure Tables where
 
 /-- Scan the `numTables` 16-byte directory records starting at byte 12,
 recording `(offset, length)` for the tables this parser needs. A record past
-`bs.size`, or a table whose offset is past `bs.size`, is skipped; a length
-that overruns `bs.size` is clamped. Bounded by `numTables ≤ 65535` (it is a
+`bs.size`, or a table whose offset is past the font's `size` (`bs.size`, or
+more for an embedded font whose tail is kept apart, T94), is skipped; a
+length that overruns `size` is clamped. Bounded by `numTables ≤ 65535` (it is a
 `u16`). -/
-def scanTables (bs : ByteArray) (numTables : Nat) : Tables := Id.run do
+def scanTables (bs : ByteArray) (numTables size : Nat) : Tables := Id.run do
   let mut t : Tables := {}
   for i in [0:numTables] do
     let dirOff := 12 + 16 * i
@@ -189,8 +192,8 @@ def scanTables (bs : ByteArray) (numTables : Nat) : Tables := Id.run do
       let tag := u32 bs dirOff
       let off := u32 bs (dirOff + 8)
       let len := u32 bs (dirOff + 12)
-      if off ≤ bs.size then
-        let clen := Nat.min len (bs.size - off)
+      if off ≤ size then
+        let clen := Nat.min len (size - off)
         if tag == tagHead then t := { t with head := some (off, clen) }
         else if tag == tagMaxp then t := { t with maxp := some (off, clen) }
         else if tag == tagCmap then t := { t with cmap := some (off, clen) }
@@ -543,16 +546,6 @@ def kern (f : Font) (left right : Nat) : Int := Id.run do
       | none => pure ()
   return 0
 
-/-! ## `hmtx`: advance widths -/
-
-/-- Advance width in font units. Glyphs at or past `numberOfHMetrics` share
-the last recorded width, as the spec requires. `0` for an out-of-range
-glyph id or a font with no metrics. -/
-def advance (f : Font) (gid : Nat) : Nat :=
-  if gid ≥ f.numGlyphs || f.numberOfHMetrics == 0 then 0
-  else if gid < f.numberOfHMetrics then u16 f.data (f.hmtxOff + 4 * gid)
-  else u16 f.data (f.hmtxOff + 4 * (f.numberOfHMetrics - 1))
-
 /-! ## Base64 (T91/T94): the embedded fonts' encoding -/
 
 /-- Value of a base64 digit (RFC 4648 standard alphabet), or 64 for any
@@ -591,16 +584,46 @@ def base64Range (chunks : Array String) (per start len : Nat) : ByteArray := Id.
     out := out.push v.toUInt8
   return out
 
+/-! ## Reading an embedded font's tail (T94) -/
+
+/-- The font's size in bytes: `data` plus the tail. -/
+def extent (f : Font) : Nat := f.data.size + f.tailLen
+
+/-- Byte `off` of the font, from `data` or the tail; 0 past `extent`. -/
+@[inline] def byteAt (f : Font) (off : Nat) : Nat :=
+  if off < f.data.size || f.tailChunks.isEmpty then u8 f.data off
+  else if off < f.extent then
+    let n := off - f.data.size
+    let s := f.tailChunks.getD (n / f.tailChunkBytes) ""
+    let j := n % f.tailChunkBytes
+    let i := 4 * (j / 3)
+    let r := j % 3
+    let v : UInt32 :=
+      if r == 0 then b64At s i <<< 2 ||| b64At s (i + 1) >>> 4
+      else if r == 1 then (b64At s (i + 1) &&& 15) <<< 4 ||| b64At s (i + 2) >>> 2
+      else (b64At s (i + 2) &&& 3) <<< 6 ||| b64At s (i + 3)
+    (v &&& 255).toNat
+  else 0
+
+/-- `u16`/`u32` over `byteAt`. -/
+@[inline] def tu16 (f : Font) (off : Nat) : Nat := byteAt f off * 256 + byteAt f (off + 1)
+@[inline] def tu32 (f : Font) (off : Nat) : Nat := tu16 f off * 65536 + tu16 f (off + 2)
+
+/-! ## `hmtx`: advance widths -/
+
+/-- Advance width in font units. Glyphs at or past `numberOfHMetrics` share
+the last recorded width, as the spec requires. `0` for an out-of-range
+glyph id or a font with no metrics. -/
+def advance (f : Font) (gid : Nat) : Nat :=
+  if gid ≥ f.numGlyphs || f.numberOfHMetrics == 0 then 0
+  else if gid < f.numberOfHMetrics then tu16 f (f.hmtxOff + 4 * gid)
+  else tu16 f (f.hmtxOff + 4 * (f.numberOfHMetrics - 1))
+
 /-! ## `loca` / `glyf`: locating a glyph's own bytes -/
 
-/-- The font's size in bytes: `data`, plus the `glyf` table when that is kept
-apart as base64 chunks (T94). -/
-def extent (f : Font) : Nat :=
-  if f.glyfChunks.isEmpty then f.data.size else f.data.size + f.glyfLen
-
 def locaOffset (f : Font) (i : Nat) : Nat :=
-  if f.indexToLocFormat == 1 then u32 f.data (f.locaOff + 4 * i)
-  else 2 * u16 f.data (f.locaOff + 2 * i)
+  if f.indexToLocFormat == 1 then tu32 f (f.locaOff + 4 * i)
+  else 2 * tu16 f (f.locaOff + 2 * i)
 
 /-- The `(absoluteOffset, length)` of glyph `gid`'s own record in `glyf`,
 clamped to the table's own extent and to `f.extent`. `none` for an
@@ -721,12 +744,12 @@ def compositePointCap : Nat := 40000
 /-- The bytes holding the glyph record at `(off, len)` (from `glyphSpan`) and
 the record's offset within them: `data` itself for a font parsed from a whole
 file, or, for an embedded font (T94), just those `len` bytes decoded from
-`glyfChunks`.  A corrupt record that claims more bytes than `len` would read
+its tail.  A corrupt record that claims more bytes than `len` would read
 the following glyph's bytes in the first case and zeros in the second; every
 embedded glyph is well-formed (`tests/check_font.py --all --via-embedded`). -/
 def glyphRecord (f : Font) (off len : Nat) : ByteArray × Nat :=
-  if f.glyfChunks.isEmpty then (f.data, off)
-  else (base64Range f.glyfChunks f.glyfChunkBytes (off - f.glyfOff) len, 0)
+  if off < f.data.size || f.tailChunks.isEmpty then (f.data, off)
+  else (base64Range f.tailChunks f.tailChunkBytes (off - f.data.size) len, 0)
 
 /-- Resolve glyph `gid`'s contours to `(x, y, onCurve)` points in font units,
 following composite references with `fuel` levels of recursion left (each
@@ -913,15 +936,19 @@ unrecognised `sfnt` version (only `0x00010000` and `'true'`, i.e. `glyf`-based
 TrueType outlines — not `OTTO`/CFF, not a `ttcf` collection), or missing one
 of the tables `outline`/`advance`/`rawContours` need (`head`, `maxp`, `hhea`,
 `hmtx`, `loca`, `glyf`). `cmap`/`kern`/`GPOS` are optional: their absence
-just makes `glyphId`/`kern` return `0`. -/
-def parse (bs : ByteArray) : Option Font :=
-  if bs.size > 16 * 1024 * 1024 || bs.size < 12 then none
+just makes `glyphId`/`kern` return `0`.
+
+`size` is the whole font's size, of which `bs` holds the first bytes: every
+table this function reads must be among them (T94's `parseEmbedded` keeps
+only `loca`, `hmtx`, `vmtx` and `glyf` apart). -/
+def parseSized (bs : ByteArray) (size : Nat) : Option Font :=
+  if size > 16 * 1024 * 1024 || bs.size < 12 then none
   else
     let version := u32 bs 0
     if version != 0x00010000 && version != 0x74727565 then none
     else
       let numTables := u16 bs 4
-      let t := scanTables bs numTables
+      let t := scanTables bs numTables size
       match t.head, t.maxp, t.hhea, t.hmtx, t.loca, t.glyf with
       | some (hOff, hLen), some (mOff, mLen), some (heOff, heLen), some (htOff, _),
         some (lOff, _), some (gOff, gLen) =>
@@ -1109,21 +1136,28 @@ def base64DecodeChunks (chunks : Array String) : ByteArray := Id.run do
     out := base64DecodeInto out c
   return out
 
-/-- An embedded font (T94): `front` is base64 of every byte before its `glyf`
-table, which the generator places last, and `glyf` is that table as base64
-chunks of `per` bytes, `glyfLen` bytes in all.  Only `front` is decoded here;
-glyph records are decoded from `glyf` as `outline`/`rawContours` ask for them.
-`none`, like `parse`, for anything inconsistent: `front` does not parse, its
-`glyf` does not start exactly where `front` ends, or `glyfLen` does not fit
-the chunk count. -/
-def parseEmbedded (front glyf : Array String) (per glyfLen : Nat) : Option Font :=
+/-- Parse a font held as a whole file (`parseSized` over all of it). -/
+def parse (bs : ByteArray) : Option Font := parseSized bs bs.size
+
+/-- An embedded font (T94): `front` is base64 of its first bytes, every table
+but `loca`, `hmtx`, `vmtx` and `glyf`, which the generator places after them
+(`glyf` last), and `tail` is the rest as base64 chunks of `per` bytes,
+`tailLen` bytes in all.  Only `front` is decoded here; the tail is read a few
+bytes at a time as `advance`/`outline` ask for them.  `none`, like `parse`,
+for anything inconsistent: `front` does not parse, `loca`/`hmtx`/`glyf` are
+not in the tail or `glyf` does not end it, or `tailLen` does not fit the
+chunk count. -/
+def parseEmbedded (front tail : Array String) (per tailLen : Nat) : Option Font :=
   let bs := base64DecodeChunks front
-  match parse bs with
-  | none => none
-  | some f =>
-    if f.glyfOff != bs.size || f.glyfLen != 0 || per == 0 || per % 3 != 0 ||
-        glyfLen > glyf.size * per || glyfLen + per ≤ glyf.size * per then none
-    else some { f with glyfLen := glyfLen, glyfChunks := glyf, glyfChunkBytes := per }
+  if per == 0 || per % 3 != 0 || tailLen > tail.size * per || tailLen + per ≤ tail.size * per then
+    none
+  else
+    match parseSized bs (bs.size + tailLen) with
+    | none => none
+    | some f =>
+      if f.locaOff < bs.size || f.hmtxOff < bs.size || f.glyfOff < bs.size ||
+          f.glyfOff + f.glyfLen != bs.size + tailLen then none
+      else some { f with tailChunks := tail, tailChunkBytes := per, tailLen := tailLen }
 
 /-- A font's codepoint coverage as sorted, disjoint, inclusive ranges, decoded
 from the generator's packed form: 6 bytes per range (24-bit big-endian first,
