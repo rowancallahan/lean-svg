@@ -18,14 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache elan toolchains
-        uses: actions/cache@v4
+      # actions/cache's combined action only saves in its post step under
+      # `post-if: success()`, so a job that ends red (a genuine invariant
+      # violation here) would never cache its toolchain/build for next time.
+      # restore/save split so the save runs regardless via `if: always()`.
+      - name: Restore elan cache
+        id: elan-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
 
-      - name: Cache Lake build
-        uses: actions/cache@v4
+      - name: Restore Lake build cache
+        id: lake-cache
+        uses: actions/cache/restore@v4
         with:
           path: .lake
           key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-${{ github.sha }}
@@ -43,6 +49,20 @@ jobs:
       - name: Invariants (axioms, two effects, no stray IO, mechanical checks)
         run: bash scripts/check-theorems.sh
 
+      - name: Save elan cache
+        if: always() && steps.elan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.elan
+          key: ${{ steps.elan-cache.outputs.cache-primary-key }}
+
+      - name: Save Lake build cache
+        if: always() && steps.lake-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .lake
+          key: ${{ steps.lake-cache.outputs.cache-primary-key }}
+
   tests:
     name: tests
     needs: invariants
@@ -51,23 +71,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache elan toolchains
-        uses: actions/cache@v4
+      - name: Restore elan cache
+        id: elan-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
 
-      - name: Cache Lake build
-        uses: actions/cache@v4
+      - name: Restore Lake build cache
+        id: lake-cache
+        uses: actions/cache/restore@v4
         with:
           path: .lake
           key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-${{ github.sha }}
           restore-keys: |
             lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-
 
-      - name: Cache resvg/usvg 0.48.1
-        id: cache-resvg
-        uses: actions/cache@v4
+      # This is the expensive step (cargo build from source, ~60-85s cold).
+      # It must survive a red run_tests.py later in this same job, which is
+      # exactly the case that broke the combined action's `success()`-gated
+      # save above.
+      - name: Restore resvg/usvg 0.48.1 cache
+        id: resvg-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/bin/resvg
@@ -118,3 +144,26 @@ jobs:
       - name: run_adversarial.py
         if: always()
         run: python3 tests/run_adversarial.py
+
+      - name: Save elan cache
+        if: always() && steps.elan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.elan
+          key: ${{ steps.elan-cache.outputs.cache-primary-key }}
+
+      - name: Save Lake build cache
+        if: always() && steps.lake-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .lake
+          key: ${{ steps.lake-cache.outputs.cache-primary-key }}
+
+      - name: Save resvg/usvg cache
+        if: always() && steps.resvg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/bin/resvg
+            ~/.cargo/bin/usvg
+          key: ${{ steps.resvg-cache.outputs.cache-primary-key }}

@@ -236,19 +236,41 @@ first push, no caches yet):
   wiring itself is correct and this is the pre-existing renderer state, not
   a bug introduced by this task.
 
-One real wiring gap the hosted run exposed: `run_tiles.py` and
-`run_adversarial.py` were skipped once `run_tests.py` failed (GitHub
-Actions' default is to skip later steps after a failure), so a red run gave
-only one of the three results instead of all three. Fixed by adding `if:
-always()` to all three harness steps — each now runs independently and the
-job still reports failure if any of them does. Re-validated with
-`actionlint` (clean) after the fix; this fix is included in the pushed
-commit, not yet re-run on GitHub as of writing this line.
+Two real wiring gaps the hosted runs exposed, both fixed and re-verified on
+GitHub before finishing:
+
+1. `run_tiles.py` and `run_adversarial.py` were skipped once `run_tests.py`
+   failed (GitHub Actions' default is to skip later steps after a failure),
+   so a red run gave only one of the three results instead of all three.
+   Fixed with `if: always()` on all three harness steps. **Verified on run 2**
+   (https://github.com/rowancallahan/lean-svg/actions/runs/35805794902):
+   `run_tests.py` still failed with the identical 23/27 table, but
+   `run_tiles.py` (27/27 byte-identical) and `run_adversarial.py` (61/61
+   clean) now both ran and passed in the same red job.
+2. The resvg/usvg cache never saved, on either run. Cause:
+   `actions/cache@v4`'s combined action only runs its save (post) step under
+   `post-if: success()` (confirmed by reading the published `action.yml`),
+   and this job's `run_tests.py` step legitimately fails before that post
+   step runs — so as long as the 4 renderer regressions above stand, the
+   built-in caching for anything cached in this job can *never* fire, cold
+   install every time. (Run 2's `elan`/`.lake` caches showed `Cache hit`
+   regardless, but only because the `invariants` job — which does succeed —
+   had just saved them moments earlier in the same workflow run; that
+   doesn't help the `tests`-job-only resvg cache.) Fixed by switching all
+   three caches, in both jobs, from the combined `actions/cache@v4` action to
+   the split `actions/cache/restore@v4` + `actions/cache/save@v4`, with the
+   save step given `if: always() && cache-hit != 'true'` — recommended
+   explicitly by that action.yml's own deprecation note on `save-always`.
+   Re-validated with `actionlint` (clean). **Not yet re-run on GitHub** as of
+   writing this line — the fix is in the pushed commit; a third push will
+   show whether the resvg cache actually saves this time (expect it to, but
+   a job ending in the same `run_tests.py` failure is exactly the condition
+   that broke it originally, so this is the case that most needs checking).
 
 ### Not done / deferred
 
 - Did not open a pull request, per the T43b amendment overriding T43's
   original instruction.
-- Have not seen a hosted run with warm caches (second push) to confirm the
-  cache-hit path for `~/.elan`, `.lake`, and the resvg/usvg binaries — only
-  the cold first run above. Worth a glance on the next push to this branch.
+- Have not yet confirmed the resvg/usvg cache actually populates and is
+  reused across runs now that it uses restore/save instead of the combined
+  action (see above) — that requires a further push past this fix.
