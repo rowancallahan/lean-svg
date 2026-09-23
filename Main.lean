@@ -5,7 +5,8 @@ import LeanSvg
 
 This file is the only code that runs in `IO` besides `Prog.execIO`.  It parses
 arguments, builds the `Prog` program from the pure `render`, hands it to the
-interpreter, and prints an error message to stderr on failure.
+interpreter, and prints an error message to stderr on failure (or a one-line
+note when a warnings file was written, T98).
 -/
 
 open LeanSvg
@@ -71,10 +72,14 @@ def main (args : List String) : IO UInt32 := do
     if out == "" then
       IO.eprintln usage
       return 2
-    let clobberError := s!"refusing to overwrite existing file {out}"
-    let result ← (Prog.renderProgram clobberError (render opts)).execIO ⟨inp⟩ ⟨out⟩
+    let clobberError := s!"refusing to overwrite existing file {out} or {Prog.warnPath out}"
+    let pure_ := fun b => (renderWithWarnings opts b).map fun (png, ws) => (png, Warn.text ws)
+    let result ← (Prog.renderProgram clobberError pure_).execIO ⟨inp⟩ ⟨out⟩
     match result with
-    | .ok () => return 0
+    | .ok false => return 0
+    | .ok true =>
+      IO.eprintln s!"lean-svg: warnings written to {Prog.warnPath out}"
+      return 0
     | .error e =>
       IO.eprintln s!"lean-svg: error: {e}"
       return 1

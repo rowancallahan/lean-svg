@@ -1047,12 +1047,14 @@ def outSize (events : Array Xml.Event) (opts : Options) : Option (Nat × Nat) :=
 
 end Render
 
-/-- Render SVG bytes to PNG bytes, or fail with a message.
+/-- Render SVG bytes to PNG bytes and the render's warnings (`Warn`, T98),
+or fail with a message.
 
 With `opts.threads ≥ 2` the canvas is cut into bands of rows that are rendered
 in parallel and concatenated; the bytes are the same either way (see
 `Render.renderBands`).  The PNG encoding stays serial: Adler-32 is sequential. -/
-def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
+def renderWithWarnings (opts : Options) (input : ByteArray) :
+    Except String (ByteArray × Array String) := do
   if input.size > maxInput then throw s!"input {input.size} bytes exceeds the {maxInput} byte limit"
   let events ← Xml.parse input
   let doc ← Svg.interpretWith { outSize := Render.outSize events opts } events
@@ -1074,6 +1076,11 @@ def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
       (·.2.2) <$> Render.renderRgba opts doc
     else
       Render.renderBands opts doc w h k
-  return Png.encode w h rgba
+  return (Png.encode w h rgba, doc.warnings)
+
+/-- Render SVG bytes to PNG bytes, or fail with a message: `renderWithWarnings`
+without the warnings. -/
+def render (opts : Options) (input : ByteArray) : Except String ByteArray :=
+  (·.1) <$> renderWithWarnings opts input
 
 end LeanSvg

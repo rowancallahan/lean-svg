@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """T43 checks 2-4: the structural invariants review currently keeps by hand.
 
-2. `Op` (LeanSvg/Effect.lean) has exactly the constructors `readInput` and
-   `writeOutput`: checked by elaborating an exhaustive match on `Op` with no
+2. `Op` (LeanSvg/Effect.lean) has exactly the constructors `readInput`,
+   `outputExists`, `warningsExists`, `writeOutput` and `writeWarnings` (T98
+   added the warnings pair deliberately: `<output>.warnings.txt`): checked by elaborating an exhaustive match on `Op` with no
    wildcard arm, so an added or renamed constructor fails to compile.
 3. No `IO.` outside the effect layer: `LeanSvg/*.lean` other than
    `Effect.lean` must not mention `IO.` (comments and string literals don't
@@ -66,18 +67,20 @@ def lean_files(exclude: set[str] = frozenset()) -> list[Path]:
     return sorted(p for p in LEANSVG.rglob("*.lean") if p.name not in exclude)
 
 
-def check_two_effects() -> None:
+def check_five_effects() -> None:
     snippet = """import LeanSvg
 open LeanSvg
 /-- Fails to elaborate (non-exhaustive match) if `Op` gains, loses, or
-renames a constructor. Catches a rename too: `.readInput`/`.outputExists`/`.writeOutput`
-would no longer resolve. Misses: a constructor added *and* immediately
+renames a constructor. Catches a rename too: `.readInput`/`.outputExists`/
+`.warningsExists`/`.writeOutput`/`.writeWarnings` would no longer resolve. Misses: a constructor added *and* immediately
 handled by a matching new arm here, but nothing writes this file but us. -/
 example (op : Op) : Unit :=
   match op with
   | .readInput => ()
   | .outputExists => ()
+  | .warningsExists => ()
   | .writeOutput _ => ()
+  | .writeWarnings _ => ()
 """
     with tempfile.NamedTemporaryFile("w", suffix=".lean", dir=REPO, delete=False) as f:
         f.write(snippet)
@@ -89,9 +92,11 @@ example (op : Op) : Unit :=
     finally:
         tmp.unlink()
     assert r.returncode == 0 and "error" not in r.stderr.lower(), (
-        f"FAIL [two-effects]: Op is not exactly {{readInput, outputExists, writeOutput}}:\n{r.stderr}"
+        "FAIL [five-effects]: Op is not exactly {readInput, outputExists, warningsExists, "
+        f"writeOutput, writeWarnings}}:\n{r.stderr}"
     )
-    print("-- two-effects: Op has exactly {readInput, outputExists, writeOutput}")
+    print("-- five-effects: Op has exactly {readInput, outputExists, warningsExists, "
+          "writeOutput, writeWarnings}")
 
 
 IO_RE = re.compile(r"(?<![A-Za-z0-9_])IO\.")
@@ -135,7 +140,7 @@ def check_mechanical_invariants() -> None:
 
 
 def main() -> None:
-    check_two_effects()
+    check_five_effects()
     check_no_io_outside_effect()
     check_mechanical_invariants()
     print("invariants ok")
