@@ -50,8 +50,20 @@ lake build
 .lake/build/bin/lean-svg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
 ```
 
-Exit codes: 0 success, 1 render error (message on stderr, no file written) —
-including refusing to overwrite an existing output file — 2 bad arguments.
+lean-svg prints nothing, ever: no stdout, no stderr. Its only outputs are
+the output file(s) and the exit code:
+
+| code | meaning |
+|---|---|
+| 0 | success, no warnings; the PNG is written |
+| 2 | success with warnings (e.g. a `font-family` drawn in Noto Sans instead); the PNG is written. By default the warnings are dropped and this code is the only signal. With `--warnings` they are also written to `<output>.warnings.txt` |
+| 1 | failure, nothing written: bad arguments, unreadable input, the output path (or, with `--warnings`, `<output>.warnings.txt`) already exists, or a render error |
+
+Flags: `--width N`, `--zoom Z`, `--background COLOR`, `--viewport X Y W H`
+(render only the W×H window at (X, Y) of the zoomed image; X, Y may be
+negative; zoom above 4096× is clamped), `--threads N` (horizontal bands,
+byte-identical output; 0 or 1 = serial), `--warnings` (opt in to the
+warnings file).
 
 ## Test
 

@@ -49,7 +49,7 @@ def render_ours(svg, binary, dest):
     rc_code, _, err, timed_out = rc.run_cmd(
         [str(binary), str(svg), str(dest), "--width", str(WIDTH)]
     )
-    if timed_out or rc_code != 0:
+    if timed_out or rc_code not in (0, 2):  # T98b: 2 = PNG written, with warnings
         return err or "rc=%s" % rc_code
     return None
 

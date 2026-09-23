@@ -7,11 +7,10 @@ cases written fresh into tests/out/adversarial_gen/ on every run.
 
 Each input is rendered into its own fresh temporary directory, and the run is a
 VIOLATION unless all of the following hold:
-  * the process exits 0 or 1 within the timeout (a signal shows up as a
+  * the process exits 0, 1 or 2 within the timeout (a signal shows up as a
     negative return code on macOS and is never acceptable);
-  * stderr mentions no panic, stack overflow, internal error or uncaught
-    exception;
-  * out.png exists if and only if the return code is 0;
+  * it writes nothing at all to stdout or stderr (T98b);
+  * out.png exists if and only if the return code is 0 or 2;
   * the temporary directory contains nothing but out.png;
   * any out.png produced starts with the PNG signature and opens in Pillow.
 """
@@ -38,9 +37,9 @@ OUT_DIR = REPO / "tests" / "out"
 GEN_DIR = OUT_DIR / "adversarial_gen"
 DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
-# T98: lean-svg writes `out.png.warnings.txt` next to the PNG when the render
-# has warnings; that and the PNG are the only files it may create.
-ALLOWED_OUTPUTS = ("out.png", "out.png.warnings.txt")
+# T98b: without `--warnings` lean-svg never writes `out.png.warnings.txt`;
+# the PNG is the only file it may create.
+ALLOWED_OUTPUTS = ("out.png",)
 RENDER_TIMEOUT = 120  # seconds
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CRASH_MARKERS = ["PANIC", "panic", "Stack overflow", "INTERNAL", "uncaught"]
@@ -614,6 +613,10 @@ def run_case(path, binary, label):
             )
             rc = proc.returncode
             stderr = proc.stderr.decode("utf-8", "replace")
+            if proc.stdout or proc.stderr:
+                result["violations"].append(
+                    "wrote to stdout/stderr: %r" % (proc.stdout + proc.stderr)[:200]
+                )
         except subprocess.TimeoutExpired as exc:
             timed_out = True
             rc = None
@@ -624,9 +627,9 @@ def run_case(path, binary, label):
 
         if timed_out:
             result["violations"].append("timed out after %ds" % RENDER_TIMEOUT)
-        elif rc not in (0, 1):
+        elif rc not in (0, 1, 2):
             result["violations"].append(
-                "return code %d (expected 0 or 1%s)"
+                "return code %d (expected 0, 1 or 2%s)"
                 % (rc, "; negative means a signal" if rc < 0 else "")
             )
 
@@ -637,9 +640,9 @@ def run_case(path, binary, label):
         exists = out_png.is_file()
         result["output"] = exists
         if not timed_out:
-            if rc == 0 and not exists:
-                result["violations"].append("exited 0 but wrote no out.png")
-            if rc != 0 and exists:
+            if rc in (0, 2) and not exists:
+                result["violations"].append("exited %d but wrote no out.png" % rc)
+            if rc == 1 and exists:
                 result["violations"].append("exited %d but still wrote out.png" % rc)
 
         strays = sorted(p.name for p in tmpdir.iterdir() if p.name not in ALLOWED_OUTPUTS)
@@ -678,7 +681,7 @@ def check_no_clobber(binary):
             stderr=subprocess.PIPE,
             timeout=RENDER_TIMEOUT,
         )
-        if first.returncode != 0 or not out_png.is_file():
+        if first.returncode not in (0, 2) or not out_png.is_file():
             result["violations"].append(
                 "setup render failed: rc=%s %s"
                 % (first.returncode, first.stderr.decode("utf-8", "replace").strip())
@@ -698,7 +701,7 @@ def check_no_clobber(binary):
         result["stderr"] = second.stderr.decode("utf-8", "replace").strip()
         result["output"] = out_png.is_file()
 
-        if second.returncode == 0:
+        if second.returncode != 1:
             result["violations"].append("second render into an existing file succeeded")
         after = out_png.read_bytes()
         if after != before:
@@ -743,7 +746,7 @@ def check_image_refs_inert(binary):
             )
             result["rc"] = proc.returncode
             result["stderr"] = proc.stderr.decode("utf-8", "replace").strip()
-            if proc.returncode != 0:
+            if proc.returncode not in (0, 2):
                 result["violations"].append("render of %s failed" % svg.name)
                 return result
             outs.append((tmpdir / name).read_bytes())

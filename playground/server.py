@@ -92,7 +92,7 @@ def _run(cmd, cwd):
     ms = (time.perf_counter() - start) * 1000.0
 
     err = (proc.stderr or b"").decode("utf-8", "replace").strip()
-    if proc.returncode != 0:
+    if proc.returncode not in (0, 2):  # T98b: lean-svg exits 2 on success with warnings
         if not err:
             err = (proc.stdout or b"").decode("utf-8", "replace").strip()
         if not err:
@@ -215,13 +215,13 @@ def _run_api(cmd, out_path, timeout):
     ms = (time.perf_counter() - start) * 1000.0
 
     stderr = (proc.stderr or b"").decode("utf-8", "replace")
-    if proc.returncode != 0 or not os.path.exists(out_path):
+    if proc.returncode not in (0, 2) or not os.path.exists(out_path):
         err = stderr.strip()
         if not err:
             err = (proc.stdout or b"").decode("utf-8", "replace").strip()
         if not err:
             err = "exited with status %d" % proc.returncode
-        if not os.path.exists(out_path) and proc.returncode == 0:
+        if not os.path.exists(out_path) and proc.returncode in (0, 2):
             err = err or "renderer produced no output file"
         return {"png": None, "error": err, "stderr": stderr, "exit_code": proc.returncode, "ms": ms}
 

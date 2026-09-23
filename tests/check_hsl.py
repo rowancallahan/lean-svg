@@ -125,7 +125,7 @@ def gen_color(rng):
 
 def render_center_pixel(binary_cmd, svg_path, png_path):
     proc = subprocess.run(binary_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=RENDER_TIMEOUT)
-    if proc.returncode != 0:
+    if proc.returncode not in (0, 2):  # T98b: 2 = PNG written, with warnings
         return None, proc.stderr.decode("utf-8", "replace").strip()
     with Image.open(png_path) as img:
         rgba = img.convert("RGBA")

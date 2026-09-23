@@ -117,10 +117,12 @@ def render_panel_resvg(svg, width, dest):
 
 
 def render_panel_ours(svg, width, dest):
-    subprocess.run(
+    r = subprocess.run(
         [str(LEAN_SVG), str(svg), str(dest), "--width", str(width)],
-        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
+    # T98b: 2 = PNG written, with warnings.
+    assert r.returncode in (0, 2), (svg, r.returncode)
 
 
 def build_sheet(entries, width, out_png):
