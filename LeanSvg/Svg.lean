@@ -5,6 +5,7 @@ import LeanSvg.Canvas
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use
+import LeanSvg.Image
 import Std.Data.HashMap
 
 /-!
@@ -171,11 +172,17 @@ structure Style where
   /-- `mask-type: alpha` on this element (T49), not inherited; only a `mask`
   element reads it. -/
   maskAlpha : Bool := false
+  /-- `image-rendering` (T63), inherited; an unparseable value is the default,
+  as usvg's `find_attribute` + `unwrap_or` makes it. -/
+  imageRendering : Image.Quality := .bicubic
 deriving Repr, Inhabited
 
 structure Shape where
   cmds : Array PathCmd
   style : Style
+  /-- T63: an `<image>`.  `cmds` is then the rectangle it paints through and
+  this is the paint, in place of `style.fill`. -/
+  image : Option Image.Placed := none
 deriving Inhabited
 
 /-! ## `clipPath` (T20), and the shape of a defs table
@@ -1710,6 +1717,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
       if st.originDx == 0 && st.originDy == 0 then localM
       else ((Mat.translate st.originDx st.originDy).mul localM).mul (Mat.translate (-st.originDx) (-st.originDy))
     { st with ctm := st.ctm.mul wrapped, ownMat := st.ownMat.mul wrapped }
+  | "image-rendering" => { st with imageRendering := Image.parseRendering v }
   | "visibility" =>
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
@@ -2409,7 +2417,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }, none⟩
   return (out, used)
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
@@ -2527,6 +2535,29 @@ def fixRecursiveMaskLinks (masks : Array MaskEntry) (uses : Array MaskUse)
     | some (.self_ k) => ms := ms.modify k fun e => { e with selfMask := none }
     | some (.use u) => us := us.modify u fun x => { x with entry := none }
   return (ms, us)
+
+/-- T63: an `<image>` element's rectangle and placed pixels, or `none` when it
+draws nothing: no embedded (`data:`) PNG/JPEG that decodes, one that would
+overrun the `budget` of decoded pixels left, or an empty viewport.  Also the
+budget left afterwards.  Lengths as `shapeCmds` resolves them; a `width`/`height` that does
+not parse (`auto`, say) is absent, i.e. taken from the image. -/
+def imageShape (attrs : Array Xml.Attr) (st : Style) (budget : Nat) :
+    Option (Array PathCmd × Image.Placed × Option (Fx × Fx × Fx × Fx)) × Nat :=
+  let href := (attr attrs "href").orElse (fun _ => attr attrs "xlink:href")
+  -- Past the document's pixel budget nothing more is even decoded, and the
+  -- first image that overruns it spends it all, so at most one decode is
+  -- ever thrown away.
+  match if budget == 0 then none else href.bind Image.load with
+  | none => (none, budget)
+  | some pix =>
+    if pix.w * pix.h > budget then (none, 0) else
+    let lx := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefW)
+    let ly := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefH)
+    let ar := match attr attrs "preserveAspectRatio" with
+      | some v => Viewport.parseAspectRatio v
+      | none => {}
+    (Image.place pix ((lx "x").getD 0) ((ly "y").getD 0) (lx "width") (ly "height") ar
+      st.imageRendering, budget - pix.w * pix.h)
 
 /-- Walk the event stream with a style stack.
 
@@ -2654,7 +2685,13 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     -- layers below still apply all three.
     let skipName (n : String) := n == "style" || early n || n == "font-kerning"
                                  || isCssOnlyProp n
-    let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
+    -- T63: usvg also drops the attribute form of `image-rendering` for its
+    -- CSS-only values (`svgtree/parse.rs`).
+    let cssOnlyValue (a : Xml.Attr) := a.name == "image-rendering" &&
+      (eqAscii a.value "smooth" || eqAscii a.value "high-quality" ||
+       eqAscii a.value "crisp-edges" || eqAscii a.value "pixelated")
+    let afterAttrs := attrs.foldl (fun st a =>
+      if skipName a.name || cssOnlyValue a then st else applyProp st a.name a.value) base
     let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
     let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
     importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
@@ -2693,6 +2730,8 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- `<text>` element draws from this one budget, so glyph generation is
   -- bounded by a constant however much text the input contains.
   let mut textBudget : Nat := 100000
+  -- T63: decoded image pixels the whole document may keep (`Image.maxTotalPixels`).
+  let mut imageBudget : Nat := Image.maxTotalPixels
   for idx in [0:events.size] do
     match events.getD idx default with
     | .text _ => pure ()
@@ -3105,7 +3144,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                    | _ => true) && (shapeCmds16 name attrs).isSome
                 fineShape := fine
                 match (if fine then shapeCmds16 name attrs else cmds) with
-                | some cmds => if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st⟩
+                | some cmds => if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, none⟩
                 | none => pure ()
               | .defs => pure ()
               | .clip k =>
@@ -3129,6 +3168,50 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               enter := some st
               frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
                          bbox := if want then cmds.bind cmdsBox else none,
+                         isShapeLeaf := true }
+              renders := pf.mode.isRender
+          else if name == "image" then
+            -- T63: a leaf like a shape (`LeanSvg/Image.lean`): its coverage is
+            -- the placed rectangle and its paint the image, so opacity,
+            -- `clip-path`, `mask` and `transform` take the shape's route.  Not
+            -- a valid `clipPath` child, and never decoded outside a render.
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
+              uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
+              let (placed, budget') :=
+                if pf.mode.isRender then imageShape attrs st imageBudget else (none, imageBudget)
+              imageBudget := budget'
+              -- `slice`: usvg's group clipped to the viewport, as a synthetic
+              -- one-rect `clipPath` on this element's chain (like T48's).
+              let mut st := st
+              if let some (_, _, some (x, y, w, h)) := placed then
+                let child : ClipChild := ⟨rectPath x y w h 0 0, false, Mat.identity, true, #[], false⟩
+                clipTable := clipTable.push
+                  { id := "", transform := Mat.identity, transformValid := true,
+                    objectBBox := false, selfClipId := none, selfClip := none,
+                    children := #[child] }
+                uses := uses.push ⟨"", some (clipTable.size - 1), st.ctm, none⟩
+                -- Inside this element's own `clip-path` use, which stays last on
+                -- the chain because a layer takes it back off from there.
+                let k := uses.size - 1
+                st := { st with clips := match slot with
+                  | some own => (st.clips.pop.push k).push own
+                  | none => st.clips.push k }
+              match placed with
+              | some (cmds, p, _) =>
+                if st.visible then
+                  shapeNode := some ⟨cmds, { st with fill := .solid ⟨0, 0, 0, 255⟩, stroke := .none },
+                    some p⟩
+              | none => pure ()
+              let want := slot.isSome || mslot.isSome || pf.want
+              enter := some st
+              frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
+                         bbox := if want then (placed.map (·.1)).bind cmdsBox else none,
                          isShapeLeaf := true }
               renders := pf.mode.isRender
           else

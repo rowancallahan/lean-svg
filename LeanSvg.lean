@@ -16,6 +16,7 @@ import LeanSvg.Use
 import LeanSvg.ImageData
 import LeanSvg.PngDecode
 import LeanSvg.JpegDecode
+import LeanSvg.Image
 import LeanSvg.Svg
 import LeanSvg.Clip
 import LeanSvg.Mask

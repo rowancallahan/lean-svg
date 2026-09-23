@@ -265,6 +265,13 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
     else (Mat.translate (-((tgt.ox : Int) * 256)) (-((tgt.oy : Int) * 256))).mul ctm
   let paintMask := fun (cv : Canvas) (p : Svg.Paint) (m0 : Raster.Mask) (op : Nat) =>
     let m := shiftMask tgt m0
+    -- T63: an `<image>` paints its own sampler through the same mask.
+    match s.image with
+    | some im =>
+      match Image.build im gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy) with
+      | some sh => cv.fillMaskImage m sh
+      | none => cv
+    | none =>
     match p with
     | .none => cv
     | .solid c => cv.fillMask m c (opacityToU8 c.a op st.opacity)
