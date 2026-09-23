@@ -31,6 +31,8 @@ PROBES = {
     "Amiri": ("1", "اقرأ المزيد عن SVG أيضًا لا بِسْمِ ٱللَّهِ final"),
     "NotoSansHebrew": ("1", "שָׁלוֹם עוֹלָם בְּרֵאשִׁית (123)"),
     "NotoSansDevanagari": ("0", "नमस्ते हिन्दी र्क क्ष त्र श्र ि् क़"),
+    # T97: mark stacking (GPOS mark/mkmk) in Noto Sans
+    "NotoSans": ("0", "z͈̤̭͖̉͑́a̳ͫ́̇͑̽͒ͯlͨ͗̍̀̍̔̀ģ͔̫̫̄o̗̠͔̦̳͆̏̓͢ ậ ǘ Ǻ̈́ q̣̌ Ё̄ ṩ Ωμέγα"),
 }
 
 

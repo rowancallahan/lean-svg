@@ -160,6 +160,9 @@ structure Style where
   fontWeight : Nat := 400
   /-- `font-style: italic` or `oblique`. -/
   fontItalic : Bool := false
+  /-- T97: `font-variant: small-caps` (usvg: the inherited value is exactly
+  `small-caps`), drawn with the font's `smcp` feature. -/
+  fontSmallCaps : Bool := false
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
   /-- T90: CSS Fonts 4 `font-size-adjust` (number form, `ex-height`), as an
@@ -1785,7 +1788,7 @@ def parseFontWeight (parent : Nat) (bs : ByteArray) : Nat :=
   -- fontdb's `find_best_match` already implements CSS Fonts 4's
   -- nearest-installed-weight rule correctly once given a number (confirmed
   -- against `fontdb`'s source), so e.g. `650` should resolve to the nearest
-  -- installed weight (`pickFace`, `≥ 600 → bold`) rather than being dropped.
+  -- installed weight (`pickFace`, e.g. `650 → bold`) rather than being dropped.
   else match parseNumberAll t with
     | some n => if n ≥ 256 && n ≤ 256000 then (n / 256).toNat else parent
     | none => parent
@@ -2265,6 +2268,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
     else if eqAscii t "normal" then { st with fontItalic := false } else st
+  -- T97: usvg compares the inherited value with `small-caps`; `inherit`
+  -- keeps the parent's
+  | "font-variant" =>
+    let t := trim v
+    if eqAscii t "inherit" then st else { st with fontSmallCaps := eqAscii t "small-caps" }
   | "font" =>
     -- T90: the CSS `font` shorthand, in either delivery form (usvg expands
     -- only the CSS one): reset, then the longhands it names.
@@ -2272,7 +2280,8 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     | none => st
     | some (italic, weight, size, family) =>
       let st := { st with fontItalic := italic, fontWeight := 400, textKerning := true,
-                          fontSizeAdjust := none }
+                          fontSizeAdjust := none,
+                          fontSmallCaps := (Bytes.splitTrim v 32).any (eqAscii · "small-caps") }
       let st := match weight with
         | some w => { st with fontWeight := parseFontWeight st.fontWeight w }
         | none => st
@@ -2900,6 +2909,7 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 `bsStack`, not from `st`: see `baselineShiftDelta`). -/
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
+    smallCaps := st.fontSmallCaps,
     family := st.fontFamily,
     size := st.fontSize,
     sizeAdjust := st.fontSizeAdjust,

@@ -83,13 +83,13 @@ def charOf (offs : Array Nat) (b : Nat) : Nat := Id.run do
 
 /-- `shape_text_with_font`: every visual run shaped in its own direction. -/
 def shapeWithFont (f : Font) (fi : Nat) (cps offs : Array Nat) (runs : Array (Nat × Nat × Nat))
-    (kerning : Bool) : Array SGlyph := Id.run do
+    (kerning : Bool) (smallCaps : Bool := false) : Array SGlyph := Id.run do
   let lay := Shape.Layout.ofBytes f.data
   let mut out : Array SGlyph := #[]
   for (s, e, lvl) in runs do
     if e ≤ s then continue
     let ltr := lvl % 2 == 0
-    let gs := Shape.shapeRun f lay (cps.extract s e) (!ltr) kerning
+    let gs := Shape.shapeRun f lay (cps.extract s e) (!ltr) kerning smallCaps
     let runStart := offs.getD s 0
     let subLen := offs.getD e 0 - runStart
     for i in [0:gs.size] do
@@ -107,10 +107,11 @@ def shapeWithFont (f : Font) (fi : Nat) (cps offs : Array Nat) (runs : Array (Na
 
 /-- `shape_text`: shaping with font fallback. -/
 def shapeText (cache : Cache) (covs : Array (Array (Nat × Nat))) (cps offs : Array Nat)
-    (runs : Array (Nat × Nat × Nat)) (base : Nat) (kerning : Bool) : Array SGlyph × Cache := Id.run do
+    (runs : Array (Nat × Nat × Nat)) (base : Nat) (kerning : Bool) (smallCaps : Bool := false) :
+    Array SGlyph × Cache := Id.run do
   let mut cache := cache.load base
   let mut glyphs := match cache.get base with
-    | some f => shapeWithFont f base cps offs runs kerning
+    | some f => shapeWithFont f base cps offs runs kerning smallCaps
     | none => #[]
   let mut used : Array Nat := #[base]
   for _ in [0:covs.size] do
@@ -125,7 +126,7 @@ def shapeText (cache : Cache) (covs : Array (Array (Nat × Nat))) (cps offs : Ar
         match cache.get k with
         | none => break
         | some fk =>
-          let fb := shapeWithFont fk k cps offs runs kerning
+          let fb := shapeWithFont fk k cps offs runs kerning smallCaps
           if fb.all (·.gid != 0) then
             glyphs := fb
             break
@@ -161,20 +162,20 @@ def scriptRuns (cps : Array Nat) (level : Nat) : Array (Nat × Nat × Nat) := Id
   return if level % 2 == 1 then runs.reverse else runs
 
 /-- `process_chunk`'s span loop.  `spans` are `(first char, end char, base
-font, kerning)` in document order; `paraLevel` and `override` choose the
+font, kerning, small caps)` in document order; `paraLevel` and `override` choose the
 bidi runs (see the module doc).  Returns the glyphs grouped into clusters, in
 visual order, as `(character index of the cluster, glyphs)`. -/
 def processChunk (cache : Cache) (covs : Array (Array (Nat × Nat))) (cps : Array Nat)
-    (spans : Array (Nat × Nat × Nat × Bool)) (paraLevel : Nat) (override : Bool) :
+    (spans : Array (Nat × Nat × Nat × Bool × Bool)) (paraLevel : Nat) (override : Bool) :
     Array (Nat × Array SGlyph) × Cache := Id.run do
   let offs := byteOffsets cps
   let runs := if override then scriptRuns cps paraLevel else Bidi.visualRuns cps paraLevel
   let mut cache := cache
   let mut glyphs : Array SGlyph := #[]
-  for (s, e, base, kerning) in spans do
+  for (s, e, base, kerning, smallCaps) in spans do
     cache := cache.load base
     if (cache.get base).isNone then continue
-    let (tmp, c2) := shapeText cache covs cps offs runs base kerning
+    let (tmp, c2) := shapeText cache covs cps offs runs base kerning smallCaps
     cache := c2
     if glyphs.isEmpty then
       glyphs := tmp
@@ -228,13 +229,28 @@ def isShapedFont (k : Nat) : Bool :=
   | some e => ["Amiri", "Noto Sans Hebrew", "Noto Sans Devanagari"].contains e.family
   | none => false
 
+/-- The Noto Sans faces (T97), which keep `ccmp`, `locl`, `smcp` and
+`mark`/`mkmk` besides `kern`. -/
+def isNotoSans (k : Nat) : Bool :=
+  match FontSet.entries[k]? with
+  | some e => e.family == "Noto Sans"
+  | none => false
+
+/-- A combining mark (general category Mn, Mc or Me).  Everything below
+U+0300 is ruled out before the table lookup, so Latin text pays one
+comparison per character. -/
+def isMarkChar (cp : Nat) : Bool :=
+  cp ≥ 0x300 && (let gc := ShapeData.genCat cp; gc == 10 || gc == 11 || gc == 12)
+
 /-- Whether a chunk needs the shaping path: some character is strongly
 right-to-left (or an explicit bidi control), or it is drawn with one of the
-fonts that carry GSUB/GPOS shaping.  Every other chunk keeps the one glyph
-per character layout, so text in the other fonts is laid out exactly as
-before T93. -/
-def needsShaping (cps : Array Nat) (fontsUsed : Array Nat) : Bool :=
-  fontsUsed.any isShapedFont || cps.any fun cp =>
+fonts that carry GSUB/GPOS shaping, or (T97) a Noto Sans face draws it and it
+has a combining mark (GPOS mark attachment) or a `small-caps` span (`smcp`).
+Every other chunk keeps the one glyph per character layout, so plain Latin
+text is laid out exactly as before T93. -/
+def needsShaping (cps : Array Nat) (fontsUsed : Array Nat) (smallCaps : Bool := false) : Bool :=
+  fontsUsed.any isShapedFont ||
+  (fontsUsed.any isNotoSans && (smallCaps || cps.any isMarkChar)) || cps.any fun cp =>
     match Bidi.bidiClass cp with
     | .R | .AL | .AN | .LRE | .LRO | .RLE | .RLO | .PDF | .LRI | .RLI | .FSI | .PDI => true
     | _ => false

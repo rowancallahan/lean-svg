@@ -52,7 +52,7 @@ open Bytes
 
 The embedded fonts are `FontSet.entries` (T91).  `font-family` picks a base
 font per span (`SpanProps.family`, resolved by `Svg.resolveFontFamily`); for
-the "Noto Sans" family, weight and slant pick among its three faces.  A
+the "Noto Sans" family, weight and slant pick among its six faces.  A
 character the base font does not map falls back through the other embedded
 fonts in `FontSet` order (`assignFonts`). -/
 
@@ -60,14 +60,39 @@ inductive Face where
   | regular
   | bold
   | italic
+  /-- T97: Noto Sans Thin (100), Light (300) and Black (900). -/
+  | thin
+  | light
+  | black
 deriving DecidableEq, Repr, Inhabited, BEq
 
-/-- usvg maps `font-weight` to a number (`bolder`/`lighter` step relative to
-the inherited one); we have no semibold face, so anything at 600 or above is
-bold.  Italic and oblique both pick the italic face, and bold wins over
-italic because there is no bold-italic face. -/
+/-- fontdb's `find_best_match` weight step (CSS Fonts 4 §5.2 4c) over the
+weights `avail`: the exact weight; else for 400–449 try 500 and for 450–500
+try 400; else at or below 500 the nearest lighter weight, then the nearest
+heavier; above 500 the nearest heavier, then the nearest lighter. -/
+def matchWeight (avail : List Nat) (w : Nat) : Nat :=
+  let lighter := (avail.filter (· ≤ w)).foldl Nat.max 0
+  let heavier := (avail.filter (· ≥ w)).foldl Nat.min 1000
+  if avail.contains w then w
+  else if 400 ≤ w && w < 450 && avail.contains 500 then 500
+  else if 450 ≤ w && w ≤ 500 && avail.contains 400 then 400
+  else if w ≤ 500 then (if lighter != 0 then lighter else heavier)
+  else if heavier != 1000 then heavier else lighter
+
+/-- usvg asks fontdb for the face of the requested style and weight (`font-
+stretch` selects nothing: every face is normal width).  Style comes first:
+italic and oblique both pick the italic face, the only slanted one, whatever
+the weight (fontdb keeps only the faces of the best-matching style before it
+looks at weight).  Upright text matches weight among 100, 300, 400, 700 and
+900 (`matchWeight`), so e.g. 200 → Thin, 500 → Regular, 600 → Bold. -/
 def pickFace (weight : Nat) (italic : Bool) : Face :=
-  if weight ≥ 600 then .bold else if italic then .italic else .regular
+  if italic then .italic
+  else match matchWeight [100, 300, 400, 700, 900] weight with
+    | 100 => .thin
+    | 300 => .light
+    | 700 => .bold
+    | 900 => .black
+    | _ => .regular
 
 /-- The `FontSet` index of a span's base font: `family` is a `FontSet` index
 (0 = "Noto Sans"); only Noto Sans has more than one face. -/
@@ -77,6 +102,9 @@ def baseFont (family : Nat) (face : Face) : Nat :=
     | .regular => 0
     | .bold => 1
     | .italic => 2
+    | .thin => FontSet.notoSansThin
+    | .light => FontSet.notoSansLight
+    | .black => FontSet.notoSansBlack
 
 /-- usvg's `shape_text` fallback loop for one base font over one chunk's
 characters, with shaping reduced to one glyph per character: the base font
@@ -122,6 +150,8 @@ cascade by `Svg.lean`.  `size`, `letterSpacing` and `wordSpacing` are `Fx`
 (1/256 px) user-space lengths. -/
 structure SpanProps where
   face : Face := .regular
+  /-- T97: `font-variant: small-caps`, shaped with the font's `smcp`. -/
+  smallCaps : Bool := false
   /-- The base font's family, as a `FontSet` index (T91). -/
   family : Nat := 0
   size : Fx := Fx.ofNat 12
@@ -863,6 +893,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     let rtlPara := p0.rtl && !vertical
     let override := p0.bidiOverride && !vertical
     let shaped := rtlPara || override || ShapeText.needsShaping cps (fis ++ bases)
+      ((List.range (b - a)).any (fun q => (cProps.getD (rend.getD (a + q) 0) default).smallCaps))
     -- T90: `font-size-adjust` rescales the used size by the x-height of
     -- the span's base font (T91's fallback leaves the base font's metrics
     -- in charge of the span, as usvg's resolved font is)
@@ -874,16 +905,19 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       | _, _ => pr
     let mut cl : Array Cluster := Array.emptyWithCapacity (b - a)
     if shaped then
-      -- usvg's spans: runs of characters sharing a base font and kerning
-      let mut spans : Array (Nat × Nat × Nat × Bool) := #[]
+      -- usvg's spans: runs of characters sharing a base font, kerning and
+      -- small caps
+      let mut spans : Array (Nat × Nat × Nat × Bool × Bool) := #[]
       for q in [0:b - a] do
         let bf := bases.getD q 0
         let kern := (cProps.getD (rend.getD (a + q) 0) default).kerning
+        let sc := (cProps.getD (rend.getD (a + q) 0) default).smallCaps
         match spans.back? with
-        | some (s0, _, bf0, k0) =>
-          if bf0 == bf && k0 == kern then spans := spans.setIfInBounds (spans.size - 1) (s0, q + 1, bf, kern)
-          else spans := spans.push (q, q + 1, bf, kern)
-        | none => spans := spans.push (q, q + 1, bf, kern)
+        | some (s0, _, bf0, k0, sc0) =>
+          if bf0 == bf && k0 == kern && sc0 == sc then
+            spans := spans.setIfInBounds (spans.size - 1) (s0, q + 1, bf, kern, sc)
+          else spans := spans.push (q, q + 1, bf, kern, sc)
+        | none => spans := spans.push (q, q + 1, bf, kern, sc)
       let (groups, cache) := ShapeText.processChunk ⟨fonts, loaded⟩ covs cps spans
         (if rtlPara then 1 else 0) override
       fonts := cache.fonts

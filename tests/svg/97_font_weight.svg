@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" font-family="Noto Sans" font-size="26">
+  <!-- T97: CSS font matching over Noto Sans Thin/Light/Regular/Bold/Black -->
+  <text x="20" y="34" font-weight="100">Thin 100 Ωμέγα</text>
+  <text x="20" y="68" font-weight="200">Nearest lighter 200</text>
+  <text x="20" y="102" font-weight="300">Light 300 Жж</text>
+  <text x="20" y="136" font-weight="500">Medium 500 → Regular</text>
+  <text x="20" y="170" font-weight="600">Semibold 600 → Bold</text>
+  <text x="20" y="204" font-weight="800">Heavy 800 → Black</text>
+  <g font-weight="300"><text x="20" y="238" font-weight="lighter">lighter of 300</text></g>
+  <!-- italic wins over weight: the only italic face -->
+  <text x="20" y="272" font-weight="900" font-style="italic">Italic 900</text>
+  <text x="220" y="272" font-weight="900" fill="#8d0801">Black<tspan font-weight="100">Thin</tspan></text>
+</svg>

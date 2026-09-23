@@ -112,3 +112,103 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+**Face selection** (`Text.pickFace`, `Text.matchWeight`): fontdb's
+`find_best_match` over the Noto Sans faces we embed. Style first: italic or
+oblique picks the Italic face whatever the weight, because fontdb keeps only
+the faces of the best-matching style before it looks at weight. This changes
+the old rule, where bold won over italic. Upright text matches weight among
+100/300/400/700/900: exact; 400–449 tries 500, 450–500 tries 400; at or below
+500 the nearest lighter weight, then the nearest heavier; above 500 the
+nearest heavier, then the nearest lighter. So 200 → Thin, 500 → Regular,
+600 → Bold, 800 → Black. `bolder`/`lighter` stepping (`parseFontWeight`) is
+unchanged.
+
+**Fonts.** Noto Sans Thin, Light and Black are appended to `FontSet` as
+indices 13–15, so every other font keeps its fallback position. They map
+what Regular maps, so fallback never reaches them. Deviation: they come from
+the resvg test suite's static `NotoSans-{Thin,Light,Black}.ttf`, not from
+instancing the Noto Sans variable font. They are Noto Sans 2.000 weight
+instances (same family, OFL, © 2015 Google), and they are the exact files
+resvg's reference images were rendered with, so they match better than a
+fontTools instance would. The six Noto Sans modules keep
+`kern,mark,mkmk,ccmp,locl,smcp,liga` and drop `post` glyph names (new
+generator flag `--no-glyph-names`). Embedded data grows 911,553 bytes
+(19,841,776 → 20,753,329), under the ~2 MB allowance.
+
+**`font-variant: small-caps`.** usvg passes the `smcp` feature to harfrust
+when the inherited `font-variant` value is exactly `small-caps`. It does not
+synthesise small caps. Here: `Style.fontSmallCaps` (`inherit` keeps the
+parent's value, any other value is false; the CSS `font` shorthand resets it
+and sets it from a `small-caps` token) → `SpanProps.smallCaps` → a
+`smallCaps` flag on `Shape.shapeRun`, which adds `smcp` as a global user
+feature. Shaping spans are split where small caps changes.
+
+**Stacked marks.** This reuses T93's shaper. `ShapeText.needsShaping` also
+sends a chunk through shaping when a Noto Sans face draws it and it has a
+combining mark (Mn/Mc/Me, pre-filtered by `cp ≥ 0x300`) or a small-caps span.
+Every other Latin chunk keeps the one-glyph-per-character path.
+
+**Shaper check** (`tests/check_shape.py`, now covering all six faces, smcp
+and zalgo): 3089/3089 and 3074/3074 identical to HarfBuzz (seeds 1 and 7).
+The random pool excludes U+035C–0362, U+0345 and U+034F. After other marks,
+HarfBuzz 14.5 attaches the marks that follow these to the base, while
+harfrust 0.12 and we stack them on the previous mark. For those strings,
+resvg's own render matches ours (within-8 ≥ 99.97% at 60–80 px on three
+test SVGs), so harfrust is what we match. `check_font --all
+--via-embedded` and `--metrics`: 0 mismatches on all six faces;
+`fuzz_font` (Thin, 300) and `fuzz_shape --font NotoSans` (700): 0
+violations.
+
+## Skipped
+
+- `font-variant` values other than `small-caps` (`all-small-caps`,
+  `font-variant-caps`, …): usvg reads only `small-caps` too.
+- Noto Sans modules keep only the listed GSUB/GPOS features. Shaped chunks
+  therefore do not apply `frac`/`numr`/`dnom`/`case`/`zero`; harfrust does
+  not turn those on by default either, except `frac` around U+2044.
+
+## Report
+
+Files: `LeanSvg/Text.lean` (Face, `matchWeight`, `pickFace`, `baseFont`,
+`SpanProps.smallCaps`, span keys and shaping trigger in the chunk loop;
+local edits only), `LeanSvg/Svg.lean` (`fontSmallCaps`, `font-variant`,
+the `font` shorthand, `spanPropsOf`), `LeanSvg/ShapeText.lean`,
+`LeanSvg/ShapeRun.lean`, `LeanSvg/FontSet.lean`, `LeanSvg/Fonts/NotoSans*.lean`
+(3 regenerated, 3 new), `ShapeDump.lean` (`1s` kern flag = smcp),
+`tests/gen_font_module.py` (`--no-glyph-names`), `tests/check_shape.py`,
+`tests/fuzz_shape.py`, `tests/svg/97_font_weight.svg`,
+`tests/svg/97_small_caps_marks.svg`, font README/NOTICE/README.
+
+Targets (within-8, fast 100 px / 200 px):
+
+| file | before | after |
+|---|---|---|
+| text/font-weight/lighter-with-clamping | 94.92 / 95.92 fail | 99.96 / 99.98 pass |
+| text/font-weight/lighter-without-parent | 94.92 / 95.92 fail | 99.96 / 99.98 pass |
+| text/font-weight/bolder-with-clamping | 94.76 / 96.19 fail | 99.98 / 99.99 pass |
+| text/font-variant/small-caps | 95.31 / 96.11 fail | 99.99 / 99.99 pass |
+| text/font-variant/inherit | 95.31 / 96.11 fail | 99.99 / 99.99 pass |
+| text/text/zalgo | 94.50 / 96.05 fail | 99.89 / 99.90 pass |
+
+Also improved (now shaped): `text/text/rotate-with-multiple-values-and-complex-text`
+97.15 → 99.71 (fail → pass), `complex-graphemes` 99.48 → 99.99,
+`complex-grapheme-split-by-tspan` 99.01 → 99.98, `text/font/simple-case`
+91.98 → 94.80 (still fails).
+
+Whole resvg suite: fast 100 px 1543 → 1550 pass, 200 px 1567 → 1574 pass;
+7 newly passing, 0 newly failing, no file's within-8 dropped by more than 0.1 points.
+`run_tests.py` 57/68 → 59/68 (both 97_* pass, 91_fonts 99.86 → 99.89, no
+drops); `run_adversarial.py` 144/144 clean; `run_tiles.py` 68/68
+byte-identical; `lake build` no warnings; `check-theorems.sh` theorems ok.
+
+Speed (whole process, median of 15, natural size, two rounds): plain Latin
+is 1–2 ms slower per image (`text/text/simple-case` 15.1/15.8 → 16.3/16.4 ms,
+`25_text` 40.8/40.4 → 42.4/43.8, `94_font_speed` 24.2/24.5 → 26.0/26.5; no
+text: `01_triangle` unchanged). The cause is the bigger GPOS (mark/mkmk) that
+first use decodes. Dropping glyph names brought Regular's front from 103 KB
+back to 69 KB (was 55 KB). Rowan accepted 1–2 ms per image.

@@ -29,6 +29,9 @@ Options:
                            (default 20000, i.e. 15 KB of font data per chunk)
     --layout-features F   passed to pyftsubset (default: kern; T93's shaped
                            fonts keep every GSUB/GPOS feature with '*')
+    --no-glyph-names      drop the `post` glyph names (format 3; the renderer
+                           reads only the `post` header), which shrinks the
+                           front that first use decodes (T97)
     --instance AXIS=V,..  instantiate a variable font at this location first
                            (fontTools.varLib.instancer; unlisted axes keep
                            their default)
@@ -78,7 +81,8 @@ def find_pyftsubset(explicit: str | None) -> str:
     )
 
 
-def subset_font(pyftsubset: str, src: Path, dst: Path, unicodes: str, features: str) -> list[str]:
+def subset_font(pyftsubset: str, src: Path, dst: Path, unicodes: str, features: str,
+                glyph_names: bool = True) -> list[str]:
     cmd = [
         pyftsubset,
         str(src),
@@ -86,7 +90,7 @@ def subset_font(pyftsubset: str, src: Path, dst: Path, unicodes: str, features: 
         f"--unicodes={unicodes}",
         "--no-hinting",
         f"--layout-features={features}",
-        "--glyph-names",
+        "--glyph-names" if glyph_names else "--no-glyph-names",
         "--notdef-outline",
     ]
     subprocess.run(cmd, check=True)
@@ -250,6 +254,7 @@ def main() -> None:
     ap.add_argument("--pyftsubset", default=None)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--keep-subset", type=Path, default=None)
+    ap.add_argument("--no-glyph-names", action="store_true")
     args = ap.parse_args()
 
     pyftsubset = find_pyftsubset(args.pyftsubset)
@@ -258,7 +263,8 @@ def main() -> None:
     if args.instance:
         src = Path(f"/tmp/{args.module}.instance.ttf")
         instantiate(args.ttf, args.instance, src)
-    cmd = subset_font(pyftsubset, src, subset_path, args.unicodes, args.layout_features)
+    cmd = subset_font(pyftsubset, src, subset_path, args.unicodes, args.layout_features,
+                      not args.no_glyph_names)
     data = subset_path.read_bytes()
 
     out = args.out or (REPO / "LeanSvg" / "Fonts" / f"{args.module}.lean")

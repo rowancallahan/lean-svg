@@ -10,7 +10,8 @@ Reads lines from stdin and prints one line of JSON (or text) per line:
 * `S <font module> <rtl 0|1> <kern 0|1> <hex cp> ...` shapes the codepoints
   as one run with an embedded font (`FontSet.byModule`) and prints
   `[[gid, cluster, xAdvance, xOffset, yOffset], ...]` in font units, visual
-  order — what `tests/check_shape.py` compares against HarfBuzz;
+  order — what `tests/check_shape.py` compares against HarfBuzz; a kern
+  flag with an `s` suffix (`1s`) also turns on `smcp` (T97's small caps);
 * `F <font file> <rtl 0|1> <kern 0|1> <hex cp> ...` does the same with a
   font read from a file (`tests/fuzz_shape.py`'s mutants);
 * `C <hex cp> ...` prints each codepoint's `Bidi.bidiClass`;
@@ -34,7 +35,8 @@ def jsonNats (a : Array Nat) : String :=
   "[" ++ ",".intercalate (a.toList.map toString) ++ "]"
 
 def shapeFont (f : Font) (r k : String) (cps : List String) : String :=
-  let gs := Shape.shapeRun f (Shape.Layout.ofBytes f.data) (cps.toArray.map parseHex) (r == "1") (k == "1")
+  let gs := Shape.shapeRun f (Shape.Layout.ofBytes f.data) (cps.toArray.map parseHex) (r == "1")
+    (k.startsWith "1") (k.endsWith "s")
   "[" ++ ",".intercalate (gs.toList.map fun g =>
     s!"[{g.gid},{g.cluster},{g.xAdv},{g.xOff},{g.yOff}]") ++ "]"
 

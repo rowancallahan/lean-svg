@@ -12,9 +12,9 @@ SC"/"Noto Sans KR" and do not use "Source".
 
 | Module | Font | Version | Scripts | cmap entries | Embedded bytes | Lean source | Licence |
 |---|---|---|---|---:|---:|---:|---|
-| NotoSans | Noto Sans Regular | 2.000 | Latin, Greek, Cyrillic | 2793 | 241,000 | 323,045 | LICENSE-OFL.txt |
-| NotoSansBold | Noto Sans Bold | 2.000 | Latin, Greek, Cyrillic | 2793 | 241,624 | 323,886 | LICENSE-OFL.txt |
-| NotoSansItalic | Noto Sans Italic | 2.000 | Latin, Greek, Cyrillic | 2793 | 254,260 | 340,742 | LICENSE-OFL.txt |
+| NotoSans | Noto Sans Regular | 2.000 | Latin, Greek, Cyrillic | 2793 | 272,129 | 364,692 | LICENSE-OFL.txt |
+| NotoSansBold | Noto Sans Bold | 2.000 | Latin, Greek, Cyrillic | 2793 | 272,793 | 365,574 | LICENSE-OFL.txt |
+| NotoSansItalic | Noto Sans Italic | 2.000 | Latin, Greek, Cyrillic | 2793 | 285,639 | 382,720 | LICENSE-OFL.txt |
 | Mplus1p | Mplus 1p Regular | 1.061 | Japanese (kana, JIS kanji), Latin | 8331 | 1,728,720 | 2,337,045 | LICENSE-OFL-Mplus1p.txt |
 | NotoSansSC | Noto Sans SC | 2.004, wght=400 | Chinese (Simplified, much Traditional), kana | 30890 | 10,370,644 | 13,836,489 | LICENSE-OFL-NotoSansCJK.txt |
 | NotoSansKR | Noto Sans KR | 2.004, wght=400 | Korean (Hangul, Hanja) | 23174 | 5,743,856 | 7,699,771 | LICENSE-OFL-NotoSansCJK.txt |
@@ -25,13 +25,18 @@ SC"/"Noto Sans KR" and do not use "Source".
 | Amiri | Amiri Regular | 000.109 | Arabic (and Latin) | 1674 | 535,420 | 716,039 | LICENSE-OFL-Amiri.txt |
 | NotoSansHebrew | Noto Sans Hebrew | 3.001, wght=400 wdth=100 | Hebrew | 464 | 46,560 | 63,803 | LICENSE-OFL-NotoScripts.txt |
 | NotoSansDevanagari | Noto Sans Devanagari | 2.003 | Devanagari | 555 | 190,080 | 255,221 | LICENSE-OFL-NotoScripts.txt |
-| **Total** | | | | | **19,841,776** | **26,556,121** | |
+| NotoSansThin | Noto Sans Thin | 2.000 | Latin, Greek, Cyrillic | 2793 | 273,578 | 366,626 | LICENSE-OFL.txt |
+| NotoSansLight | Noto Sans Light | 2.000 | Latin, Greek, Cyrillic | 2793 | 269,894 | 361,714 | LICENSE-OFL.txt |
+| NotoSansBlack | Noto Sans Black | 2.000 | Latin, Greek, Cyrillic | 2793 | 274,404 | 367,730 | LICENSE-OFL.txt |
+| **Total** | | | | | **20,753,329** | **27,777,504** | |
 
 Sources (all `glyf` TrueType outlines):
 
 - Noto Sans Regular/Bold/Italic: https://github.com/notofonts/latin-greek-cyrillic,
   the `NotoSans-{Regular,Bold,Italic}.ttf` files of the resvg test suite
   (`tests/corpora/resvg-test-suite/fonts`), the same files T25 subsetted.
+  Thin/Light/Black (T97): the suite's `NotoSans-{Thin,Light,Black}.ttf`, the
+  static weight instances resvg's reference images were drawn with.
 - Mplus 1p: https://github.com/google/fonts/tree/main/ofl/mplus1p, the
   resvg test suite's `MPLUS1p-Regular.ttf`.
 - Noto Sans SC/KR/Thai/Armenian/Georgian/Ethiopic:
@@ -78,6 +83,18 @@ instancer left its name table saying "Thin", which nothing here reads).
 python3 tests/gen_font_module.py Amiri-Regular.ttf Amiri --unicodes='*' --layout-features='*'
 python3 tests/gen_font_module.py NotoSansDevanagari-Regular.ttf NotoSansDevanagari --unicodes='*' --layout-features='*'
 python3 tests/gen_font_module.py 'NotoSansHebrew[wdth,wght].ttf' NotoSansHebrew --unicodes='*' --layout-features='*' --instance wght=400,wdth=100
+```
+
+## Noto Sans weights, small caps and marks (T97)
+
+The six Noto Sans faces keep `kern`, `mark`, `mkmk`, `ccmp`, `locl`, `smcp`
+and `liga` (Italic's only), for GPOS mark stacking and `font-variant:
+small-caps`, and drop the `post` glyph names (`--no-glyph-names`; only the
+`post` header is read), which keeps the part decoded on first use at 69 KB:
+
+```
+python3 tests/gen_font_module.py NotoSans-Thin.ttf NotoSansThin --unicodes='*' \
+  --layout-features='kern,mark,mkmk,ccmp,locl,smcp,liga' --no-glyph-names
 ```
 
 ## Not embedded

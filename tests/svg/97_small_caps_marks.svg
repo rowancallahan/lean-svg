@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" font-family="Noto Sans" font-size="30">
+  <!-- T97: font-variant: small-caps (the font's smcp) and GPOS mark stacking -->
+  <text x="20" y="44" font-variant="small-caps">Small Caps 123</text>
+  <g font-variant="small-caps">
+    <text x="20" y="88" font-weight="bold">Bold <tspan font-variant="normal">Mixed</tspan> Text</text>
+  </g>
+  <text x="20" y="132" style="font: small-caps italic 28px Noto Sans">Shorthand</text>
+  <text x="20" y="190" fill="#1d3557">z͈̤̭͖̉͑́a̳ͫ́̇͑̽͒ͯlͨ͗̍̀̍̔̀ģ͔̫̫̄o̗̠͔̦̳͆̏̓͢ ậ ǘ</text>
+  <text x="20" y="240" font-weight="900" fill="#e63946">Ǻ̈́ q̣̌ Ё̄ ṩ</text>
+</svg>
