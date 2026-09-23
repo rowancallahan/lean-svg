@@ -1,6 +1,7 @@
 import LeanSvg.Mask
 import LeanSvg.Clip
 import LeanSvg.FilterApply
+import LeanSvg.Marker
 import LeanSvg.Png
 
 /-!
@@ -884,6 +885,12 @@ def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
   if input.size > maxInput then throw s!"input {input.size} bytes exceeds the {maxInput} byte limit"
   let events ← Xml.parse input
   let doc ← Svg.interpret events
+  -- T52: marker instancing happens once here, after `interpret` has resolved
+  -- every element's style and every `<marker>`'s own content, and before
+  -- anything below (size checks, band splitting, `drawShape`) sees `doc` --
+  -- so a marker instance is culled, tiled and banded exactly like any other
+  -- shape, with no changes to any of that machinery.
+  let doc := Marker.expand doc
   let (w, h, _, _) ← Render.canvasSetup doc.root opts
   if w == 0 || h == 0 then throw "empty canvas"
   if w > maxDim || h > maxDim then throw s!"canvas {w}x{h} exceeds the {maxDim} px limit"
