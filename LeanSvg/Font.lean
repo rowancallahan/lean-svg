@@ -42,9 +42,31 @@ functions `Font.parse`, `Font.glyphId`, … without a spurious extra
 structure Font where
   unitsPerEm : Nat
   numGlyphs : Nat
-  ascender : Int
-  descender : Int
+  /-- Resolved ascender: `OS/2.sTypoAscender` when `OS/2.fsSelection`'s
+  `USE_TYPO_METRICS` bit is set, else `hhea.ascender`, else (only when that is
+  `0`) the `OS/2` typo or Windows ascent as a last resort — `skrifa`'s
+  `Metrics::new` algorithm (itself FreeType's), which is what usvg's
+  `ResolvedFont` carries. Positive: font units above the baseline. -/
+  ascent : Int
+  /-- Resolved descender, same source as `ascent`. Negative: font units below
+  the baseline. -/
+  descent : Int
+  /-- Resolved line gap, same source as `ascent`/`descent`. -/
   lineGap : Int
+  /-- `OS/2.sxHeight` if the table has it (version ≥ 2) and it is positive,
+  else `round((ascent - descent) * 0.45)` (Firefox's fallback, which usvg
+  copies). -/
+  xHeight : Int
+  /-- `OS/2.sCapHeight` if the table has it (version ≥ 2), else `0` (no
+  formula fallback exists in usvg either; unused by the baseline formulas
+  this task implements, kept for `tests/check_font.py` and future use). -/
+  capHeight : Int
+  /-- `OS/2.ySubscriptYOffset`, or `unitsPerEm * 5` if there is no `OS/2`
+  table at all (usvg's generic Inkscape/librsvg-derived fallback). -/
+  subscriptOffset : Int
+  /-- `OS/2.ySuperscriptYOffset`, or `round(unitsPerEm * 2.5)` with no `OS/2`
+  table. -/
+  superscriptOffset : Int
   /-- 0 = `loca` entries are `u16 * 2`, 1 = `u32` directly. -/
   indexToLocFormat : Nat
   locaOff : Nat
@@ -89,6 +111,22 @@ ties away from zero via `Int.ediv`'s floor after adding half the denominator
 — the same idiom as `Fx.round`. -/
 @[inline] def roundDiv14 (n : Int) : Int := Int.ediv (n + 8192) 16384
 
+/-- A font-units value (an ascender, an `OS/2` subscript offset, …) scaled by
+`sizeFx / unitsPerEm` into 16.16 fixed point (units of 1/65536 px) — the
+precision `Text.layout` carries pen positions in, so a baseline offset can be
+added to them before the one rounding to `Fx` that happens when a glyph's
+control points are finally written out. `sizeFx` is the span's `font-size`
+(`Fx`, 1/256 px). Rounds to nearest, ties away from zero, the same idiom as
+`roundDiv14`, extended to a possibly-negative numerator (an ascender is
+positive, a descender and many baseline offsets are not). -/
+def unitsToFx16 (v sizeFx : Int) (upem : Nat) : Int :=
+  if upem == 0 then 0
+  else
+    let num := v * sizeFx * 256
+    let d : Int := upem
+    if num ≥ 0 then Int.ediv (num + d / 2) d
+    else -(Int.ediv (-num + d / 2) d)
+
 /-! ## Table tags, as the big-endian `u32` of their four ASCII bytes -/
 
 def tagHead : Nat := 0x68656164
@@ -100,6 +138,7 @@ def tagHhea : Nat := 0x68686561
 def tagHmtx : Nat := 0x686D7478
 def tagKern : Nat := 0x6B65726E
 def tagGPOS : Nat := 0x47504F53
+def tagOS2 : Nat := 0x4F532F32
 
 /-! ## Table directory -/
 
@@ -113,6 +152,7 @@ structure Tables where
   hmtx : Option (Nat × Nat) := none
   kernT : Option (Nat × Nat) := none
   gpos : Option (Nat × Nat) := none
+  os2 : Option (Nat × Nat) := none
 
 /-- Scan the `numTables` 16-byte directory records starting at byte 12,
 recording `(offset, length)` for the tables this parser needs. A record past
@@ -138,6 +178,7 @@ def scanTables (bs : ByteArray) (numTables : Nat) : Tables := Id.run do
         else if tag == tagHmtx then t := { t with hmtx := some (off, clen) }
         else if tag == tagKern then t := { t with kernT := some (off, clen) }
         else if tag == tagGPOS then t := { t with gpos := some (off, clen) }
+        else if tag == tagOS2 then t := { t with os2 := some (off, clen) }
   return t
 
 /-! ## `cmap` subtable selection -/
@@ -733,12 +774,58 @@ def parse (bs : ByteArray) : Option Font :=
             match t.gpos with
             | some (gpOff, gpLen) => findKernSubtables bs gpOff gpLen
             | none => #[]
+          -- `OS/2`-derived metrics, `skrifa::Metrics::new`'s algorithm
+          -- (see the `ascent` field docs): `hhea`'s own ascender/descender/
+          -- lineGap first, unless `OS/2.fsSelection`'s `USE_TYPO_METRICS`
+          -- bit says to prefer the typo metrics, or `hhea`'s pair is `(0,
+          -- 0)` (a broken/degenerate font), in which case a non-zero typo
+          -- pair, else the Windows ascent/descent, is the fallback.
+          let hheaAsc := i16 bs (heOff + 4)
+          let hheaDesc := i16 bs (heOff + 6)
+          let hheaGap := i16 bs (heOff + 8)
+          let (os2Off, os2Len) := match t.os2 with | some p => p | none => (0, 0)
+          let os2Present := t.os2.isSome
+          let os2Version := if os2Len ≥ 2 then u16 bs os2Off else 0
+          let fsSelection := if os2Len ≥ 64 then u16 bs (os2Off + 62) else 0
+          let useTypo := fsSelection &&& 0x0080 != 0
+          let haveTypo := os2Present && os2Len ≥ 74
+          let typoAsc := if haveTypo then i16 bs (os2Off + 68) else 0
+          let typoDesc := if haveTypo then i16 bs (os2Off + 70) else 0
+          let typoGap := if haveTypo then i16 bs (os2Off + 72) else 0
+          let haveWin := os2Present && os2Len ≥ 78
+          let winAsc : Int := if haveWin then (u16 bs (os2Off + 74) : Int) else 0
+          let winDesc : Int := if haveWin then (u16 bs (os2Off + 76) : Int) else 0
+          let (rAscent, rDescent, rLineGap) :=
+            if haveTypo && useTypo then (typoAsc, typoDesc, typoGap)
+            else if hheaAsc == 0 && hheaDesc == 0 then
+              if haveTypo && (typoAsc != 0 || typoDesc != 0) then (typoAsc, typoDesc, typoGap)
+              else if haveWin then (winAsc, -winDesc, hheaGap)
+              else (hheaAsc, hheaDesc, hheaGap)
+            else (hheaAsc, hheaDesc, hheaGap)
+          -- `OS/2.sxHeight`/`sCapHeight`: only in version ≥ 2.
+          let haveV2 := os2Present && os2Version ≥ 2 && os2Len ≥ 90
+          let sxHeight := if haveV2 then i16 bs (os2Off + 86) else 0
+          let sCapHeight := if haveV2 then i16 bs (os2Off + 88) else 0
+          let xHeightFallback := Int.ediv ((rAscent - rDescent) * 9 + 10) 20
+          let rXHeight := if haveV2 && sxHeight > 0 then sxHeight else xHeightFallback
+          let rCapHeight := if haveV2 then sCapHeight else 0
+          -- `OS/2.ySubscriptYOffset`/`ySuperscriptYOffset`: present in every
+          -- `OS/2` version; the generic `unitsPerEm * 5` / `* 2.5` fallback
+          -- is only for a font with no `OS/2` table at all.
+          let haveSubSup := os2Present && os2Len ≥ 26
+          let rSubOff := if haveSubSup then i16 bs (os2Off + 16) else (unitsPerEm : Int) * 5
+          let rSupOff :=
+            if haveSubSup then i16 bs (os2Off + 24) else Int.ediv ((unitsPerEm : Int) * 5 + 1) 2
           some {
             unitsPerEm := unitsPerEm
             numGlyphs := numGlyphs
-            ascender := i16 bs (heOff + 4)
-            descender := i16 bs (heOff + 6)
-            lineGap := i16 bs (heOff + 8)
+            ascent := rAscent
+            descent := rDescent
+            lineGap := rLineGap
+            xHeight := rXHeight
+            capHeight := rCapHeight
+            subscriptOffset := rSubOff
+            superscriptOffset := rSupOff
             indexToLocFormat := indexToLocFormat
             locaOff := lOff
             glyfOff := gOff

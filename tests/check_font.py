@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Oracle check for LeanSvg/Font.lean (T25).
+"""Oracle check for LeanSvg/Font.lean (T25, T54).
 
 Compares `fontdump`'s output against fontTools, character by character, for:
 glyph id (`getBestCmap`), advance (`hmtx`), raw quadratic contours
@@ -12,6 +12,8 @@ Exact integer equality throughout; any difference is reported as a mismatch.
 
     python3 tests/check_font.py <font.ttf> [text] [--all]
     python3 tests/check_font.py <subset.ttf> [text] --via-embedded NAME
+    python3 tests/check_font.py <font.ttf> --metrics
+    python3 tests/check_font.py <subset.ttf> --metrics --via-embedded NAME
 
 The second form runs `fontdump --embedded NAME <text>` (the constant baked
 into the binary) but still opens <subset.ttf> with fontTools as the oracle,
@@ -25,10 +27,19 @@ the font's own cmap, sorted -- i.e. every glyph in the subset reachable from
 a Unicode codepoint (not `.notdef`, which nothing maps to and which
 `fontdump`'s character-driven interface has no way to name directly; noted
 as a small, deliberate gap in the T25 Report).
+
+--metrics (T54) instead compares `fontdump --metrics`'s font-level metrics
+(`ascent`/`descent`/`xHeight`/`capHeight`/`subscriptOffset`/
+`superscriptOffset`) against `metrics_oracle`, a from-scratch reimplementation
+of skrifa's `Metrics::new` line-metrics fallback and usvg's own x-height/
+sub/superscript-offset fallbacks directly against fontTools' decompiled
+`hhea`/`OS/2` tables -- independently of, not by re-running,
+`LeanSvg/Font.lean`'s own logic, same spirit as `kern_oracle`.
 """
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -164,6 +175,87 @@ def kern_oracle(font):
 
 
 # --------------------------------------------------------------------------
+# oracle: font-level metrics (T54) -- reimplemented directly against
+# fontTools' decompiled 'hhea'/'OS/2' tables, independently of LeanSvg/
+# Font.lean's own logic, same spirit as gpos_kern_lookup/kern_oracle above.
+# --------------------------------------------------------------------------
+
+
+def round_half_away(x):
+    """Python's builtin round() is banker's rounding; Rust's f32::round()
+    (what skrifa/usvg use throughout) rounds half away from zero."""
+    return math.floor(x + 0.5) if x >= 0 else math.ceil(x - 0.5)
+
+
+def metrics_oracle(font):
+    upem = font["head"].unitsPerEm
+    hhea = font["hhea"]
+    os2 = font["OS/2"] if "OS/2" in font else None
+
+    hhea_asc, hhea_desc, hhea_gap = hhea.ascent, hhea.descent, hhea.lineGap
+
+    typo_asc = typo_desc = typo_gap = 0
+    win_asc = win_desc = 0
+    use_typo = False
+    if os2 is not None:
+        use_typo = bool(os2.fsSelection & 0x0080)
+        typo_asc, typo_desc, typo_gap = os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap
+        win_asc, win_desc = os2.usWinAscent, os2.usWinDescent
+
+    # skrifa's Metrics::new: OS/2 typo metrics if USE_TYPO_METRICS is set;
+    # else hhea, unless hhea's ascent/descent are both zero, in which case a
+    # non-zero typo pair, else the Windows ascent/descent, is the fallback.
+    if os2 is not None and use_typo:
+        ascent, descent = typo_asc, typo_desc
+    elif hhea_asc == 0 and hhea_desc == 0:
+        if os2 is not None and (typo_asc != 0 or typo_desc != 0):
+            ascent, descent = typo_asc, typo_desc
+        elif os2 is not None:
+            ascent, descent = win_asc, -win_desc
+        else:
+            ascent, descent = hhea_asc, hhea_desc
+    else:
+        ascent, descent = hhea_asc, hhea_desc
+
+    # x-height: OS/2.sxHeight (version >= 2) if positive, else 45% of
+    # (ascent - descent) -- usvg's own Firefox-derived fallback.
+    sx_height = getattr(os2, "sxHeight", 0) if os2 is not None else 0
+    x_height = sx_height if sx_height > 0 else round_half_away((ascent - descent) * 0.45)
+
+    cap_height = getattr(os2, "sCapHeight", 0) if os2 is not None else 0
+
+    # sub/superscript offset: the raw OS/2 fields if there is an OS/2 table
+    # at all (present in every version), else usvg's generic
+    # Inkscape/librsvg-derived upem*5 / upem*2.5 fallback.
+    if os2 is not None:
+        sub_off, sup_off = os2.ySubscriptYOffset, os2.ySuperscriptYOffset
+    else:
+        sub_off = round_half_away(upem / 0.2)
+        sup_off = round_half_away(upem / 0.4)
+
+    return {
+        "unitsPerEm": upem,
+        "ascent": ascent,
+        "descent": descent,
+        "xHeight": x_height,
+        "capHeight": cap_height,
+        "subscriptOffset": sub_off,
+        "superscriptOffset": sup_off,
+    }
+
+
+def compare_metrics(font, dump):
+    want = metrics_oracle(font)
+    mismatches = 0
+    for k, w in want.items():
+        got = dump.get(k)
+        if got != w:
+            mismatches += 1
+            print(f"  MISMATCH {k}: got {got} want {w}")
+    return mismatches
+
+
+# --------------------------------------------------------------------------
 # comparison
 # --------------------------------------------------------------------------
 
@@ -234,9 +326,21 @@ def main():
     ap.add_argument("text", nargs="?", default=None)
     ap.add_argument("--all", action="store_true", help="use every codepoint in the font's own cmap")
     ap.add_argument("--via-embedded", default=None, metavar="NAME")
+    ap.add_argument("--metrics", action="store_true", help="compare font-level metrics (T54) instead")
     args = ap.parse_args()
 
     font = TTFont(str(args.ttf))
+
+    if args.metrics:
+        if args.via_embedded:
+            dump = run_fontdump(["--metrics", "--embedded", args.via_embedded])
+        else:
+            dump = run_fontdump(["--metrics", str(args.ttf)])
+        mismatches = compare_metrics(font, dump)
+        label = f"{args.ttf.name} (via --embedded {args.via_embedded})" if args.via_embedded else args.ttf.name
+        print(f"{label}: metrics, {mismatches} mismatches")
+        sys.exit(1 if mismatches else 0)
+
     if args.all:
         cmap = font.getBestCmap()
         # Exclude C0/C1 control codepoints (notably U+0000, which cannot survive
