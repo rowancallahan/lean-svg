@@ -9,6 +9,7 @@ bash "$REPO/scripts/install-lean.sh"
 command -v resvg >/dev/null || cargo install resvg --version 0.48.1 --locked
 command -v usvg >/dev/null || cargo install usvg --version 0.48.1 --locked
 python3 -c "import numpy, PIL" 2>/dev/null || pip install -q numpy pillow
+python3 -c "import playwright" 2>/dev/null || pip install -q playwright
 
 mkdir -p "$REPO/tests/corpora"
 if [ ! -d "$REPO/tests/corpora/resvg-test-suite/tests" ]; then
