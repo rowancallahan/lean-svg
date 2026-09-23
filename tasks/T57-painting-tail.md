@@ -205,14 +205,14 @@ identical commits rather than a snapshot from partway through the task.
 **`bash scripts/check-theorems.sh`:** `theorems ok` before and after (this
 task never touches `Effect.lean` or the size-bound proof's assumptions).
 **`python3 tests/run_adversarial.py`:** 61/61 clean before, 62/62 after (the
-new `tests/svg/28_painting_tail.svg` adds one more truncation case, all
+new `tests/svg/35_painting_tail.svg` adds one more truncation case, all
 still clean).
 **`python3 tests/run_tiles.py`:** 27/27 byte-identical before, 28/28 after.
 **`python3 tests/run_tests.py`:** 23/27 before and after on the existing
 files, identical scores to three decimals on every one (the 4 pre-existing
 failures — `12_badge`, `14_flower_transforms`, `15_spiral_stroke`,
 `16_stress_2000` — are untouched by this task); the new
-`28_painting_tail.svg` passes at 99.076% within-8.
+`35_painting_tail.svg` passes at 99.076% within-8.
 
 **Full corpus** (`tests/run_corpora.py --fast --corpus resvg --route
 direct`, 1679 files, `--width 100`), true before → after:
@@ -249,7 +249,7 @@ crossing the 99% line, per the table above and the "left alone" notes):
 | `stroke-linejoin` | 0/5 | 0/5 (`miter-clip` now geometrically correct, still short of 99% at this width) |
 | `paint-order` | 2/14 | 2/14 (unchanged — all remaining failures need markers) |
 
-New test file: `tests/svg/28_painting_tail.svg` (600×450) exercises `em`/`%`
+New test file: `tests/svg/35_painting_tail.svg` (600×450) exercises `em`/`%`
 `stroke-dasharray`/`stroke-dashoffset`, `shape-rendering` inheritance and
 override (fill and a thin stroked line) with a `<text>` proving it is
 unaffected, and `miter-clip` both within and past the miter limit. Passes at
