@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T43 checks 2-4: the structural invariants review currently keeps by hand.
+"""T43 checks 2-5: the structural invariants review currently keeps by hand.
 
 2. `Op` (LeanSvg/Effect.lean) has exactly the constructors `readInput`,
    `outputExists`, `warningsExists`, `writeOutput` and `writeWarnings` (T98
@@ -12,6 +12,12 @@
    `partial`, `unsafe`, `@[extern]`, `panic!`, `Float`, or `!`-indexing
    (`]!`, `get!`, `set!`); comments and string literals are stripped first
    so prose ("never needs `partial`") and string contents can't trigger it.
+5. No stdout/stderr on the `lean-svg` main path (T98b): `Main.lean`,
+   `LeanSvg.lean` and `LeanSvg/*.lean` (everything the `lean-svg` binary
+   links) must not mention a print, a standard stream, a debug trace, a
+   panic or a subprocess; the only outputs are the effect layer's files and
+   the exit code.  The dev tools (`FontDump.lean`, `ShapeDump.lean`, ...)
+   are separate executables and exempt.
 """
 import re
 import subprocess
@@ -33,7 +39,7 @@ def strip_comments_and_strings(text: str) -> str:
         if depth == 0 and text.startswith("--", i):
             j = text.find("\n", i)
             j = n if j == -1 else j
-            out.append(text[i:j])
+            out.append(" " * (j - i))
             i = j
             continue
         if text.startswith("/-", i):
@@ -139,9 +145,39 @@ def check_mechanical_invariants() -> None:
     print("-- mechanical: no partial/unsafe/@[extern]/panic!/Float/!-indexing under LeanSvg/")
 
 
+# `IO.println`, bare `println` under `open IO`, `println!`, `getStdout`, the
+# streams themselves, `dbg_trace`/`dbgTrace*`, `panic*` and subprocesses.
+OUTPUT_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:e?println!?|e?print!?|putStr\w*|getStdout|getStderr|setStdout|"
+    r"setStderr|stdout|stderr|dbg_trace\w*|dbgTrace\w*|panic\w*|Process\w*)(?![A-Za-z0-9_])"
+)
+
+
+def check_no_output_on_main_path() -> None:
+    root_exe = re.search(
+        r'\[\[lean_exe\]\]\s*name = "lean-svg"\s*root = "(\w+)"', (REPO / "lakefile.toml").read_text()
+    )
+    assert root_exe and root_exe.group(1) == "Main", "FAIL [no-output]: lean-svg root is not Main"
+    main = REPO / "Main.lean"
+    imports = re.findall(r"^import\s+(\S+)", main.read_text(), re.M)
+    assert imports == ["LeanSvg"], f"FAIL [no-output]: Main.lean imports {imports}, not just LeanSvg"
+    offenders = []
+    for path in [main, REPO / "LeanSvg.lean"] + lean_files():
+        stripped = strip_comments_and_strings(path.read_text())
+        for lineno, line in enumerate(stripped.splitlines(), start=1):
+            if OUTPUT_RE.search(line):
+                offenders.append(f"{path.relative_to(REPO)}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "FAIL [no-output]: the lean-svg main path can write to stdout/stderr:\n"
+        + "\n".join(offenders)
+    )
+    print("-- no-output: no print/stream/trace/panic/process on the lean-svg main path")
+
+
 def main() -> None:
     check_five_effects()
     check_no_io_outside_effect()
+    check_no_output_on_main_path()
     check_mechanical_invariants()
     print("invariants ok")
 

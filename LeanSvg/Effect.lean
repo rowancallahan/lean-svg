@@ -18,22 +18,40 @@ checked by the Lean kernel:
 * `runFS_input_only`    : the program's result depends only on the input
                           path's contents and on whether the output and
                           warnings paths are present.
-* `renderProgram_spec`  : the renderer program either fails (and the file
+There are two renderer programs (T98b).  `renderProgram` is the default,
+strict one: one file in, one file out, no clobber; its warnings are dropped
+(only whether there were any is returned, for the exit code).
+`renderProgramWarn` is `--warnings`: at most two files out, both no-clobber.
+
+* `renderProgram_spec`  : the strict program either fails (and the file
                           system is untouched) or writes exactly the PNG bytes
                           produced by the pure `render` function to the output
-                          path and, when that same call produced a non-empty
-                          warnings text, exactly that text to the warnings
-                          path — and it fails without touching anything if
-                          either path already exists.
-* `renderProgram_no_clobber`, `renderProgram_no_clobber_warnings` : if the
+                          path — and it fails without touching anything if the
+                          output path already exists.
+* `renderProgram_no_clobber` : if the output path already holds something,
+                          running the strict program changes nothing at all.
+* `renderProgram_ok_frame`, `renderProgram_never_overwrites` : the strict
+                          program changes no path but the output path, and
+                          only when it was absent.
+* `renderProgramWarn_spec`  : the `--warnings` program either fails (and the
+                          file system is untouched) or writes exactly the PNG
+                          bytes produced by the pure `render` function to the
+                          output path and, when that same call produced a
+                          non-empty warnings text, exactly that text to the
+                          warnings path — and it fails without touching
+                          anything if either path already exists.
+* `renderProgramWarn_no_clobber`, `renderProgramWarn_no_clobber_warnings` : if the
                           output or the warnings path already holds something,
                           running the program changes nothing at all.
-* `renderProgram_never_overwrites` : every path the program changes was
-                          absent before it ran.
+* `renderProgramWarn_ok_frame`, `renderProgramWarn_never_overwrites` : it
+                          changes no path but those two, and only paths that
+                          were absent before it ran.
 
 The one trusted piece is `Prog.execIO`, the interpreter that maps the five
 operations onto real `IO` calls.  It is a handful of lines long.  Everything
-else in the renderer is a pure function of a `ByteArray`.
+else in the renderer is a pure function of a `ByteArray`.  There is no
+operation that writes to stdout or stderr: the program's only outputs are the
+files above and its result value (T98b).
 -/
 
 namespace LeanSvg
@@ -182,13 +200,111 @@ theorem runFS_input_only (inp out : String) (p : Prog α) (fs fs' : FS)
       · simp only [FS.write]; split <;> simp [*]
       · simp [FS.write]
 
-/-! ## The renderer program -/
+/-! ## The strict renderer program (default, T98b) -/
 
-/-- The whole top-level program: read the input, refuse if the output path or
+/-- The default top-level program: read the input, refuse if the output path
+already exists, otherwise run a pure `render` and either write its PNG or
+report its error.  The warnings text is never written; the result says only
+whether it was non-empty.  Nothing else. -/
+def renderProgram {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) : Prog (Except ε Bool) :=
+  .step .readInput fun inp =>
+    .step .outputExists fun outExists =>
+      if outExists then
+        .pure (.error clobberError)
+      else
+        match render inp with
+        | .ok (png, warn) => .step (.writeOutput png) fun _ => .pure (.ok (warn.size != 0))
+        | .error e => .pure (.error e)
+
+/-- **Specification of the strict renderer program.**  On the model file
+system: if the output path already exists, nothing happens and the program
+reports `clobberError`. Otherwise it either fails and changes nothing, or
+succeeds and writes exactly the PNG of `render input` to `out`. -/
+theorem renderProgram_spec {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS) :
+    runFS inp out (renderProgram clobberError render) fs =
+      if (fs out).isSome then
+        (.error clobberError, fs)
+      else
+        match render ((fs inp).getD ByteArray.empty) with
+        | .ok (png, warn) => (.ok (warn.size != 0), fs.write out png)
+        | .error e => (.error e, fs) := by
+  unfold renderProgram
+  simp only [runFS]
+  split
+  · rfl
+  · cases h : render ((fs inp).getD ByteArray.empty) with
+    | ok r => simp only [runFS]
+    | error e => simp only [runFS]
+
+/-- **No-clobber.** If the output path already holds something when the
+program starts, running it changes the file system not at all — not merely
+the frame theorem's "every path but `out`", but literally nothing, because
+the program refuses before doing anything else. -/
+theorem renderProgram_no_clobber {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
+    (b : ByteArray) (h : fs out = some b) :
+    (runFS inp out (renderProgram clobberError render) fs).2 = fs := by
+  rw [renderProgram_spec]
+  simp [h]
+
+/-- On error — including the no-clobber refusal — the file system is
+untouched: no output file is created or modified. -/
+theorem renderProgram_error_no_write {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS) (e : ε)
+    (hout : fs out = none) (h : render ((fs inp).getD ByteArray.empty) = .error e) :
+    (runFS inp out (renderProgram clobberError render) fs).2 = fs := by
+  rw [renderProgram_spec]
+  simp [hout, h]
+
+/-- On success, the output path holds exactly the rendered bytes. The output
+path cannot already have existed: no-clobber means a success only happens
+when `render` is actually invoked, which only happens when `fs out = none`. -/
+theorem renderProgram_ok_output {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
+    (png warn : ByteArray)
+    (hout : fs out = none) (h : render ((fs inp).getD ByteArray.empty) = .ok (png, warn)) :
+    (runFS inp out (renderProgram clobberError render) fs).2 out = some png := by
+  rw [renderProgram_spec]
+  simp [hout, h, FS.write]
+
+/-- On success (and always), every path other than the output path is
+untouched — in particular the warnings path is never written. -/
+theorem renderProgram_ok_frame {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
+    (q : String) (hq : q ≠ out) :
+    (runFS inp out (renderProgram clobberError render) fs).2 q = fs q := by
+  rw [renderProgram_spec]
+  split
+  · rfl
+  · split <;> simp [FS.write, hq]
+
+/-- **Never overwrites.** Every path whose contents the strict program changes
+was absent when it started. -/
+theorem renderProgram_never_overwrites {ε : Type} (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
+    (q : String) (hq : (runFS inp out (renderProgram clobberError render) fs).2 q ≠ fs q) :
+    fs q = none := by
+  rw [renderProgram_spec] at hq
+  split at hq
+  · exact absurd rfl hq
+  · rename_i hfree
+    simp only [Bool.not_eq_true, Option.isSome_eq_false_iff, Option.isNone_iff_eq_none] at hfree
+    split at hq
+    · simp only [FS.write] at hq
+      split at hq
+      · subst q; exact hfree
+      · exact absurd rfl hq
+    · exact absurd rfl hq
+
+/-! ## The `--warnings` renderer program (T98) -/
+
+/-- The `--warnings` top-level program: read the input, refuse if the output path or
 the warnings path already exists, otherwise run a pure `render` and either
 write its PNG (and its warnings text, when non-empty) or report its error.
 Returns whether a warnings file was written.  Nothing else. -/
-def renderProgram {ε : Type} (clobberError : ε)
+def renderProgramWarn {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) : Prog (Except ε Bool) :=
   .step .readInput fun inp =>
     .step .outputExists fun outExists =>
@@ -208,9 +324,9 @@ the output path or the warnings path already exists, nothing happens and the
 program reports `clobberError`. Otherwise it either fails and changes nothing,
 or succeeds and writes exactly the PNG of `render input` to `out` and, when
 its warnings text is non-empty, exactly that text to `warnPath out`. -/
-theorem renderProgram_spec {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_spec {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS) :
-    runFS inp out (renderProgram clobberError render) fs =
+    runFS inp out (renderProgramWarn clobberError render) fs =
       if (fs out).isSome || (fs (warnPath out)).isSome then
         (.error clobberError, fs)
       else
@@ -219,7 +335,7 @@ theorem renderProgram_spec {ε : Type} (clobberError : ε)
           if warn.size = 0 then (.ok false, fs.write out png)
           else (.ok true, (fs.write out png).write (warnPath out) warn)
         | .error e => (.error e, fs) := by
-  unfold renderProgram
+  unfold renderProgramWarn
   simp only [runFS]
   split
   · rfl
@@ -234,30 +350,30 @@ theorem renderProgram_spec {ε : Type} (clobberError : ε)
 program starts, running it changes the file system not at all — not merely
 the frame theorem's "every path but `out`", but literally nothing, because
 the program refuses before doing anything else. -/
-theorem renderProgram_no_clobber {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_no_clobber {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
     (b : ByteArray) (h : fs out = some b) :
-    (runFS inp out (renderProgram clobberError render) fs).2 = fs := by
-  rw [renderProgram_spec]
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 = fs := by
+  rw [renderProgramWarn_spec]
   simp [h]
 
 /-- **No-clobber for the warnings file.** Likewise if the warnings path
 already holds something — even when this render would produce no warnings, so
 a stale warnings file is never left next to a fresh PNG. -/
-theorem renderProgram_no_clobber_warnings {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_no_clobber_warnings {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
     (b : ByteArray) (h : fs (warnPath out) = some b) :
-    (runFS inp out (renderProgram clobberError render) fs).2 = fs := by
-  rw [renderProgram_spec]
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 = fs := by
+  rw [renderProgramWarn_spec]
   simp [h]
 
 /-- On error — including the no-clobber refusal — the file system is
 untouched: no output file is created or modified. -/
-theorem renderProgram_error_no_write {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_error_no_write {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS) (e : ε)
     (_hout : fs out = none) (h : render ((fs inp).getD ByteArray.empty) = .error e) :
-    (runFS inp out (renderProgram clobberError render) fs).2 = fs := by
-  rw [renderProgram_spec]
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 = fs := by
+  rw [renderProgramWarn_spec]
   split
   · rfl
   · simp [h]
@@ -266,52 +382,52 @@ theorem renderProgram_error_no_write {ε : Type} (clobberError : ε)
 output path nor the warnings path can already have existed: no-clobber means
 a success only happens when `render` is actually invoked, which only happens
 when both are absent. -/
-theorem renderProgram_ok_output {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_ok_output {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
     (png warn : ByteArray) (hout : fs out = none) (hwout : fs (warnPath out) = none)
     (h : render ((fs inp).getD ByteArray.empty) = .ok (png, warn)) :
-    (runFS inp out (renderProgram clobberError render) fs).2 out = some png := by
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 out = some png := by
   have hne := warnPath_ne out
-  rw [renderProgram_spec]
+  rw [renderProgramWarn_spec]
   simp only [hout, hwout, h, Option.isSome_none, Bool.or_self, Bool.false_eq_true, ite_false]
   split <;> simp [FS.write, Ne.symm hne]
 
 /-- On success with a non-empty warnings text, the warnings path holds exactly
 that text. -/
-theorem renderProgram_ok_warnings {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_ok_warnings {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
     (png warn : ByteArray) (hout : fs out = none) (hwout : fs (warnPath out) = none)
     (h : render ((fs inp).getD ByteArray.empty) = .ok (png, warn)) (hw : warn.size ≠ 0) :
-    (runFS inp out (renderProgram clobberError render) fs).2 (warnPath out) = some warn := by
-  rw [renderProgram_spec]
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 (warnPath out) = some warn := by
+  rw [renderProgramWarn_spec]
   simp [hout, hwout, h, hw, FS.write]
 
 /-- On success with no warnings, no warnings file is created. -/
-theorem renderProgram_ok_no_warnings {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_ok_no_warnings {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
     (png warn : ByteArray) (hwout : fs (warnPath out) = none)
     (h : render ((fs inp).getD ByteArray.empty) = .ok (png, warn)) (hw : warn.size = 0) :
-    (runFS inp out (renderProgram clobberError render) fs).2 (warnPath out) = none := by
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 (warnPath out) = none := by
   have hne := warnPath_ne out
-  rw [renderProgram_spec]
+  rw [renderProgramWarn_spec]
   split
   · exact hwout
   · simp [h, hw, FS.write, hne, hwout]
 
 /-- On success, every path other than the output and warnings paths is untouched. -/
-theorem renderProgram_ok_frame {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_ok_frame {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
     (q : String) (hq : q ≠ out) (hw : q ≠ warnPath out) :
-    (runFS inp out (renderProgram clobberError render) fs).2 q = fs q :=
+    (runFS inp out (renderProgramWarn clobberError render) fs).2 q = fs q :=
   runFS_frame inp out _ fs q hq hw
 
 /-- **Never overwrites.** Every path whose contents the program changes was
 absent when it started: it only ever creates files. -/
-theorem renderProgram_never_overwrites {ε : Type} (clobberError : ε)
+theorem renderProgramWarn_never_overwrites {ε : Type} (clobberError : ε)
     (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS)
-    (q : String) (hq : (runFS inp out (renderProgram clobberError render) fs).2 q ≠ fs q) :
+    (q : String) (hq : (runFS inp out (renderProgramWarn clobberError render) fs).2 q ≠ fs q) :
     fs q = none := by
-  rw [renderProgram_spec] at hq
+  rw [renderProgramWarn_spec] at hq
   split at hq
   · exact absurd rfl hq
   · rename_i hfree
