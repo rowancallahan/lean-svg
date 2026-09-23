@@ -1032,6 +1032,19 @@ def renderBands (opts : Options) (doc : Svg.Doc) (w h k : Nat) :
     | .ok (_, _, b) => out := out ++ b
   return out
 
+/-- T92: the full output canvas size (`canvasSetup` without the tile
+`viewport`) from the root `<svg>`'s own attributes, before `interpret`: what
+the viewport units (`vw`, ...) resolve against.  `none` when the root has no
+usable size (`RootFit` refits it later; the units then use the natural
+size, like a nested document). -/
+def outSize (events : Array Xml.Event) (opts : Options) : Option (Nat × Nat) :=
+  match events.find? (fun e => match e with | .open_ _ _ => true | _ => false) with
+  | some (.open_ "svg" attrs) =>
+    match canvasSetup (Svg.parseRoot attrs) { opts with viewport := none } with
+    | .ok (w, h, _, _) => some (w, h)
+    | .error _ => none
+  | _ => none
+
 end Render
 
 /-- Render SVG bytes to PNG bytes, or fail with a message.
@@ -1042,7 +1055,7 @@ in parallel and concatenated; the bytes are the same either way (see
 def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
   if input.size > maxInput then throw s!"input {input.size} bytes exceeds the {maxInput} byte limit"
   let events ← Xml.parse input
-  let doc ← Svg.interpret events
+  let doc ← Svg.interpretWith { outSize := Render.outSize events opts } events
   -- T52: marker instancing happens once here, after `interpret` has resolved
   -- every element's style and every `<marker>`'s own content, and before
   -- anything below (size checks, band splitting, `drawShape`) sees `doc` --

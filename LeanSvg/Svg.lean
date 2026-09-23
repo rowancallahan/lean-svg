@@ -9,6 +9,8 @@ import LeanSvg.Use
 import LeanSvg.Filter
 import LeanSvg.Image
 import LeanSvg.SvgImage
+import LeanSvg.Units
+import LeanSvg.BasicShape
 import Std.Data.HashMap
 
 /-!
@@ -151,8 +153,9 @@ structure Style where
   `rem` resolves against (SVG2/CSS Values, always the root regardless of any
   element's local `font-size`), set once in `interpret`'s `applyEffective`
   when it processes the root element itself and inherited unchanged by every
-  descendant after that, unlike `fontSize`. -/
-  rootFontSize : Fx := Fx.ofNat 12
+  descendant after that, unlike `fontSize`.  T92: it also carries the output
+  canvas size the viewport units (`vw`, ...) resolve against (`Units`). -/
+  rootFontSize : Units.RootLen := {}
   /-- Numeric CSS `font-weight` after `bolder`/`lighter` stepping. -/
   fontWeight : Nat := 400
   /-- `font-style: italic` or `oblique`. -/
@@ -218,6 +221,10 @@ structure Style where
   absent `clip-path`, an explicit `none`, an unparseable value (a CSS basic
   shape, say), all of which usvg treats alike: no clipping. -/
   clipRef : Option String := none
+  /-- T92: this element's own `clip-path` when it is not `url(#id)` or
+  `none`, raw: a candidate CSS basic shape (`BasicShape.parse`, run by
+  `addClipUse` once the element's font sizes are final).  Not inherited. -/
+  clipShapeRaw : Option ByteArray := none
   /-- The clip uses in force on this element, outermost first, as indices into
   `Doc.uses`.  Inherited; an element with its own `clip-path` appends one. -/
   clips : Array Nat := #[]
@@ -376,6 +383,12 @@ structure ClipUse where
   entry : Option Nat
   ctm : Mat
   bbox : Option Box
+  /-- T92: a CSS basic shape instead of an id, with the `view-box` reference
+  box; `interpret` builds its entry at the end, from `bbox`/`sbox`. -/
+  shape : Option (BasicShape.Spec × Box) := none
+  /-- T92: the stroke bounding box, filled in with `bbox` when a `stroke-box`
+  shape needs it. -/
+  sbox : Option Box := none
 deriving Inhabited
 
 /-- The largest number of `clipPath` elements collected; later ones are skipped
@@ -1705,15 +1718,23 @@ def applyFontUnit (rest : ByteArray) (n ref : Fx) : Option Fx :=
   else if eqAscii rest "in" then some (n * 96)
   else none
 
+/-- T92: the units `applyFontUnit` lacks (`rem` and `Units.parseAt`'s), for a
+whole value `n` + `t[j:]`; font units measure against `ref`. -/
+def applyNewUnit (t : ByteArray) (j : Nat) (n ref : Fx) (ctx : Units.RootLen) : Option Fx :=
+  if eqAscii (t.extract j t.size) "rem" then some (Fx.mul n ctx.size)
+  else match Units.parseAt t j n ref ctx with
+    | some (v, k) => if k == t.size then some v else none
+    | none => none
+
 /-- `font-size`: a length relative to the inherited size, or a keyword. -/
-def parseFontSize (parent : Fx) (bs : ByteArray) : Fx :=
+def parseFontSize (parent : Fx) (bs : ByteArray) (ctx : Units.RootLen) : Fx :=
   let t := trim bs
   match parseNumber t 0 with
   | none => namedFontSize t parent
   | some (n, j) =>
     match applyFontUnit (t.extract j t.size) n parent with
     | some v => v
-    | none => namedFontSize t parent
+    | none => (applyNewUnit t j n parent ctx).getD (namedFontSize t parent)
 
 /-- The length a percentage resolves against on an attribute that names
 neither axis (`letter-spacing`, `word-spacing`): usvg's
@@ -1723,7 +1744,7 @@ def viewportDiag (w h : Fx) : Fx := Fx.scale16 (Fx.hypot w h) 46341
 
 /-- `letter-spacing` / `word-spacing`.  `normal` is zero; a percentage
 resolves against `viewportDiag`, as `convert_length`'s catch-all arm does. -/
-def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) (ctx : Units.RootLen) : Option Fx :=
   let t := trim bs
   if eqAscii t "normal" then some 0
   else match parseNumber t 0 with
@@ -1731,7 +1752,9 @@ def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
     | some (n, j) =>
       let rest := t.extract j t.size
       if eqAscii rest "%" then some (Int.ediv (Fx.mul n refLen) 100)
-      else applyFontUnit rest n fontSize
+      else match applyFontUnit rest n fontSize with
+        | some v => some v
+        | none => applyNewUnit t j n fontSize ctx
 
 /-- `font-weight`, as usvg resolves it: the keywords map to numbers, and
 `bolder`/`lighter` step from the inherited value by 300/200 at 400 and by 100
@@ -1811,12 +1834,12 @@ resolves `em`/`ex` against the element's own font size, `rem` against the
 root element's (`Style.rootFontSize`), a percentage against the viewport axis
 the attribute belongs to (`x`/`dx` → width, `y`/`dy` → height), and `Q`
 (quarter-millimetres, SVG 2) as a fixed ratio like `mm`/`cm`. -/
-def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
+def parseTextLen (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
   match parseNumber bs i with
   | none => none
   | some (v, j) =>
     if startsWith bs j "px" then some (v, j + 2)
-    else if startsWith bs j "rem" then some (Fx.mul v rootFontSize, j + 3)
+    else if startsWith bs j "rem" then some (Fx.mul v rootFontSize.size, j + 3)
     else if startsWith bs j "em" then some (Fx.mul v fontSize, j + 2)
     else if startsWith bs j "ex" then some (Int.ediv (Fx.mul v fontSize) 2, j + 2)
     else if startsWith bs j "pt" then some (Int.ediv (v * 4) 3, j + 2)
@@ -1827,7 +1850,10 @@ def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) 
     -- 1Q = 1/40 cm = 96 / (2.54 * 40) px = 120/127 px, exactly (SVG 2).
     else if startsWith bs j "Q" then some (Int.ediv (v * 120) 127, j + 1)
     else if at' bs j == 37 then some (Int.ediv (Fx.mul v refLen) 100, j + 1)
-    else some (v, j)
+    -- T92: the CSS Values 4 units usvg lacks (`vw`, `ch`, `rlh`, ...).
+    else match Units.parseAt bs j v fontSize rootFontSize with
+      | some r => some r
+      | none => some (v, j)
 
 /-- Parse a whole attribute value as a single `parseTextLen` length: usvg's
 `convert_user_length`, which every non-text geometry attribute
@@ -1835,7 +1861,7 @@ def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) 
 through as well as text's own `x`/`y`/`dx`/`dy` -- the same em/ex-against-
 font-size and percentage-against-viewport-axis resolution, just for a single
 value instead of a list. -/
-def parseTextLenAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+def parseTextLenAll (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option Fx :=
   let t := trim bs
   match parseTextLen fontSize refLen rootFontSize t 0 with
   | some (v, j) => if j == t.size then some v else none
@@ -1844,7 +1870,7 @@ def parseTextLenAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Optio
 /-- `textLength`: one length, the whole (trimmed) attribute value, negative
 rejected (`n < 0` in usvg's parser turns `text_length` back into `None`
 rather than clamping it). -/
-def parseTextLength (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+def parseTextLength (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option Fx :=
   let t := trim bs
   match parseTextLen fontSize refLen rootFontSize t 0 with
   | some (v, j) => if j == t.size && v ≥ 0 then some v else none
@@ -1852,7 +1878,7 @@ def parseTextLength (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Optio
 
 /-- A whitespace/comma separated list of such lengths.  Stops at the first
 item it cannot read, like `parseNumberList`. -/
-def parseTextLenList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Array Fx := Id.run do
+def parseTextLenList (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Array Fx := Id.run do
   let mut out : Array Fx := #[]
   let mut i := 0
   for _ in [0:bs.size + 1] do
@@ -1869,7 +1895,7 @@ def parseTextLenList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Arra
 like `parseTextLen` (`em`/`ex` against `fontSize`, `%` against `refLen`), but
 all-or-nothing like `parseAbsLengthList` — one bad item drops the whole list,
 matching `Geom.dashPattern`'s downstream fallback to an undashed stroke. -/
-def parseDashLengthList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option (Array Fx) := Id.run do
+def parseDashLengthList (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option (Array Fx) := Id.run do
   let t := trim bs
   let mut out : Array Fx := #[]
   let mut i := 0
@@ -1884,7 +1910,7 @@ def parseDashLengthList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : O
   return some out
 
 /-- `stroke-dashoffset`: a single length, resolved the same way. -/
-def parseDashLengthAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+def parseDashLengthAll (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option Fx :=
   let t := trim bs
   match parseTextLen fontSize refLen rootFontSize t 0 with
   | some (v, j) => if j == t.size then some v else none
@@ -2034,8 +2060,16 @@ closes.  Returns the style with the use appended to `clips`, the table, and the
 new use's index. -/
 def addClipUse (st : Style) (uses : Array ClipUse) : Style × Array ClipUse × Option Nat :=
   match st.clipRef with
-  | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none⟩, some uses.size)
-  | none => (st, uses, none)
+  | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none, none, none⟩, some uses.size)
+  | none =>
+    let env : BasicShape.Env := ⟨parseTextLenAll st.fontSize 0 st.rootFontSize, parsePathData⟩
+    match st.clipShapeRaw.bind (BasicShape.parse env) with
+    | some spec =>
+      let vb : Box := ⟨0, 0, st.pctRefW, st.pctRefH⟩
+      ({ st with clips := st.clips.push uses.size },
+       uses.push { id := "", entry := none, ctm := st.ctm, bbox := none, shape := some (spec, vb) },
+       some uses.size)
+    | none => (st, uses, none)
 
 /-- T90: split the CSS `font` shorthand (`[style] [variant] [weight] [stretch]
 size[/line-height] family`) into `(italic, weight, size, family)`; `none`
@@ -2081,7 +2115,10 @@ def fontShorthand (v : ByteArray) : Option (Bool × Option ByteArray × ByteArra
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
-  | "clip-path" => { st with clipRef := parseClipRef v }
+  | "clip-path" =>
+    let r := parseClipRef v
+    { st with clipRef := r,
+              clipShapeRaw := if r.isNone && !eqAscii (trim v) "none" then some v else none }
   | "mask" => { st with maskRef := parseClipRef v }
   | "mask-type" => { st with maskAlpha := eqAscii (trim v) "alpha" }
   | "filter" => { st with filterRaw := some v }
@@ -2197,7 +2234,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     else st
   -- T36: text properties.  Inherited like every other property here; only
   -- `Svg.textShapes` ever reads them.
-  | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
+  | "font-size" => { st with fontSize := parseFontSize st.fontSize v st.rootFontSize }
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
   | "font-family" =>
     match resolveFontFamily v with
@@ -2239,10 +2276,10 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
       | some (n, j) => if j == t.size && n > 0 then { st with fontSizeAdjust := some n } else st
       | none => st
   | "letter-spacing" =>
-    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v st.rootFontSize with
     | some s => { st with letterSpacing := s } | none => st
   | "word-spacing" =>
-    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v st.rootFontSize with
     | some s => { st with wordSpacing := s } | none => st
   | "font-kerning" =>
     let t := trim v
@@ -2329,7 +2366,7 @@ every unit this parses since none of their factors are negative; if exactly
 one of the two is present, its value is mirrored onto the other axis; if
 neither is, both are 0 (a later `≤ 0` check then drops the shape, same as an
 explicit 0). -/
-def resolveRxRy (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH rootFontSize : Fx) : Fx × Fx :=
+def resolveRxRy (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH : Fx) (rootFontSize : Units.RootLen) : Fx × Fx :=
   let rxo := ((attr attrs "rx").bind (parseTextLenAll fontSize pctRefW rootFontSize)).filter (· ≥ 0)
   let ryo := ((attr attrs "ry").bind (parseTextLenAll fontSize pctRefH rootFontSize)).filter (· ≥ 0)
   match rxo, ryo with
@@ -2344,7 +2381,7 @@ against the viewport axis the attribute names (`x`-like → `pctRefW`, `y`-like
 → `pctRefH`), same as text's `x`/`y`/`dx`/`dy`.  `r` (`circle`'s only length
 that names neither axis) instead falls to `convert_length`'s catch-all,
 `viewportDiag`, exactly like `letter-spacing`. -/
-def shapeCmds (name : String) (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH rootFontSize : Fx) :
+def shapeCmds (name : String) (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH : Fx) (rootFontSize : Units.RootLen) :
     Option (Array PathCmd) :=
   let lx := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefW rootFontSize)).getD dflt
   let ly := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefH rootFontSize)).getD dflt
@@ -2945,7 +2982,7 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
           let m := match attr attrs "transform" with
             | some t => parseTransform t
             | none => Mat.identity
-          match (shapeCmds nm attrs 0 0 0 0).bind (fun cmds => TextPath.build cmds m) with
+          match (shapeCmds nm attrs 0 0 0 { size := 0 }).bind (fun cmds => TextPath.build cmds m) with
           | some tbl => out := out.insert id tbl
           | none => pure ()
       | none => pure ()
@@ -3476,7 +3513,34 @@ structure Frame where
   filterOnly : Bool := false
   /-- T85: this `use`'s `ctxUses` slot; the box goes there on close. -/
   ctxUse : Option Nat := none
+  /-- T92: the stroke bounding box of this element's rendered content so far
+  (`bbox`'s counterpart), kept only while `wantS`: this element or an
+  ancestor has a `stroke-box` basic-shape `clip-path`. -/
+  sbox : Option Box := none
+  wantS : Bool := false
 deriving Inhabited
+
+/-- T92: whether clip use `slot` is a basic shape on the `stroke-box`. -/
+def strokeShapeUse (uses : Array ClipUse) (slot : Option Nat) : Bool :=
+  match slot.bind (fun k => uses[k]?) with
+  | some u => match u.shape with
+    | some (spec, _) => spec.ref == .stroke
+    | none => false
+  | none => false
+
+/-- T92: a shape's stroke bounding box, Chromium's `stroke-box`: the bounds of
+the exact stroke outline (`strokePoly`, without dashes) joined with the fill
+box; just the fill box when there is no stroke. -/
+def strokeBoxOf (st : Style) (cmds : Array PathCmd) : Option Box := Id.run do
+  let mut b := cmdsBox cmds
+  let painted := match st.stroke with | .none => false | _ => true
+  if !painted || st.strokeWidth ≤ 0 then return b
+  let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
+  for poly in flatten Mat.identity cmds do
+    for ring in strokePoly ss poly #[] do
+      for p in ring do
+        b := Box.cover b p
+  return b
 
 /-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
 theorem use_maxDepth_le : Use.maxDepth ≤ maxLayerDepth := by decide
@@ -3601,6 +3665,10 @@ never nest). -/
 structure SubCfg where
   layerDepth : Nat := 0
   nested : Bool := false
+  /-- T92: the output canvas size in px (after `--width`/`--zoom`), what the
+  viewport units resolve against (Chromium's `<img>` viewport); `none` means
+  the root's natural size. -/
+  outSize : Option (Nat × Nat) := none
 
 /-- Walk the event stream with a style stack.
 
@@ -3690,7 +3758,13 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         let (rw, rh) := match r.viewBox with
           | some (_, _, vw, vh) => (vw, vh)
           | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
-        { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
+        -- T92: the canvas the viewport units resolve against: the output
+        -- size when the caller knows it, else the root's natural size.
+        let (vw, vh) := match cfg.outSize with
+          | some (w, h) => (Fx.ofNat w, Fx.ofNat h)
+          | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+        { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh,
+                      rootFontSize := { parent.rootFontSize with vpW := vw, vpH := vh } }
     let styleDecls := match attr attrs "style" with
       | some v => parseStyleDecls v
       | none => #[]
@@ -3733,7 +3807,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     let base := { base with ownOpacity := opacityOne, blend := .normal, isolate := false }
     -- `clip-path` and the element's own transform are per-element too, and for
     -- the same reason (T20).
-    let base := { base with clipRef := none, ownMat := Mat.identity, maskRef := none,
+    let base := { base with clipRef := none, clipShapeRaw := none, ownMat := Mat.identity, maskRef := none,
                             maskAlpha := false, filterRaw := none }
     -- `text-decoration` and `textLength`/`lengthAdjust` are per-element for
     -- the same reason (T55): see the field docs on `Style`.
@@ -3758,7 +3832,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
     let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
     let final := importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
-    if isRoot then { final with rootFontSize := final.fontSize } else final
+    if isRoot then { final with rootFontSize := { final.rootFontSize with size := final.fontSize } } else final
   let mut stack : Array Style := #[]
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
@@ -3852,7 +3926,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         -- under `defs` or inside a `clipPath` is not a child of the parent
         -- group in usvg's tree and does not count towards its box.
         match fr.useSlot with
-        | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox })
+        | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox, sbox := fr.sbox })
         | none => pure ()
         match fr.maskUse with
         | some k => maskUses := maskUses.modify k (fun u => { u with bbox := fr.bbox })
@@ -3888,7 +3962,10 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         | .render, some pf =>
           if pf.want then
             frames := frames.pop.push
-              { pf with bbox := Box.union pf.bbox (fr.bbox.bind (Box.transformed st.ownMat)) }
+              { pf with bbox := Box.union pf.bbox (fr.bbox.bind (Box.transformed st.ownMat)),
+                        sbox := if pf.wantS then
+                            Box.union pf.sbox ((fr.sbox <|> fr.bbox).bind (Box.transformed st.ownMat))
+                          else pf.sbox }
         | _, _ => pure ()
     | .open_ name attrs =>
       if skip > 0 then
@@ -3982,7 +4059,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               clipTable := clipTable.modify k (fun e =>
                 { e with transform := stC.ctm, transformValid := Mat.hasScale stC.ctm,
                          objectBBox := obb, selfClipId := stC.clipRef, filled := true })
-              enter := some { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none }
+              enter := some { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none,
+                                       clipShapeRaw := none }
               frame := { mode := .clip k }
             | none => skip := 1
           else if name == "mask" then
@@ -4024,7 +4102,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               nodes := #[]
               layerDepth := 0
               enter := some { stM with ctm := Mat.identity, ownMat := Mat.identity,
-                                       clipRef := none, maskRef := none }
+                                       clipRef := none, clipShapeRaw := none, maskRef := none }
               frame := { mode := .render, maskSlot := some k,
                          fine := (maskTable.getD k default).contentBBox }
             | none => skip := 1
@@ -4166,7 +4244,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 clipTable := clipTable.push
                   { id := "", transform := Mat.identity, transformValid := true, objectBBox := false,
                     selfClipId := none, selfClip := none, children := #[child] }
-                uses := uses.push ⟨"", some (clipTable.size - 1), st0.ctm, none⟩
+                uses := uses.push ⟨"", some (clipTable.size - 1), st0.ctm, none, none, none⟩
                 st0 := { st0 with clips := st0.clips.push (uses.size - 1) }
                 viewportClip := some (uses.size - 1)
               let st1 := { st0 with ctm := st0.ctm.mul newTs, ownMat := st0.ownMat.mul newTs,
@@ -4306,7 +4384,9 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                   match frames.back? with
                   | some pf' =>
                     frames := frames.pop.push
-                      { pf' with bbox := Box.union pf'.bbox (tbox.bind (Box.transformed st.ownMat)) }
+                      { pf' with bbox := Box.union pf'.bbox (tbox.bind (Box.transformed st.ownMat)),
+                                 sbox := if pf'.wantS then Box.union pf'.sbox (tbox.bind (Box.transformed st.ownMat))
+                                   else pf'.sbox }
                   | none => pure ()
               | .defs => pure ()
               | .markerDef _ => pure ()  -- unreachable: gated above, kept for exhaustiveness
@@ -4395,10 +4475,12 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                     clipTable := clipTable.modify k fun e => { e with children := e.children.push child }
                 | none => pure ()
               let want := slot.isSome || mslot.isSome || pf.want || st.filterRaw.isSome
+              let wantS := pf.wantS || strokeShapeUse uses slot
               enter := some st
               frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
                          bbox := if want then cmds.bind cmdsBox else none,
-                         isShapeLeaf := true }
+                         sbox := if want && wantS then cmds.bind (strokeBoxOf st) else none,
+                         wantS, isShapeLeaf := true }
               renders := pf.mode.isRender
           else if name == "marker" then
             -- T52: like `clipPath`, a `<marker>` never renders itself -- only
@@ -4424,7 +4506,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               markerSlot := some k
               let stM := applyEffective
                 { parent with ctm := Mat.identity, ownMat := Mat.identity,
-                              clips := #[], clipRef := none } attrs chain
+                              clips := #[], clipRef := none, clipShapeRaw := none } attrs chain
               let refX := lengthOrPctAttr attrs "refX" 0 stM.pctRefW
               let refY := lengthOrPctAttr attrs "refY" 0 stM.pctRefH
               let width := lengthOrPctAttr attrs "markerWidth" (Fx.ofNat 3) stM.pctRefW
@@ -4511,7 +4593,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                   { id := "", transform := Mat.identity, transformValid := true,
                     objectBBox := false, selfClipId := none, selfClip := none,
                     children := #[child] }
-                uses := uses.push ⟨"", some (clipTable.size - 1), st.ctm, none⟩
+                uses := uses.push ⟨"", some (clipTable.size - 1), st.ctm, none, none, none⟩
                 -- Inside this element's own `clip-path` use, which stays last on
                 -- the chain because a layer takes it back off from there.
                 let k := uses.size - 1
@@ -4559,7 +4641,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           -- shape has nothing to overlap with, so its own `clip-path` keeps
           -- T20's cheaper per-coverage multiply unless the element is getting
           -- a layer anyway, in which case the clip rides it.
-          let clipLayer := container && (st.clipRef.isSome || viewportClip.isSome)
+          let clipLayer := container && (st.clipRef.isSome || frame.useSlot.isSome || viewportClip.isSome)
           let other := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer
             || frame.maskUse.isSome
           -- T51: a `filter` is `should_isolate`'s third case.  Whether it
@@ -4613,7 +4695,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           childCounts := childCounts.push 0
           switchSel := switchSel.push sel
           layerOpen := layerOpen.push layered
-          frames := frames.push frame
+          frames := frames.push { frame with wantS := frame.wantS || pf.wantS || strokeShapeUse uses frame.useSlot }
           markerOpenSlot := markerOpenSlot.push markerSlot
   -- T20: resolve the ids, over the slots the walk actually filled.  Like
   -- usvg's `links` map, a duplicated id resolves to the last such element.
@@ -4624,6 +4706,27 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
       if e.filled then m := m.insert e.id i
     return m
   let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
+  -- T92: a basic-shape use gets a synthetic one-child entry, like T48's
+  -- viewport clips, now that its element's boxes are known.  No box (an
+  -- empty group) means no outline, which clips everything away.
+  let mut shapeClips : Array ClipEntry := #[]
+  for i in [0:uses.size] do
+    let u := uses.getD i default
+    match u.shape with
+    | some (spec, vb) =>
+      let box := match spec.ref with
+        | .fill => u.bbox
+        | .stroke => u.sbox <|> u.bbox
+        | .view => some vb
+      let children := match box.map (BasicShape.build spec) with
+        | some (cmds, eo) => if cmds.size ≥ 2 then #[(⟨cmds, eo, Mat.identity, true, #[], false⟩ : ClipChild)] else #[]
+        | none => #[]
+      uses := uses.modify i fun x => { x with entry := some (clipsResolved.size + shapeClips.size) }
+      shapeClips := shapeClips.push
+        { id := "", transform := Mat.identity, transformValid := true, objectBBox := false,
+          selfClipId := none, selfClip := none, children, filled := false }
+    | none => pure ()
+  let clipsResolved := clipsResolved ++ shapeClips
   -- A use that already has its entry (T48's viewport clips) keeps it.
   let usesResolved := uses.map fun u =>
     { u with entry := match u.entry with | some k => some k | none => idMap.get? u.id }
