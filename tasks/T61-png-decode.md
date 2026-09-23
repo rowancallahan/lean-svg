@@ -122,3 +122,117 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+`LeanSvg/PngDecode.lean` (`decode : ByteArray → Option ImageData.Decoded`) and
+`LeanSvg/Inflate.lean` (`zlib : ByteArray → (cap : Nat) → Option ByteArray`).
+The reference is resvg 0.48.1 → `tiny_skia::Pixmap::decode_png` (tiny-skia
+0.12) → `png` 0.18.1 with `normalize_to_color8()` (EXPAND | STRIP_16), then
+widened to RGBA8. Output is straight alpha; tiny-skia premultiplies, which is
+T63's job.
+
+* **Chunks.** Signature, then `IHDR` first (13 bytes; width/height > 0; valid
+  colour type/depth pair; compression/filter 0; interlace 0/1). Only chunks
+  before the first `IDAT` are read for metadata. The `IDAT` run is
+  concatenated; the crate needs the following chunk's length and type to see
+  the run end, so those 8 bytes must exist (a file cut right after the last
+  `IDAT` is `none` in both). Nothing after that is read (`IEND` optional, as
+  in the crate). `IEND`/unknown critical chunk/second `IHDR`/second `PLTE`
+  before `IDAT` → `none`; `fdAT` before `IDAT` → `none`.
+* **CRC.** Checked on every chunk read. Critical (`IHDR`, `PLTE`, `IDAT`)
+  mismatch → `none`; ancillary mismatch → chunk skipped
+  (`skip_ancillary_crc_failures = true`, the crate default).
+* **Adler-32 not checked**: the crate default is `ignore_adler32 = true` and
+  resvg does not change it.
+* **zlib header** as `fdeflate` checks it: method 8, CINFO ≤ 7, no FDICT,
+  FCHECK. DEFLATE: stored (LEN/NLEN), fixed and dynamic blocks; HLIT ≤ 286,
+  HDIST ≤ 30, repeat-16 with no previous length, run past HLIT+HDIST,
+  missing end-of-block code, over-subscribed trees, length symbols 286/287,
+  distance codes 30/31, distance before the start → `none`.
+* **Transforms** (from `png/src/decoder/transform.rs`, `palette.rs`,
+  `stream.rs::parse_trns`): 16-bit → high byte; gray 1/2/4 → `v * 255/(2^d-1)`;
+  palette index past the PLTE → opaque black; tRNS for palette ignored whole if
+  longer than the palette, missing entries → 255; gray/RGB tRNS at depth ≤ 8
+  compares the low byte(s) of each 16-bit key, at depth 16 compares all bytes
+  (a tRNS of the wrong length never matches). tRNS on gray+alpha / RGBA, a
+  second tRNS, a short one, or one before `PLTE` is ignored. Colour type 3
+  with no `PLTE`, or a `PLTE` whose length is not a multiple of 3 (the crate
+  panics on it), → `none`.
+* All five filters, Adam7 (empty passes skipped), multiple `IDAT`s.
+
+**Bounds.** `w * h > maxPixels` → `none` straight after the chunk walk,
+before inflating. The inflater's cap is the exact filtered-stream size (sum
+over passes of `rows * (1 + rowBytes)`); it stops once the cap is reached and
+fails if the stream ends before. Loops: chunk walk and `IDAT` run by
+`size / 12 + 1` fuel; blocks by `8 * input.size + 1` (each block header is
+≥ 3 bits); symbols by `cap + 1` per block; code lengths by `HLIT + HDIST + 1`;
+everything else `for` over ranges bounded by the cap or `w * h`. No
+`partial`, no `IO`, no `!`-indexing.
+
+**Proof.** `proofs/PngDecode.lean`: `decode_size`, the `ImageData` contract.
+`decode` checks it on `decodeRaw`'s result and returns `none` otherwise, so the
+proof is that check read back. Axioms: `propext`, `Quot.sound`.
+
+**Debug exe.** `pngdump` (`PngDump.lean`, own `lean_exe`, not linked into
+`lean-svg`): `pngdump <out-dir|-> <file.png>...` prints `<path> <w> <h>` or
+`<path> none` and optionally writes raw RGBA.
+
+**Tests.** `tests/check_png_decode.py`:
+* PngSuite (all 175 PNGs, fetched into `tests/corpora/pngsuite` from
+  image-rs/image-png, the `png` crate's own copy; the schaik.com tarball is
+  blocked here) + 122 generated PNGs (every colour type × depth × interlace,
+  random per-row filters, split `IDAT`s, tRNS, zlib level 0/1/6/9 and
+  fixed/Huffman-only/RLE/filtered strategies, two larger ones) + two PNGs
+  written by `lean-svg` (stored blocks > 64 KiB, round trip through our
+  encoder). Compared byte-exact with Pillow's samples after applying the
+  crate's rules above. Pillow drops the low bytes of 16-bit RGB, so that one
+  tRNS key is checked against a small zlib+unfilter reader in the script. The
+  14 `x*.png` must give `none`.
+* 15 adversarial cases through `pngdump`: 16×16 IHDR over a ~200 MB zero
+  stream (decodes, stopped at the cap), the same stream under 100000² and
+  4097×4096 IHDRs, 4096² with a tiny IDAT, zero width, 8 truncations, no IEND
+  (decodes) and a cut right after the last IDAT (`none`).
+* 2000 mutants (bit flips, byte sets, deletions, insertions, truncation; half
+  with CRCs repaired so the damage reaches the inflater and unfilter).
+* The harness is sensitive: a one-character change to the Paeth tie-break
+  gave 28 mismatches.
+
+## Skipped / differences
+
+* **Round-trip theorem** (`decode (Png.encode ...) = ...`) not attempted; it
+  would mean proving the inflater and unfilter correct. The round trip is
+  tested instead (the `leansvg_*` corpus entries).
+* **Streaming quirks not copied.** `fdeflate` decodes as each `IDAT` arrives,
+  so it can fail on corrupt data *after* the last needed byte if that data
+  is in the same chunk; this decoder stops reading at the cap. Incomplete
+  Huffman trees are accepted and fail only if an unassigned code is read;
+  `fdeflate`'s exact rules for incomplete trees were not copied.
+* **APNG** (`acTL`/`fcTL`) is ignored; the default image from `IDAT` is
+  decoded. The crate treats a malformed `fcTL` as fatal; here it is skipped.
+* `tests/svg/NN_*.svg`: none added. `<image>` is not rendered until T63
+  lands, so an SVG using it would test nothing here. Adversarial cases for
+  `tests/adversarial/` wait on T63 too; for now they run through `pngdump`.
+* Speed: 2000×2000 RGBA (514 KB file) decodes in 0.78 s in `pngdump`.
+
+## Report
+
+Files: `LeanSvg/Inflate.lean` (new), `LeanSvg/PngDecode.lean` (stub
+replaced), `LeanSvg.lean` (+`import LeanSvg.Inflate`), `PngDump.lean` +
+`lakefile.toml` (`pngdump` exe), `proofs/PngDecode.lean`,
+`tests/check_png_decode.py`.
+
+| check | before | after |
+|---|---|---|
+| `lake build` | ok | ok, no warnings |
+| `scripts/check-theorems.sh` | theorems ok | theorems ok (+`decode_size`) |
+| resvg corpus, direct, `--fast` | 1046/1679 pass (62.3%) | 1046/1679; 0 newly failing, 0 moved > 0.1 pt |
+| `tests/run_tests.py` | 30/34 | 30/34, per-file scores identical |
+| `tests/run_adversarial.py` | — | 77/77 clean |
+| `tests/run_tiles.py` | — | 34/34 byte-identical |
+| `tests/check_png_decode.py` | — | 299 files 0 mismatches; 15/15 adversarial (0.01 s); 2000 fuzz: 80 some / 1920 none, 0 bad |
+
+Nothing calls `PngDecode.decode` from `render` yet (T63), so the render
+numbers cannot move.
