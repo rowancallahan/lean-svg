@@ -14,4 +14,5 @@ import LeanSvg.Viewport
 import LeanSvg.Use
 import LeanSvg.Svg
 import LeanSvg.Clip
+import LeanSvg.Mask
 import LeanSvg.Render
