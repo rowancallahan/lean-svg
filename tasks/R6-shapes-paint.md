@@ -87,3 +87,57 @@ into a scratch dir; `crates/usvg/src/parser/*` and `crates/resvg/src/*`).
 
 
 **Corpus gate for any code change:** `python3 tests/run_corpora.py --corpus resvg --route direct --out /tmp/after --no-worst --compare <baseline csv>` (make the baseline first without your change) and `python3 tests/score_known.py /tmp/after/resvg_direct.csv`; plus `lake build`, `bash scripts/check-theorems.sh`, `tests/run_tests.py`, `tests/run_adversarial.py`, `tests/run_tiles.py`.
+
+## Report
+
+**Deliverables:** `docs/resvg-wrong/R6-shapes-paint.md` (per-file writeup,
+summary table, questions for Rowan) and `docs/resvg-wrong/R6-shapes-paint.png`
+(comparison sheet, resvg | suite PNG | Chromium | ours, 83 KB).
+
+**Classified:** 2 files (a, fixed), 2 files (c, not fixing — negligible/
+already-correct), 2 files (b, not fixed — real work, narrow payoff), 3 files
+(d, not fixed — needs Rowan's call), 1 file (b+d, not fixed — needs both a
+feature and a reference decision). Full reasoning per file in the doc.
+
+**Fixed (2 commits):**
+- `54b9aad` — `Q` (120/127 px) and `rem` (root element's own `font-size`,
+  new `Style.rootFontSize`) length units on shape geometry
+  (`shapes/rect/q-values.svg`, `shapes/rect/rem-values.svg`).
+- `7464e3b` — percentage alpha in `rgba()`/`hsla()`, CSS Color 4
+  (`painting/fill/rgba-0-127-0-50percent.svg`); reverses a previously
+  deliberate match to a confirmed resvg 0.48.1/svgtypes 0.16.1 bug, now that
+  this task calls for it. `grep` confirmed this is the only corpus file
+  using a percentage alpha, so the change cannot touch resvg parity
+  anywhere else.
+
+**Not fixed, with why (see doc for full detail):** the two `fr` gradient
+files (≤1-level tiny-skia rounding noise, inherent to resvg's own
+dependency, only when `fr≠0`); the ICC-color-fallback file (we already
+match resvg *and* every real browser — the suite's own PNG is the stale
+outlier); the arc marker-orientation file (Chromium measurably closer to
+the suite PNG than resvg, but the fix needs the exact arc-tangent formula,
+not isolated); the zero-gap dasharray file (our dash deferral is a faithful
+port of Skia's actual `SkDashPath::InternalFilter`, wrong only in one
+coincidental edge case — perimeter an exact multiple of the dash cycle and
+a zero-length gap); `ch` (font-metric-dependent, and the three references
+disagree with each other, not just with resvg); `vw`/`vh`/`vmin`/`vmax`
+(Chromium + spec + Firefox all agree on 60 px, but the suite's own PNG shows
+~150 px — fails the task's "suite PNG and Chromium must agree" auto-fix
+gate despite Chromium clearly being right, so left for Rowan's decision).
+
+**Before/after (corpus gate, `tests/run_corpora.py --corpus resvg --route
+direct`, 200 px, pre-fix baseline vs. both fixes applied):** exactly 3 files
+move pass→fail against resvg — `rgba-0-127-0-50percent.svg`, `q-values.svg`,
+`rem-values.svg` (all three intentional, all three listed above). 0 newly
+passing, 1676/1679 corpus files byte-for-byte unchanged, resvg-correct
+bucket unchanged at 1400/1522 (`tests/score_known.py`). `lake build`,
+`scripts/check-theorems.sh`, `tests/run_tests.py` (46/50 both before and
+after — same 4 pre-existing, unrelated failures, confirmed with `git
+stash`), `tests/run_adversarial.py` (116/116) and `tests/run_tiles.py`
+(50/50) all pass.
+
+**Could not do:** the 9 unfixed files above, and 4 open questions for Rowan
+in the doc (`vw`/`vh`/`vmin`/`vmax` vs. the suite's apparently-wrong PNG;
+whether `ch` is worth building given no trustworthy reference; whether the
+`n-0` dasharray edge case and the `on-ArcTo` marker-angle gap are worth
+dedicated follow-up tasks).
