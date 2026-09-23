@@ -64,6 +64,17 @@ structure Font where
   /-- Absolute offsets of `GPOS` `PairPos` subtables reachable from a
   `kern`-tagged feature (any script/language). -/
   gposKernSubtables : Array Nat
+  /-- `post` table `underlinePosition`, font units (negative is below the
+  baseline); usvg's fallback of `-unitsPerEm/9` if the table is absent. -/
+  underlinePosition : Int
+  /-- `post` table `underlineThickness`, font units; usvg's fallback of
+  `unitsPerEm/12` if the table is absent or the field is non-positive. -/
+  underlineThickness : Int
+  /-- `OS/2` table `yStrikeoutPosition`, font units (positive is above the
+  baseline); usvg's fallback of `0.225 * (ascender - descender)` if the table
+  is absent, an approximation of Firefox's x-height-based one that is never
+  exercised by the three embedded faces (all three carry a real `OS/2`). -/
+  strikeoutPosition : Int
   data : ByteArray
 
 namespace Font
@@ -100,6 +111,8 @@ def tagHhea : Nat := 0x68686561
 def tagHmtx : Nat := 0x686D7478
 def tagKern : Nat := 0x6B65726E
 def tagGPOS : Nat := 0x47504F53
+def tagPost : Nat := 0x706F7374
+def tagOS2 : Nat := 0x4F532F32
 
 /-! ## Table directory -/
 
@@ -113,6 +126,8 @@ structure Tables where
   hmtx : Option (Nat × Nat) := none
   kernT : Option (Nat × Nat) := none
   gpos : Option (Nat × Nat) := none
+  post : Option (Nat × Nat) := none
+  os2 : Option (Nat × Nat) := none
 
 /-- Scan the `numTables` 16-byte directory records starting at byte 12,
 recording `(offset, length)` for the tables this parser needs. A record past
@@ -138,6 +153,8 @@ def scanTables (bs : ByteArray) (numTables : Nat) : Tables := Id.run do
         else if tag == tagHmtx then t := { t with hmtx := some (off, clen) }
         else if tag == tagKern then t := { t with kernT := some (off, clen) }
         else if tag == tagGPOS then t := { t with gpos := some (off, clen) }
+        else if tag == tagPost then t := { t with post := some (off, clen) }
+        else if tag == tagOS2 then t := { t with os2 := some (off, clen) }
   return t
 
 /-! ## `cmap` subtable selection -/
@@ -733,11 +750,31 @@ def parse (bs : ByteArray) : Option Font :=
             match t.gpos with
             | some (gpOff, gpLen) => findKernSubtables bs gpOff gpLen
             | none => #[]
+          let ascender := i16 bs (heOff + 4)
+          let descender := i16 bs (heOff + 6)
+          -- `post`: `underlinePosition`/`underlineThickness` sit at a fixed
+          -- offset in every table version. usvg's fallbacks (`skrifa`'s, via
+          -- `ResolvedFont::load`): `-unitsPerEm/9` and `unitsPerEm/12` when
+          -- the table is absent, the latter also when the table's own
+          -- thickness is non-positive.
+          let (underlinePosition, underlineThickness) :=
+            match t.post with
+            | some (pOff, pLen) =>
+              if pLen ≥ 12 then
+                let th := i16 bs (pOff + 10)
+                (i16 bs (pOff + 8), if th ≤ 0 then (unitsPerEm : Int) / 12 else th)
+              else (-(unitsPerEm : Int) / 9, (unitsPerEm : Int) / 12)
+            | none => (-(unitsPerEm : Int) / 9, (unitsPerEm : Int) / 12)
+          -- `OS/2`: `yStrikeoutPosition` is a fixed offset since version 0.
+          let strikeoutPosition :=
+            match t.os2 with
+            | some (oOff, oLen) => if oLen ≥ 30 then i16 bs (oOff + 28) else (ascender - descender) * 9 / 40
+            | none => (ascender - descender) * 9 / 40
           some {
             unitsPerEm := unitsPerEm
             numGlyphs := numGlyphs
-            ascender := i16 bs (heOff + 4)
-            descender := i16 bs (heOff + 6)
+            ascender := ascender
+            descender := descender
             lineGap := i16 bs (heOff + 8)
             indexToLocFormat := indexToLocFormat
             locaOff := lOff
@@ -751,6 +788,9 @@ def parse (bs : ByteArray) : Option Font :=
             kernPairsOff := kernPairsOff
             kernNPairs := kernNPairs
             gposKernSubtables := gposKernSubtables
+            underlinePosition := underlinePosition
+            underlineThickness := underlineThickness
+            strikeoutPosition := strikeoutPosition
             data := bs
           }
       | _, _, _, _, _, _ => none

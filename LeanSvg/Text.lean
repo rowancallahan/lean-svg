@@ -97,6 +97,15 @@ structure SpanProps where
   /-- `font-kerning: none` (or SVG 1.1 `kerning="0"`) turns pair kerning off. -/
   kerning : Bool := true
   anchor : Anchor := .start
+  /-- `text-decoration`, resolved by `Svg.lean` to *which ancestor's* style
+  supplies the fill/stroke for each line that is in effect (usvg walks from
+  this element up to the root, drawing a line for every kind any of them
+  declares, coloured by the nearest one that declares that particular kind —
+  see `Svg.textShapes`), as an index into its own per-run style table.
+  `none` when no ancestor declares that kind at all. -/
+  underlineIdx : Option Nat := none
+  overlineIdx : Option Nat := none
+  throughIdx : Option Nat := none
 deriving Inhabited, Repr
 
 /-- The per-character position lists of one `text`/`tspan` element. -/
@@ -346,6 +355,72 @@ def glyphCmds (f : Font) (gid : Nat) (sizeFx : Fx) (rot : Fx) (ox oy : Int) :
     out := out.push .close
   return out
 
+/-! ## Text decoration (`text-decoration`)
+
+`underline`/`overline`/`line-through` are drawn as a plain filled rectangle
+per run, `underlineThickness` tall, spanning the run's own advance width,
+offset from the baseline by a font-metric that is otherwise never read
+(`Font.underlinePosition`/`ascender`/`Font.strikeoutPosition`), and rotated
+about the *first* character's pen position exactly like a glyph outline —
+usvg builds the same rectangle from the first glyph cluster's own transform
+and the summed advance of the run, so a `rotate`/`dy`/`y` list that only
+touches a later character in the run moves the glyphs but not the line
+underneath them (`text-decoration/underline-with-{dy,rotate,y}-list-*.svg`
+pin this down). -/
+
+/-- One open decoration run: which ancestor's style colours it
+(`Placed.styleIdx`), the pen position and rotation of the run's first
+character, the accumulated advance so far, and the font metrics (already
+picked for this run's own face/size) the rectangle is built from. -/
+structure DecorRun where
+  styleIdx : Nat := 0
+  ox : Int := 0
+  oy : Int := 0
+  rot : Fx := 0
+  width : Int := 0
+  unitsPerEm : Nat := 1000
+  size : Fx := 0
+  /-- Font-unit Y coordinate the rectangle is centred on, in the same
+  convention as a glyph's own contour points (negative is above the
+  baseline): `Font.underlinePosition`, `Font.ascender` or
+  `Font.strikeoutPosition`, depending on which line this run is. -/
+  dyUnits : Int := 0
+  /-- `Font.underlineThickness`, shared by all three kinds. -/
+  thicknessUnits : Int := 0
+deriving Inhabited
+
+/-- Round `v * size256 / upem` to the nearest integer, ties away from zero.
+Unlike `glyphCmds`'s `tr` (which works in doubled font units so a contour's
+implied midpoints come out exact), a decoration metric is a plain scalar, so
+a symmetric round is simpler and exactly as correct. -/
+def roundScale (v size256 upem : Int) : Int :=
+  if upem == 0 then 0
+  else if v ≥ 0 then Int.ediv (v * size256 + upem / 2) upem
+  else -(Int.ediv (-v * size256 + upem / 2) upem)
+
+/-- One decoration run's rectangle, already rotated and translated to the
+`<text>` element's user space — the same final transform `glyphCmds` applies
+to a contour, just to four straight corners instead of control points.
+`#[]` for a run with zero or negative width (`letter-spacing` collapsed it
+away, or the character never advanced): a rectangle here is drawn only from
+its own width, there is no glyph outline to fall back on. -/
+def decorRectCmds (r : DecorRun) : Array PathCmd :=
+  if r.width ≤ 0 then #[]
+  else
+    let upem : Int := if r.unitsPerEm == 0 then 1000 else r.unitsPerEm
+    let k : Int := r.size * 256
+    let dy := -(roundScale r.dyUnits k upem)
+    let th := roundScale r.thicknessUnits k upem
+    let y0 := dy - Int.ediv th 2
+    let y1 := y0 + th
+    let (sn, cs) := if r.rot == 0 then ((0 : Int), (65536 : Int)) else sinCos16 (degToRad16 r.rot)
+    let tr := fun (lx ly : Int) =>
+      let (rx, ry) :=
+        if r.rot == 0 then (lx, ly)
+        else (Int.ediv (cs * lx - sn * ly) 65536, Int.ediv (sn * lx + cs * ly) 65536)
+      (⟨Fx.clamp (Int.ediv (rx + r.ox + 128) 256), Fx.clamp (Int.ediv (ry + r.oy + 128) 256)⟩ : Pt)
+    #[.moveTo (tr 0 y0), .lineTo (tr r.width y0), .lineTo (tr r.width y1), .lineTo (tr 0 y1), .close]
+
 /-! ## Layout -/
 
 /-- One laid-out character. -/
@@ -482,9 +557,18 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   let rn := rend.size
   if rn == 0 then return (#[], used)
   -- ---- 8. chunk by chunk
+  -- A decoration rectangle breaks more often than a glyph-outline run: usvg
+  -- starts a new one not only where the style changes but at *any* character
+  -- that carries its own `dx`, `dy` or `rotate` (`GlyphCluster::
+  -- has_relative_shift`, `text/layout.rs`) — `text-decoration/underline-
+  -- with-{dy,rotate}-list-*.svg` give every character in the run a `dy`/
+  -- `rotate`, and the reference draws one short underline per glyph rather
+  -- than one line spanning the word.  All of a run's rectangles for one
+  -- decoration kind still end up in a *single* path, though (below), same as
+  -- its glyph outlines: usvg resolves one fill/stroke per (span, kind) pair
+  -- against the whole thing, so a gradient across an underline spans the
+  -- true run width even when the line itself is several disjoint segments.
   let mut placed : Array Placed := #[]
-  let mut curStyle : Option Nat := none
-  let mut curCmds : Array PathCmd := #[]
   let mut lastX : Int := 0
   let mut lastY : Int := 0
   let mut a : Nat := 0
@@ -539,6 +623,35 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
     let chunkY : Int := match p0.y with | some v => v * 256 | none => lastY
     let mut x : Int := x0
     let mut y : Int := 0
+    -- A style run never crosses a chunk boundary (`collect_decoration_spans`
+    -- runs per chunk): every buffer below starts fresh each chunk and is
+    -- flushed at the end of this `for`, never carried into the next one.
+    --
+    -- Within a run, a shift-break (see above) closes the *currently open*
+    -- rectangle into the run's own buffer without flushing anything: usvg
+    -- builds one path per (span, decoration kind) out of every rectangle the
+    -- run produced (`convert_decoration`'s one `PathBuilder` for the whole
+    -- `decoration_spans` slice) and resolves *one* fill/stroke against it, so
+    -- a gradient painted across an underline spans the true run width even
+    -- when the line itself is drawn as several disjoint segments
+    -- (`underline-with-{dy,rotate}-list-2/4.svg`, both gradient-filled).
+    let mut curStyle : Option Nat := none
+    let mut curCmds : Array PathCmd := #[]
+    let mut olIdx : Option Nat := none
+    let mut ulIdx : Option Nat := none
+    let mut thIdx : Option Nat := none
+    let mut olCmds : Array PathCmd := #[]
+    let mut ulCmds : Array PathCmd := #[]
+    let mut thCmds : Array PathCmd := #[]
+    let mut olRun : Option DecorRun := none
+    let mut ulRun : Option DecorRun := none
+    let mut thRun : Option DecorRun := none
+    let closeSub := fun (cmds : Array PathCmd) (r : Option DecorRun) =>
+      match r with | some r => cmds ++ decorRectCmds r | none => cmds
+    let flushBuf := fun (placed : Array Placed) (idx? : Option Nat) (cmds : Array PathCmd) =>
+      match idx? with
+      | some idx => if cmds.size > 0 then placed.push ⟨idx, cmds⟩ else placed
+      | none => placed
     for q in [0:cl.size] do
       let c := cl.getD q default
       -- usvg indexes `dx`/`dy`/`rotate` by the character's position among the
@@ -549,26 +662,65 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
       let p := pos.getD (a + q) {}
       x := x + p.dx * 256
       y := y + p.dy * 256
+      let ox := chunkX + x
+      let oy := chunkY + y
+      let styleChanged := curStyle != some c.styleIdx
+      let shiftBreak := p.dx != 0 || p.dy != 0 || p.rot != 0
+      if styleChanged then
+        -- close the whole old run and flush it, in painter's order:
+        -- overline, underline, its glyph outline, then line-through.
+        olCmds := closeSub olCmds olRun
+        ulCmds := closeSub ulCmds ulRun
+        thCmds := closeSub thCmds thRun
+        placed := flushBuf placed olIdx olCmds
+        placed := flushBuf placed ulIdx ulCmds
+        placed := match curStyle with
+          | some s => if curCmds.size > 0 then placed.push ⟨s, curCmds⟩ else placed
+          | none => placed
+        placed := flushBuf placed thIdx thCmds
+        curStyle := some c.styleIdx
+        curCmds := #[]
+        olIdx := c.props.overlineIdx; ulIdx := c.props.underlineIdx; thIdx := c.props.throughIdx
+        olCmds := #[]; ulCmds := #[]; thCmds := #[]
+      else if shiftBreak then
+        -- only the currently open rectangle closes; the run (and its
+        -- buffers) keeps going.
+        olCmds := closeSub olCmds olRun
+        ulCmds := closeSub ulCmds ulRun
+        thCmds := closeSub thCmds thRun
+      if styleChanged || shiftBreak then
+        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) =>
+          match idx?, faces.get c.props.face with
+          | some idx, some f =>
+            some { styleIdx := idx, ox := ox, oy := oy, rot := p.rot, width := 0,
+                   unitsPerEm := f.unitsPerEm, size := c.props.size,
+                   dyUnits := metric f, thicknessUnits := f.underlineThickness : DecorRun }
+          | _, _ => none
+        olRun := mkRun olIdx (·.ascender)
+        ulRun := mkRun ulIdx (·.underlinePosition)
+        thRun := mkRun thIdx (·.strikeoutPosition)
+      -- the run's width counts every character's advance, dropped or not,
+      -- the same way the pen itself always moves on.
+      olRun := olRun.map (fun r => { r with width := r.width + c.adv })
+      ulRun := ulRun.map (fun r => { r with width := r.width + c.adv })
+      thRun := thRun.map (fun r => { r with width := r.width + c.adv })
       if !c.dropped then
         match faces.get c.props.face with
-        | some f =>
-          let cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot (chunkX + x) (chunkY + y)
-          if cmds.size > 0 then
-            if curStyle == some c.styleIdx then curCmds := curCmds ++ cmds
-            else
-              match curStyle with
-              | some s => if curCmds.size > 0 then placed := placed.push ⟨s, curCmds⟩
-              | none => pure ()
-              curStyle := some c.styleIdx
-              curCmds := cmds
+        | some f => curCmds := curCmds ++ glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot ox oy
         | none => pure ()
       x := x + c.adv
+    olCmds := closeSub olCmds olRun
+    ulCmds := closeSub ulCmds ulRun
+    thCmds := closeSub thCmds thRun
+    placed := flushBuf placed olIdx olCmds
+    placed := flushBuf placed ulIdx ulCmds
+    placed := match curStyle with
+      | some s => if curCmds.size > 0 then placed.push ⟨s, curCmds⟩ else placed
+      | none => placed
+    placed := flushBuf placed thIdx thCmds
     lastX := chunkX + x
     lastY := chunkY + y
     a := b
-  match curStyle with
-  | some s => if curCmds.size > 0 then placed := placed.push ⟨s, curCmds⟩
-  | none => pure ()
   return (placed, used)
 
 end Text

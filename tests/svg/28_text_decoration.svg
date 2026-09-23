@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="320" font-family="Noto Sans">
+  <rect width="400" height="320" fill="#fdfdfb"/>
+  <!-- the three kinds, plain -->
+  <text x="12" y="040" font-size="24" fill="#1d3557" text-decoration="underline">Underlined</text>
+  <text x="12" y="088" font-size="24" fill="#1d3557" text-decoration="overline">Overlined</text>
+  <text x="12" y="136" font-size="24" fill="#1d3557" text-decoration="line-through">Struck out</text>
+  <!-- all three stacked, and bold (a different face's own metrics) -->
+  <text x="12" y="184" font-size="24" font-weight="bold" fill="#e63946"
+        text-decoration="underline overline line-through">All three</text>
+  <!-- the decoration line takes its colour from the nearest ancestor that
+       declares it, not from the glyphs it happens to sit under -->
+  <text x="12" y="222" font-size="22" fill="#e76f51" stroke="#2a9d8f"
+        text-decoration="line-through">
+    <tspan fill="#264653">different fill</tspan>
+  </text>
+  <!-- a `font-family` this renderer cannot match draws nothing at all, not a
+       Noto Sans fallback -->
+  <text x="12" y="258" font-size="22" font-family="serif" fill="#457b9d"
+        text-decoration="underline">invisible (no font match)</text>
+  <!-- letter-spacing carries the underline across the widened gaps -->
+  <text x="12" y="298" font-size="22" letter-spacing="6" fill="#6a4c93"
+        text-decoration="underline">wide underline</text>
+</svg>
