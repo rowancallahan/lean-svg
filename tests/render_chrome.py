@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 from playwright.async_api import async_playwright
 
@@ -36,7 +37,11 @@ async def _render_one(page, src, out_png, width):
     """Render one SVG with `page`. Returns None on success, else an error string."""
     src = src.resolve()
     html = src.parent / (".chrome_%d_%s.html" % (id(page), src.stem))
-    html.write_text(PAGE % (width, src.name))
+    # percent-encode: a filename can contain URI-reserved characters (the
+    # suite has literal `#`s, e.g. "#RGB-color.svg") that the browser would
+    # otherwise parse as part of the URL, not the path -- a `#` truncates
+    # `src` at the fragment, silently loading nothing.
+    html.write_text(PAGE % (width, quote(src.name, safe="")))
     try:
         await page.goto(html.as_uri())
         await page.wait_for_load_state("networkidle")
