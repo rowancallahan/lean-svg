@@ -158,7 +158,7 @@ difference is invisible, (b) we copy a resvg bug and a fix is within reach,
 | text/tspan/with-opacity | 1 | 0.993 | 0.989 | 0.989 | 0.971 | (a) (T90 fixed; font AA) |
 | text/writing-mode/tb-and-punctuation | 1 | 1.000 | 0.989 | 0.989 | 0.986 | skipped: writing-mode (T96 area) |
 
-Summary: 1 × (b), fixed; 16 × (a); 33 × (c); 3 skipped as other agents' areas.
+Summary: 1 × (b), fixed; 12 × (a); 37 × (c); 3 skipped as other agents' areas (53 total).
 
 ### 2. Fix: `feOffset` is clipped to its subregion
 
