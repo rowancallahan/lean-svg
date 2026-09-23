@@ -443,6 +443,8 @@ structure MaskEntry where
   userUnits : Bool := false
   contentBBox : Bool := false
   alpha : Bool := false
+  /-- T90: `color-interpolation="linearRGB"` on the `<mask>` itself. -/
+  linear : Bool := false
   x : Option Grad.LenPct := none
   y : Option Grad.LenPct := none
   w : Option Grad.LenPct := none
@@ -3905,6 +3907,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 { e with userUnits := isUser "maskUnits" false,
                          contentBBox := !(isUser "maskContentUnits" true),
                          alpha := stM.maskAlpha,
+                         linear := (attrOrStyle attrs "color-interpolation").any
+                           (fun v => eqAscii (trim v) "linearRGB"),
                          x := (attr attrs "x").bind parseCoord16,
                          y := (attr attrs "y").bind parseCoord16,
                          w := (attr attrs "width").bind parseCoord16,

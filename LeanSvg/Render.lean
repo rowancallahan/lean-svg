@@ -908,7 +908,7 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
                 filterWork := fw'
                 let mcv := Clip.applyToCanvas
                   #[Mask.regionMask parent.fw parent.fh parent.maskMat st.region] mcv lox loy
-                covs := covs.push (Mask.toClipMask mcv lox loy e.alpha)
+                covs := covs.push (Mask.toClipMask mcv lox loy e.alpha e.linear)
             if err.isSome then break
             done := Clip.applyToCanvas covs.reverse done lox loy
             -- Popped *before* the composite so that the parent's pixel array is
