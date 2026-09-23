@@ -11,6 +11,8 @@ Reads lines from stdin and prints one line of JSON (or text) per line:
   as one run with an embedded font (`FontSet.byModule`) and prints
   `[[gid, cluster, xAdvance, xOffset, yOffset], ...]` in font units, visual
   order — what `tests/check_shape.py` compares against HarfBuzz;
+* `F <font file> <rtl 0|1> <kern 0|1> <hex cp> ...` does the same with a
+  font read from a file (`tests/fuzz_shape.py`'s mutants);
 * `C <hex cp> ...` prints each codepoint's `Bidi.bidiClass`;
 * `M <hex cp> ...` prints each codepoint's `Bidi.mirror` (`0` for none);
 * `<paraLevel> <hex cp> ...` prints the paragraph levels (`pl`, before L1),
@@ -31,18 +33,20 @@ def parseHex (s : String) : Nat :=
 def jsonNats (a : Array Nat) : String :=
   "[" ++ ",".intercalate (a.toList.map toString) ++ "]"
 
-def shapeLine (ws : List String) : String :=
-  match ws with
-  | m :: r :: k :: cps =>
-    match FontSet.byModule m with
-    | none => "error: unknown font module"
-    | some bs =>
+def shapeBytes (bs : ByteArray) (r k : String) (cps : List String) : String :=
       match Font.parse bs with
       | none => "error: font does not parse"
       | some f =>
         let gs := Shape.shapeRun f (Shape.Layout.ofBytes bs) (cps.toArray.map parseHex) (r == "1") (k == "1")
         "[" ++ ",".intercalate (gs.toList.map fun g =>
           s!"[{g.gid},{g.cluster},{g.xAdv},{g.xOff},{g.yOff}]") ++ "]"
+
+def shapeLine (ws : List String) : String :=
+  match ws with
+  | m :: r :: k :: cps =>
+    match FontSet.byModule m with
+    | none => "error: unknown font module"
+    | some bs => shapeBytes bs r k cps
   | _ => "error: usage S <module> <rtl> <kern> <hex cp>..."
 
 def main : IO Unit := do
@@ -56,6 +60,12 @@ def main : IO Unit := do
     let ws := (line.trimAscii.toString.splitOn " ").filter (· ≠ "")
     match ws.headD "" with
     | "S" => stdout.putStrLn (shapeLine (ws.drop 1))
+    | "F" =>
+      match ws.drop 1 with
+      | path :: r :: k :: cps =>
+        let bs ← IO.FS.readBinFile path
+        stdout.putStrLn (shapeBytes bs r k cps)
+      | _ => stdout.putStrLn "error: usage F <file> <rtl> <kern> <hex cp>..."
     | "C" =>
       let cs := (ws.drop 1).map fun w => (repr (Bidi.bidiClass (parseHex w))).pretty
       stdout.putStrLn (" ".intercalate cs)
