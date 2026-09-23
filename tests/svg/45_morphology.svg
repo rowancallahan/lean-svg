@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <!-- T69: feMorphology erode/dilate, separate x/y radii, objectBoundingBox -->
+  <defs>
+    <filter id="erode">
+      <feMorphology operator="erode" radius="4"/>
+    </filter>
+    <filter id="dilate">
+      <feMorphology operator="dilate" radius="6"/>
+    </filter>
+    <filter id="anisotropic">
+      <feMorphology operator="dilate" radius="2 10"/>
+    </filter>
+    <filter id="obb" primitiveUnits="objectBoundingBox">
+      <feMorphology operator="erode" radius="0.05"/>
+    </filter>
+  </defs>
+  <rect x="20" y="20" width="110" height="110" fill="seagreen" filter="url(#erode)"/>
+  <rect x="170" y="20" width="110" height="110" fill="darkorange" filter="url(#dilate)"/>
+  <rect x="20" y="170" width="110" height="110" fill="steelblue" filter="url(#anisotropic)"/>
+  <rect x="170" y="170" width="110" height="110" fill="crimson" filter="url(#obb)"/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200">
+  <!-- T63: only data: URIs are ever read; each of these must render exactly
+       like the same file without its <image> elements. -->
+  <image xlink:href="image.png" width="100" height="100"/>
+  <image href="../corpora/resvg-test-suite/resources/image.png" width="100" height="100"/>
+  <image href="/etc/passwd" x="10" width="100" height="100"/>
+  <image xlink:href="file:///etc/passwd" width="100" height="100"/>
+  <image xlink:href="file:///dev/zero"/>
+  <image xlink:href="http://evil.example/x.png" width="100" height="100"/>
+  <image href="https://evil.example/x.png"/>
+  <image href="  data-not:image/png;base64,AAAA"/>
+  <image href="data:text/html,%3Cscript%3E"/>
+  <image/>
+  <rect x="10" y="10" width="50" height="50" fill="#000"/>
+</svg>

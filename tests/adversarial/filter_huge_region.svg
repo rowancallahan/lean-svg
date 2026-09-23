@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
+  <!-- T51: a region far larger than the canvas is cut to resvg's max_filter_bbox
+       and then to the canvas; nested filters each get a bounded layer -->
+  <filter id="f" filterUnits="userSpaceOnUse" x="-1e9" y="-1e9" width="4e9" height="4e9">
+    <feFlood flood-color="gold"/>
+    <feOffset dx="-1e8" dy="1e8"/>
+  </filter>
+  <filter id="g" x="-100000" y="-100000" width="200000" height="200000"><feGaussianBlur stdDeviation="30"/></filter>
+  <g filter="url(#g)"><g filter="url(#g)"><rect x="10" y="10" width="1" height="1" filter="url(#f)"/></g></g>
+</svg>

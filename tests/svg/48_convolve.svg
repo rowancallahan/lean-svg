@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <!-- T68: feConvolveMatrix -->
+  <defs>
+    <filter id="sharpen" color-interpolation-filters="sRGB">
+      <feConvolveMatrix order="3" bias="0"
+        kernelMatrix="0 -1 0 -1 5 -1 0 -1 0"/>
+    </filter>
+    <filter id="wrap" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+      <feConvolveMatrix order="5 1" edgeMode="wrap" targetX="2"
+        kernelMatrix="0.2 0.2 0.2 0.2 0.2"/>
+    </filter>
+    <filter id="alpha" color-interpolation-filters="sRGB">
+      <feConvolveMatrix order="3" preserveAlpha="true" divisor="1"
+        kernelMatrix="0 1 0 1 -4 1 0 1 0"/>
+    </filter>
+    <filter id="invalid" color-interpolation-filters="sRGB">
+      <!-- divisor=0: usvg's dummy primitive (transparent black) -->
+      <feConvolveMatrix order="3" divisor="0"
+        kernelMatrix="1 1 1 1 1 1 1 1 1"/>
+    </filter>
+  </defs>
+  <rect x="10" y="10" width="80" height="80" fill="steelblue" filter="url(#sharpen)"/>
+  <rect x="110" y="10" width="80" height="80" fill="tomato" filter="url(#wrap)"/>
+  <circle cx="250" cy="50" r="40" fill="seagreen" filter="url(#alpha)"/>
+  <rect x="10" y="110" width="80" height="80" fill="gold" filter="url(#invalid)"/>
+</svg>

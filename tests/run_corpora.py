@@ -71,6 +71,7 @@ from run_tests import (  # noqa: E402  (path must be set up first)
     resvg_font_args,
     write_composite,
 )
+import render_chrome  # noqa: E402  (path must be set up first)
 
 CORPORA_DIR = REPO / "tests" / "corpora"
 OUT_DIR = REPO / "tests" / "out" / "corpora"
@@ -106,6 +107,15 @@ WIDTHS = {}
 # timeout, size_mismatch, usvg_failed, ref_failed, unreadable_png) is a
 # non-pass and is what --failing-from re-selects.
 PASS_STATUS = "pass"
+
+# What `ours` is scored against. `resvg` (default) is live resvg on a copy
+# with external hrefs stripped, unchanged from before --ref existed. `chrome`
+# renders the same stripped copy with headless Chromium, one browser launch
+# per corpus/route batch (see `prerender_chrome_refs`). `suite` reads the
+# resvg-test-suite's own bundled PNG next to the SVG (resvg only; other
+# corpora have none), resizing it to the render width if it is not already
+# that size.
+REF_MODES = ("resvg", "chrome", "suite")
 
 # --compare reports a file as changed when within-8 moved by more than this
 # many percentage points.
@@ -156,8 +166,98 @@ def first_line(text, limit=160):
 # --------------------------------------------------------------------------
 
 
+# Rowan's policy: lean-svg never loads anything outside the SVG itself (no file
+# paths, no URLs). For a file that references an external resource, the right
+# output is the file rendered *without* it, so the reference is resvg on a copy
+# with every such `href`/`xlink:href` removed. Only same-document (`#id`) and
+# `data:` hrefs are kept. The row carries a note saying so.
+EXTERNAL_HREF = re.compile(r"""\s(?:xlink:)?href\s*=\s*(["'])(?!\s*#|\s*data:)[^"']*\1""")
+
+TAG_OPEN = re.compile(r"<([A-Za-z][\w:.-]*)((?:[^>\"']|\"[^\"]*\"|'[^']*')*)")
+
+
+def strip_external_refs(svg_path):
+    """(text without external hrefs, number removed); None if unreadable."""
+    try:
+        text = svg_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    count = [0]
+
+    def strip_tag(m):
+        # `<a href>` is a hyperlink, not a resource: nothing is loaded for it
+        if m.group(1) == "a":
+            return m.group(0)
+        attrs, n = EXTERNAL_HREF.subn("", m.group(2))
+        count[0] += n
+        return "<" + m.group(1) + attrs
+
+    stripped = TAG_OPEN.sub(strip_tag, text)
+    return stripped, count[0]
+
+
+def prerender_chrome_refs(corpus, files, width, jobs):
+    """Render every file's Chromium reference once, up front, for `--ref chrome`.
+
+    Applies the same external-href stripping as the resvg reference path
+    (`strip_external_refs`), so Chromium never loads anything outside the SVG
+    either. One browser launch for the whole list (`render_chrome.render_batch`,
+    `jobs` pages pulling from a shared queue), not one per file.
+
+    Returns ({rel: {"png": Path|None, "note": str, "err": str}}, tmpdir); the
+    caller must rmtree tmpdir once every row referencing these PNGs is done
+    (render_one copies them out before returning).
+    """
+    root = CORPORA_DIR / CORPORA[corpus][0]
+    tmpdir = Path(tempfile.mkdtemp(prefix="chromeref_%s_" % corpus))
+    pairs = []
+    stem_meta = {}
+    for i, svg in enumerate(files):
+        rel = svg.relative_to(root).as_posix()
+        stem = "%06d" % i
+        src = svg
+        note = ""
+        stripped = strip_external_refs(svg)
+        if stripped is not None and stripped[1] > 0:
+            src = tmpdir / (stem + "_src.svg")
+            src.write_text(stripped[0], encoding="utf-8")
+            note = "external resource not loaded by design; reference rendered without it"
+        pairs.append((src, stem))
+        stem_meta[stem] = (rel, note)
+    rendered = render_chrome.render_batch(pairs, tmpdir / "out", width, jobs)
+    out = {}
+    for stem, (rel, note) in stem_meta.items():
+        png = rendered.get(stem)
+        out[rel] = {
+            "png": png,
+            "note": note,
+            "err": "" if png is not None else "chromium could not render this file",
+        }
+    return out, tmpdir
+
+
+def suite_ref_png(svg, width, dest):
+    """Write the resvg-test-suite's own PNG for `svg`, resized to `width` if
+    needed, to `dest`. Returns an error string, or None on success."""
+    suite_png = svg.with_suffix(".png")
+    if not suite_png.is_file():
+        return "no suite PNG next to this file"
+    img = load_rgba(suite_png)
+    if img is None:
+        return "suite PNG could not be read"
+    if img.shape[1] == width:
+        shutil.copy2(suite_png, dest)
+        return None
+    from PIL import Image  # local: only `suite` ref mode needs PIL's resize
+
+    height = max(1, round(img.shape[0] * width / img.shape[1]))
+    with Image.open(suite_png) as im:
+        im.convert("RGBA").resize((width, height), Image.LANCZOS).save(dest)
+    return None
+
+
 def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
-                keep_renders_dir=None, resvg_args=None):
+                keep_renders_dir=None, resvg_args=None, ref_mode="resvg", chrome_ref=None):
     """Render one file both ways and score it.
 
     Returns a row dict. When `keep` is true the loaded RGBA arrays and the
@@ -192,6 +292,7 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
         "max_d": "",
         "ms_ours": "",
         "ms_ref": "",
+        "note": "",
     }
 
     ref_png = tmpdir / ("%06d_ref.png" % slot)
@@ -217,17 +318,59 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
             for path in scratch:
                 path.unlink(missing_ok=True)
 
-    # reference: resvg on the ORIGINAL file, for both routes
-    rc_ref, ms_ref, err_ref, to_ref = run_cmd(
-        ["resvg"] + (resvg_args or []) + ["-w", str(width), str(svg), str(ref_png)]
-    )
-    row["ref_rc"] = "timeout" if to_ref else rc_ref
-    row["ref_err"] = first_line(err_ref)
-    row["ms_ref"] = "%.1f" % ms_ref
-    if to_ref or rc_ref != 0:
-        row["status"] = "ref_failed"
-        cleanup()
-        return row
+    # `--ref suite`: the suite's PNGs are 500 px renders, and a resampled
+    # reference never matches a native render (every file fails), so under
+    # `suite` both sides are compared at the PNG's own width instead.
+    if ref_mode == "suite":
+        native = load_rgba(svg.with_suffix(".png"))
+        if native is not None:
+            width = native.shape[1]
+            row["width"] = width
+
+    # reference: resvg on the ORIGINAL file, for both routes -- except that
+    # external resources are removed first (see `strip_external_refs`). Under
+    # `--ref chrome`/`--ref suite` a different reference is substituted below,
+    # but the external-resource policy still applies (chrome: stripped same as
+    # resvg, upstream in prerender_chrome_refs; suite: the suite PNG is itself
+    # already rendered without external resources, by the same suite policy).
+    if ref_mode == "resvg":
+        ref_src = svg
+        stripped = strip_external_refs(svg)
+        if stripped is not None and stripped[1] > 0:
+            ref_src = tmpdir / ("%06d_noext.svg" % slot)
+            ref_src.write_text(stripped[0], encoding="utf-8")
+            scratch.append(ref_src)
+            row["note"] = "external resource not loaded by design; reference rendered without it"
+        rc_ref, ms_ref, err_ref, to_ref = run_cmd(
+            ["resvg"] + (resvg_args or []) + ["-w", str(width), str(ref_src), str(ref_png)]
+        )
+        row["ref_rc"] = "timeout" if to_ref else rc_ref
+        row["ref_err"] = first_line(err_ref)
+        row["ms_ref"] = "%.1f" % ms_ref
+        if to_ref or rc_ref != 0:
+            row["status"] = "ref_failed"
+            cleanup()
+            return row
+    elif ref_mode == "chrome":
+        info = (chrome_ref or {}).get(rel)
+        if info is None or info.get("png") is None:
+            row["status"] = "ref_failed"
+            row["ref_err"] = (info or {}).get("err") or "no chromium render for this file"
+            cleanup()
+            return row
+        row["note"] = info.get("note", "")
+        shutil.copy2(info["png"], ref_png)
+        row["ref_rc"] = 0
+    elif ref_mode == "suite":
+        err = suite_ref_png(svg, width, ref_png)
+        if err is not None:
+            row["status"] = "ref_failed"
+            row["ref_err"] = err
+            cleanup()
+            return row
+        row["ref_rc"] = 0
+    else:
+        assert False, "unknown --ref mode %r" % ref_mode
 
     # input for lean-svg
     src = svg
@@ -356,12 +499,12 @@ CSV_FIELDS = [
     "corpus", "route", "file", "dir", "width", "status",
     "ours_rc", "ours_err", "ref_rc", "ref_err", "usvg_rc", "usvg_err",
     "size", "exact", "within", "within32", "mean_abs", "max_d",
-    "ms_ours", "ms_ref",
+    "ms_ours", "ms_ref", "note",
 ]
 
 
 def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_renders_dir=None,
-                     resvg_args=None):
+                     resvg_args=None, ref_mode="resvg", chrome_ref=None):
     width = width_for(corpus)
     tmpdir = Path(tempfile.mkdtemp(prefix="corpora_%s_%s_" % (corpus, route)))
     try:
@@ -375,7 +518,7 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
             return render_one(
                 svg, corpus, route, width, binary, tmpdir, i,
                 tol, threshold, keep=False, keep_renders_dir=keep_renders_dir,
-                resvg_args=resvg_args,
+                resvg_args=resvg_args, ref_mode=ref_mode, chrome_ref=chrome_ref,
             )
 
         start = time.perf_counter()
@@ -396,7 +539,8 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
 
 
 def write_worst_composites(
-    corpus, route, rows, binary, tol, threshold, jobs, resvg_args=None
+    corpus, route, rows, binary, tol, threshold, jobs, resvg_args=None,
+    ref_mode="resvg", chrome_ref=None,
 ):
     """Re-render the N worst scored files and write ref|ours|diff composites."""
     scored = [r for r in rows if "_within" in r]
@@ -414,6 +558,7 @@ def write_worst_composites(
             fresh = render_one(
                 svg, corpus, route, width, binary, tmpdir, i,
                 tol, threshold, keep=True, resvg_args=resvg_args,
+                ref_mode=ref_mode, chrome_ref=chrome_ref,
             )
             panels = fresh.pop("_panels", None)
             if panels is None:
@@ -694,10 +839,12 @@ def build_summary(all_runs, config):
     parts.append("# External corpora: lean-svg vs resvg\n")
     parts.append(
         "generated %s &middot; lean-svg `%s` &middot; commit `%s` &middot; "
-        "resvg/usvg %s &middot; tol %d &middot; threshold %.2f &middot; jobs %d\n"
+        "resvg/usvg %s &middot; tol %d &middot; threshold %.2f &middot; jobs %d "
+        "&middot; ref `%s`\n"
         % (
             time.strftime("%Y-%m-%d %H:%M:%S"), config["bin"], config["commit"],
             config["tool_version"], config["tol"], config["threshold"], config["jobs"],
+            config["ref"],
         )
     )
     parts.append(
@@ -936,6 +1083,12 @@ def main():
              "set (falls back to whatever fonts resvg finds on the system)",
     )
     parser.add_argument(
+        "--ref", default="resvg", choices=list(REF_MODES),
+        help="what to score `ours` against: live resvg (default, unchanged "
+             "behaviour), headless Chromium (chrome), or the resvg-test-suite's "
+             "own bundled PNG (suite, resvg corpus only)",
+    )
+    parser.add_argument(
         "--keep-renders", metavar="DIR", default=None,
         help="save each file's reference and our render as PNGs under "
              "DIR/<corpus>/<route>/<relative path>.{ref,ours}.png, for a "
@@ -1085,30 +1238,47 @@ def main():
     grand_start = time.perf_counter()
     for (corpus, route), files in selected.items():
         print(
-            "== %s / %s: %d files at width %d, %d jobs"
-            % (corpus, route, len(files), width_for(corpus), args.jobs),
+            "== %s / %s: %d files at width %d, %d jobs, --ref %s"
+            % (corpus, route, len(files), width_for(corpus), args.jobs, args.ref),
             flush=True,
         )
-        rows, elapsed, csv_path = run_corpus_route(
-            corpus, route, files, binary, args.tol, args.threshold, args.jobs,
-            keep_renders_dir, resvg_args=resvg_args,
-        )
-        s = stats_for(rows)
-        print(
-            "   %.1fs  rendered %d/%d  unsupported %d  size-mism %d  "
-            "pass %d (%.1f%% of all, %.1f%% of rendered)"
-            % (
-                elapsed, s["rendered"], s["files"],
-                s["unsupported"] + s["timeout"], s["size_mismatch"],
-                s["pass"], s["pass_all"] * 100.0, s["pass_rendered"] * 100.0,
-            ),
-            flush=True,
-        )
-        if not args.no_worst:
-            write_worst_composites(
-                corpus, route, rows, binary, args.tol, args.threshold, args.jobs,
-                resvg_args=resvg_args,
+        chrome_ref, chrome_tmpdir = None, None
+        if args.ref == "chrome":
+            t0 = time.perf_counter()
+            chrome_ref, chrome_tmpdir = prerender_chrome_refs(
+                corpus, files, width_for(corpus), args.jobs
             )
+            n_ok = sum(1 for v in chrome_ref.values() if v["png"] is not None)
+            print(
+                "   chromium reference: %d/%d rendered in %.1fs"
+                % (n_ok, len(chrome_ref), time.perf_counter() - t0),
+                flush=True,
+            )
+        try:
+            rows, elapsed, csv_path = run_corpus_route(
+                corpus, route, files, binary, args.tol, args.threshold, args.jobs,
+                keep_renders_dir, resvg_args=resvg_args,
+                ref_mode=args.ref, chrome_ref=chrome_ref,
+            )
+            s = stats_for(rows)
+            print(
+                "   %.1fs  rendered %d/%d  unsupported %d  size-mism %d  "
+                "pass %d (%.1f%% of all, %.1f%% of rendered)"
+                % (
+                    elapsed, s["rendered"], s["files"],
+                    s["unsupported"] + s["timeout"], s["size_mismatch"],
+                    s["pass"], s["pass_all"] * 100.0, s["pass_rendered"] * 100.0,
+                ),
+                flush=True,
+            )
+            if not args.no_worst:
+                write_worst_composites(
+                    corpus, route, rows, binary, args.tol, args.threshold, args.jobs,
+                    resvg_args=resvg_args, ref_mode=args.ref, chrome_ref=chrome_ref,
+                )
+        finally:
+            if chrome_tmpdir is not None:
+                shutil.rmtree(chrome_tmpdir, ignore_errors=True)
         all_runs.append((corpus, route, rows, elapsed, csv_path))
 
     # ---- --compare: what moved against a baseline run
@@ -1125,6 +1295,7 @@ def main():
         "tol": args.tol,
         "threshold": args.threshold,
         "jobs": args.jobs,
+        "ref": args.ref,
         "sampling_notes": sampling_notes,
         "fast": args.fast,
         "widths_for": sorted({c for c, _ in selected}, key=list(CORPORA).index),

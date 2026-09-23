@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" font-family="Noto Sans">
+  <rect width="400" height="300" fill="#fdfdfb"/>
+  <!-- alignment-baseline keywords, all against the same anchor line -->
+  <path d="M 8 40 H 392" stroke="#c9c9c9" stroke-width="1"/>
+  <g font-size="16" fill="#1d3557">
+    <text x="10" y="40" alignment-baseline="text-before-edge">before-edge</text>
+    <text x="130" y="40" alignment-baseline="middle">middle</text>
+    <text x="220" y="40" alignment-baseline="hanging">hanging</text>
+    <text x="320" y="40" alignment-baseline="text-after-edge">after-edge</text>
+  </g>
+  <!-- dominant-baseline on <text>, inherited by a plain tspan -->
+  <path d="M 8 80 H 392" stroke="#c9c9c9" stroke-width="1"/>
+  <text x="10" y="80" font-size="18" dominant-baseline="central" fill="#2a9d8f">central
+    <tspan dominant-baseline="ideographic" fill="#e76f51">ideographic tspan</tspan></text>
+  <!-- baseline-shift: sub/super, a length and a percentage, all against one baseline -->
+  <text x="10" y="130" font-size="24" fill="#264653">H<tspan baseline-shift="sub"
+      font-size="14">2</tspan>O and E=mc<tspan baseline-shift="super"
+      font-size="14">2</tspan> or x<tspan baseline-shift="-6">low</tspan><tspan
+      baseline-shift="30%">high</tspan></text>
+  <!-- baseline-shift accumulates through nested tspans -->
+  <text x="10" y="180" font-size="20" fill="#6a4c93">plain<tspan baseline-shift="super"
+      >up<tspan baseline-shift="super">up again</tspan></tspan></text>
+  <!-- baseline-shift on <text> itself is ignored (not inheritable); on <g> too -->
+  <path d="M 8 220 H 392" stroke="#c9c9c9" stroke-width="1"/>
+  <text x="10" y="220" font-size="18" baseline-shift="super" fill="#e63946">on text, ignored</text>
+  <g baseline-shift="super">
+    <text x="220" y="220" font-size="18" fill="#e63946">on g, ignored</text>
+  </g>
+  <!-- dominant-baseline + baseline-shift combined -->
+  <text x="10" y="260" font-size="18" dominant-baseline="hanging" fill="#457b9d">hanging<tspan
+      baseline-shift="sub" font-size="12">+sub</tspan></text>
+</svg>

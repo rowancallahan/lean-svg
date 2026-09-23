@@ -412,3 +412,12 @@ back. Not before.
 6. The locality theorem, cheap half. Shares the loop idiom with (4).
 
 Features rank below all of these unless the goal changes.
+
+## 6. Later: fonts (Rowan, 2026-09-23; not started, after the current work lands)
+
+- Add non-European scripts and more open-source fonts, packaged the same way
+  as the embedded Noto Sans subsets (check each font's licence permits it;
+  OFL does). Keep binary size in mind.
+- Longer term: rethink how text reaches the renderer, e.g. fonts as outline
+  paths the document can carry, or a different handling of the `<text>`
+  element. Design discussion first; no change yet.

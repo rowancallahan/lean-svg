@@ -1,8 +1,14 @@
 import LeanSvg.Xml
 import LeanSvg.Css
 import LeanSvg.Shader
+import LeanSvg.Pattern
 import LeanSvg.Canvas
 import LeanSvg.Text
+import LeanSvg.Viewport
+import LeanSvg.Use
+import LeanSvg.Filter
+import LeanSvg.Image
+import LeanSvg.SvgImage
 import Std.Data.HashMap
 
 /-!
@@ -12,8 +18,9 @@ Turns the XML event stream into a flat list of shapes with fully resolved
 style and transform.  Supported: `svg g path rect circle ellipse line polygon
 polyline`, solid paints, opacity, fill rule, stroke width/cap/join/miter,
 `transform`, and the `style` attribute.  Everything else is skipped along with
-its subtree.  There is no code that follows a reference of any kind (`url()`,
-`href`, `use`, `image`, CSS), so the renderer cannot be made to look outside the
+its subtree.  References are followed only within the input: `url(#id)` and
+same-document `use` `href="#id"` (T47, `LeanSvg/Use.lean`); nothing resolves
+an external reference, so the renderer cannot be made to look outside the
 input bytes.
 -/
 
@@ -26,8 +33,19 @@ inductive Paint where
   | none
   | solid (c : Rgba)
   /-- A `url(#id)` that named a usable gradient: the index of its entry in the
-  style's `Grad.Defs` table (T18). -/
-  | gradient (idx : Nat)
+  style's `Grad.Defs` table (T18), plus the `<fallback>` from `url(#id)
+  <fallback>` (T64): usvg's `has_bbox` check (SVG 7.11) can still reject an
+  `objectBoundingBox` paint server at render time, once the shape's own
+  geometry is known, and falls back to this instead of painting nothing. -/
+  | gradient (idx : Nat) (fallback : Paint)
+  /-- A `url(#id)` that named a usable `<pattern>`: the index of its entry in
+  the style's `Pat.Defs` table.  Unlike a gradient, there is no further
+  invalidity to defer to draw time except a zero-area referencing shape under
+  `objectBoundingBox`, which usvg does not fall back for either — it paints
+  nothing, exactly as `Grad.build`'s `.skip` already does — so this carries no
+  fallback of its own; `resolvePaint` has already chosen between `.pattern`
+  and the `url()` fallback the same way it does for a gradient. -/
+  | pattern (idx : Nat)
 deriving Repr, Inhabited
 
 /-- `1.0` on the opacity grid: opacities are `Nat` numerators over 10^18.
@@ -80,6 +98,13 @@ structure Style where
   /-- `isolation: isolate`; not inherited, CSS only, like `blend`. -/
   isolate : Bool := false
   visible : Bool := true
+  /-- `shape-rendering: crispEdges`/`optimizeSpeed` (`usvg`'s
+  `ShapeRendering::use_shape_antialiasing() == false`): the shape is filled and
+  stroked with `Raster.rasterizeCrisp` instead of the antialiased default, and
+  a thin stroke skips the hairline shortcut (`painter.rs`'s
+  `treat_as_hairline` also refuses when `!paint.anti_alias`). Inherited;
+  `auto`/`geometricPrecision` (the default) turn antialiasing back on. -/
+  crisp : Bool := false
   /-- The CSS `color` property: inherited, defaults to black, and is what
   `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
   applies `color` before any other property so the resolution sees the
@@ -88,14 +113,13 @@ structure Style where
   /-- Whether `pctRefW`/`pctRefH` have been established yet.  False only for
   the literal `default : Style` that `interpret` passes as the parent of the
   root `<svg>` element itself; every other `Style` inherits `true` and the
-  values below unchanged, since this renderer has no nested `<svg>`/`<symbol>`
-  to rescope them. -/
+  values below, which only a nested `<svg>` rescopes (T48). -/
   pctRefSet : Bool := false
   /-- The rect `transform-origin` percentages resolve against: usvg's
-  per-element `state.view_box`, which is the same constant rect (the root's
-  `viewBox`, or else its own resolved size) for every element in a document
-  with no nested `<svg>`. Set once in `applyEffective`, from the root's own
-  attrs. -/
+  per-element `state.view_box`: the root's `viewBox`, or else its own
+  resolved size, set in `applyEffective` from the root's own attrs; a nested
+  `<svg>` replaces it for its subtree (T48).  Shape percentages (`shapeCmds`)
+  resolve against it too. -/
   pctRefW : Fx := 0
   pctRefH : Fx := 0
   /-- `transform-origin`'s resolved offset, *not* inherited: every element
@@ -110,6 +134,12 @@ structure Style where
   `url(#id)` becomes a `Paint.gradient` — without changing `applyProp`'s
   signature.  Every other `Style` inherits the same table by copying. -/
   defs : Grad.Defs := {}
+  /-- The document's `<pattern>` geometry table, built the same way and at the
+  same time as `defs`: fully from the pre-pass's raw attributes and `href`
+  chains, which is why it can be complete before the main walk even starts
+  (unlike its *content*, `Doc.patternContent`, which the walk itself
+  collects). -/
+  patterns : Pat.Defs := {}
   ctm : Mat := Mat.identity
   -- The text properties (T36).  All inherited, all unused by every element
   -- except `text`/`tspan`, so nothing outside `Svg.textShapes` reads them.
@@ -117,6 +147,12 @@ structure Style where
   inherited value (usvg's `resolve_font_size`), and the default is usvg's
   `Options::font_size`. -/
   fontSize : Fx := Fx.ofNat 12
+  /-- The root `<svg>` element's own resolved `font-size` (T52-shapes): what
+  `rem` resolves against (SVG2/CSS Values, always the root regardless of any
+  element's local `font-size`), set once in `interpret`'s `applyEffective`
+  when it processes the root element itself and inherited unchanged by every
+  descendant after that, unlike `fontSize`. -/
+  rootFontSize : Fx := Fx.ofNat 12
   /-- Numeric CSS `font-weight` after `bolder`/`lighter` stepping. -/
   fontWeight : Nat := 400
   /-- `font-style: italic` or `oblique`. -/
@@ -126,6 +162,44 @@ structure Style where
   /-- `font-kerning: none`, or SVG 1.1 `kerning="0"`, turns pair kerning off. -/
   textKerning : Bool := true
   textAnchor : Text.Anchor := .start
+  /-- `writing-mode` (T56): usvg resolves this once per `<text>` element from
+  its own attribute or the nearest ancestor that has one (`lr-tb`/`lr`/
+  `rl-tb`/`rl`/`horizontal-tb`/anything unrecognised is `LeftToRight`; only
+  `tb`/`tb-rl`/`vertical-rl`/`vertical-lr` are `TopToBottom` — usvg 0.48.1
+  does not distinguish `vertical-lr` from `vertical-rl`, or `tb` from
+  `tb-rl`, so neither do we).  Inherited like the other text properties, but
+  `Svg.textShapes` reads it only once, off the `<text>` element's own
+  resolved `Style`, so a `writing-mode` on a `tspan` has no effect (matches
+  usvg: it searches the `<text>` node's ancestors, which does not include its
+  own descendants). -/
+  writingMode : Bool := false
+  /-- `dominant-baseline`/`alignment-baseline` (T54): ordinary CSS-inherited
+  properties, unlike `baseline-shift` (`LeanSvg/Baseline.lean`, `textShapes`'s
+  `bsStack`), which is not carried on `Style` at all. -/
+  dominantBaseline : Text.AlignmentBaseline := .auto
+  alignmentBaseline : Text.AlignmentBaseline := .auto
+  /-- Whether `font-family` resolves to the one family this renderer embeds
+  ("Noto Sans"): see `resolveFontFamily`.  Defaults to `false`, matching
+  usvg's own default `font-family` ("Times New Roman"), which is not in the
+  embedded set either. -/
+  fontAvailable : Bool := false
+  /-- `text-decoration`, *not* inherited: `applyEffective` resets all three to
+  `false` for every element, and only that element's own raw attribute value
+  (from any cascade layer) can set them back.  usvg's decoration search
+  (`Svg.textShapes`) walks from a run's own element up through its ancestors
+  and draws a line for every kind *any* of them sets this way, so an
+  ancestor's own declaration must stay visible at its own level rather than
+  spreading (or failing to spread) like an ordinary inherited property. -/
+  ownUnderline : Bool := false
+  ownOverline : Bool := false
+  ownLineThrough : Bool := false
+  /-- `textLength`/`lengthAdjust`, *not* inherited for the same reason: a
+  `tspan`'s own `textLength` stretches only its own characters
+  (`textLength/on-a-single-tspan.svg`), so a plain reset-per-element `Style`
+  field is exactly what `Text.spanPropsOf` needs to hand `Text.layout` one
+  value per run. -/
+  ownTextLength : Option Fx := none
+  ownLengthAdjustGlyphs : Bool := false
   /-- `xml:space="preserve"`. -/
   spacePreserve : Bool := false
   /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
@@ -142,11 +216,54 @@ structure Style where
   inherited: what `ctm` gained on this element.  `Box.transformed` by it takes
   a child's object bounding box into the parent's user space (T20). -/
   ownMat : Mat := Mat.identity
+  /-- What `context-fill`/`context-stroke` resolve to (T47): the fill and
+  stroke of the nearest enclosing `use`, inherited; `none` outside any `use`,
+  as in usvg without a context element.  Only the paint is kept, not a
+  colour's alpha (usvg's `ContextElement` carries `Fill::paint` alone). -/
+  ctxFill : Paint := .none
+  ctxStroke : Paint := .none
+  /-- T85: the `Doc.ctxUses` slot of the nearest enclosing `use`, when that
+  `use`'s own fill or stroke is a gradient or pattern; inherited. -/
+  ctxSlot : Option Nat := none
+  /-- T85: set when `fill`/`stroke` came from `context-fill`/`context-stroke`
+  (to `ctxSlot`), reset by any other paint.  usvg then resolves the paint
+  server against that `use`'s transform and content bbox, not the shape's. -/
+  fillCtx : Option Nat := none
+  strokeCtx : Option Nat := none
+  /-- This element's own `mask` reference (T49), not inherited, like `clipRef`. -/
+  maskRef : Option String := none
+  /-- `mask-type: alpha` on this element (T49), not inherited; only a `mask`
+  element reads it. -/
+  maskAlpha : Bool := false
+  /-- This element's own `filter` value, raw (T51); not inherited. -/
+  filterRaw : Option ByteArray := none
+  /-- `marker-start`/`marker-mid`/`marker-end` (T52): the raw `url(#id)`
+  target, inherited like any other paint property.  Resolved against
+  `Doc.markers` by `Marker.expand`, after `interpret` has finished (markers
+  may be defined anywhere, including after the element that uses them). -/
+  markerStartId : Option String := none
+  markerMidId : Option String := none
+  markerEndId : Option String := none
+  /-- `image-rendering` (T63), inherited; an unparseable value is the default,
+  as usvg's `find_attribute` + `unwrap_or` makes it. -/
+  imageRendering : Image.Quality := .bicubic
 deriving Repr, Inhabited
 
 structure Shape where
   cmds : Array PathCmd
   style : Style
+  /-- Whether this shape's element is one usvg instantiates markers on --
+  `path`, `line`, `polyline`, `polygon` -- as opposed to `rect`/`circle`/
+  `ellipse`/text runs, which never draw a marker even when `marker-start`
+  etc. are set (T52 reads this, not the element name, since a `Shape` no
+  longer remembers it). -/
+  markerable : Bool := false
+  /-- T63: an `<image>`.  `cmds` is then the rectangle it paints through and
+  this is the paint, in place of `style.fill`. -/
+  image : Option Image.Placed := none
+  /-- T84: an `<image>` of an SVG document, an index into `Doc.svgImages`.
+  `cmds` is then its viewport and the style paints nothing itself. -/
+  svgImage : Option Nat := none
 deriving Inhabited
 
 /-! ## `clipPath` (T20), and the shape of a defs table
@@ -232,6 +349,14 @@ structure ClipEntry where
   filled : Bool := false
 deriving Inhabited
 
+/-- T85: a `use` whose fill or stroke is a paint server: its CTM (after `x`/`y`)
+and the object bounding box of its whole content in that space, filled in when
+the `use` closes. -/
+structure CtxUse where
+  ctm : Mat
+  bbox : Option Box
+deriving Inhabited
+
 /-- One `clip-path="url(#id)"` on an element: which clip, the referencing
 element's `ctm` (relative to the space the referencing `Shape`/`ClipChild`
 lives in) and its object bounding box in its own user space, for
@@ -257,17 +382,17 @@ structure RootInfo where
   width : Option (Fx × Bool) := none
   height : Option (Fx × Bool) := none
   viewBox : Option (Fx × Fx × Fx × Fx) := none
+  /-- `preserveAspectRatio` (T48). -/
+  aspect : Viewport.AspectRatio := {}
 deriving Inhabited
 
 /-- What a container (or a lone shape) that becomes a compositing *layer*
 carries: its children render into a fresh transparent canvas which is then
 composited onto the parent with these (resvg `render.rs::render_group`).
 
-`clip`/`mask`/`filter` are the hooks T20/T21 will need: usvg's
-`Group::should_isolate` also creates a layer for those, and they apply to the
-finished layer (a post-multiply mask) *before* this composite.  Neither is
-implemented here, so neither has a field yet; adding one is additive and
-`Render.renderRgba`'s `groupEnd` is the single place that would consume it. -/
+`clips` (T20) and `mask` (T49) are `Group::should_isolate`'s other reasons for a
+layer; both multiply the finished layer *before* this composite, in
+`Render.renderNodes`' `groupEnd`.  `filter` is not implemented. -/
 structure GroupInfo where
   /-- Group opacity on the `opacityOne` grid. -/
   opacity : Nat := opacityOne
@@ -280,7 +405,20 @@ structure GroupInfo where
   use is *not* also on `Style.clips`, so the clip is applied once to the
   composite instead of once per descendant shape. -/
   clips : Array Nat := #[]
-deriving Repr, Inhabited
+  /-- T49: this group's `mask` use (an index into `Doc.maskUses`), applied to the
+  finished layer after the clip and before the composite (`render_group`). -/
+  mask : Option Nat := none
+  /-- T51: the element's resolved `filter` list, in the user space `filterCtm`
+  maps to the root.  Filled in when the element closes (the object bounding
+  box is needed); non-empty makes the layer a filter layer (`Render`). -/
+  filters : Array Filter.Resolved := #[]
+  filterCtm : Mat := Mat.identity
+  /-- T51: the layer was opened only for a `filter` that resolved to nothing
+  (unsupported, or a parse error): no layer at all, as before this task. -/
+  passthrough : Bool := false
+  /-- T51: usvg drops the element (an invalid filter reference or region). -/
+  dropped : Bool := false
+deriving Inhabited
 
 /-- The document as a flat, ordered instruction stream.
 
@@ -296,12 +434,130 @@ inductive Node where
   | groupEnd
 deriving Inhabited
 
+/-- One `mask` element (T49): its attributes, and its children as their own
+node stream, in the user space of the element that references it (the `mask`
+element's own `transform` has no effect, and its ancestors' are dropped).
+`x`/`y`/`w`/`h` are raw (`parseCoord16`), resolved per use in `Mask.region`. -/
+structure MaskEntry where
+  id : String
+  userUnits : Bool := false
+  contentBBox : Bool := false
+  alpha : Bool := false
+  x : Option Grad.LenPct := none
+  y : Option Grad.LenPct := none
+  w : Option Grad.LenPct := none
+  h : Option Grad.LenPct := none
+  /-- The viewport a `userSpaceOnUse` percentage resolves against, in `Fx`. -/
+  pctW : Fx := 0
+  pctH : Fx := 0
+  selfMaskId : Option String := none
+  selfMask : Option Nat := none
+  nodes : Array Node := #[]
+  filled : Bool := false
+deriving Inhabited
+
+/-- One `mask="url(#id)"` on a rendered element; shaped like `ClipUse`. -/
+structure MaskUse where
+  id : String
+  entry : Option Nat
+  ctm : Mat
+  bbox : Option Box
+deriving Inhabited
+/-! ## `marker` (T52)
+
+A `<marker>` element is a template, never drawn on its own: `interpret`
+collects one `MarkerEntry` per element with a usable `id`, wherever it
+appears (mirroring `ClipEntry`), and `LeanSvg/Marker.lean`'s `expand` turns
+each `marker-start`/`marker-mid`/`marker-end` reference on a `path`/`line`/
+`polyline`/`polygon` into copies of the marker's `content`, one per vertex,
+after `interpret` has finished. -/
+
+/-- `orient`: `auto`/`auto-start-reverse` compute the angle from the path's
+own geometry at each vertex (`Marker.calcVertexAngle`); anything else is a
+fixed angle in degrees, `0` if the attribute is absent or unparseable
+(usvg's `convert_orientation`). -/
+inductive MarkerOrient where
+  | auto
+  | autoStartReverse
+  | fixed (deg : Fx)
+deriving Inhabited
+
+structure MarkerEntry where
+  id : String
+  refX : Fx := 0
+  refY : Fx := 0
+  /-- `markerWidth`/`markerHeight`; default `3` (usvg `Length::new_number(3.0)`). -/
+  width : Fx := Fx.ofNat 3
+  height : Fx := Fx.ofNat 3
+  viewBox : Option (Fx × Fx × Fx × Fx) := none
+  /-- `preserveAspectRatio`'s `align`, as the three primitives
+  `Marker.viewBoxTransform` takes: `alignNone` for `"none"` (independent axis
+  scaling), else `alignX`/`alignY` ∈ {0,1,2} for min/mid/max.  Default
+  `xMidYMid`. -/
+  alignNone : Bool := false
+  alignX : Nat := 1
+  alignY : Nat := 1
+  slice : Bool := false
+  orient : MarkerOrient := .fixed 0
+  /-- `markerUnits`: `true` for `userSpaceOnUse`, `false` (default) for
+  `strokeWidth` -- any value other than exactly `"userSpaceOnUse"`, including
+  an absent or invalid one, is the default (`with-invalid-markerUnits.svg`). -/
+  unitsUser : Bool := false
+  /-- `overflow`: hidden by default and for `"hidden"`/`"scroll"`; anything
+  else (`"visible"`, `"auto"`, ...) turns clipping off. -/
+  clip : Bool := true
+  /-- The synthetic `clipPath` entry (index into `Doc.clips`) built once, at
+  parse time, for `clip`'s rectangle -- the `viewBox` rect if there is one,
+  else `(0, 0, width, height)` -- so `Marker.expand` only has to add one
+  `ClipUse` per instance, not rebuild the geometry.  `none` when `clip` is
+  false or the marker is `!valid`. -/
+  clipEntryIdx : Option Nat := none
+  /-- `NonZeroRect::from_xywh` on `(refX, refY, width, height)`: `false` (and
+  the whole marker unresolvable-but-referenceable, like an empty one) when
+  `width ≤ 0 ∨ height ≤ 0` (`zero-sized.svg`, `marker-with-a-negative-
+  size.svg`). -/
+  valid : Bool := false
+  /-- This marker's children, in its own local space (root ctm = identity),
+  styled by its own ancestors -- never the referencing element's -- exactly
+  as `interpret`'s ordinary cascade already gives an element wherever it
+  sits.  Filled in when the `<marker>` element closes. -/
+  content : Array Node := #[]
+  /-- Whether the main walk actually reached this element (as opposed to a
+  slot under `display:none` or a losing `switch` branch, which stays
+  unresolvable, like `ClipEntry.filled`). -/
+  filled : Bool := false
+deriving Inhabited
+
+/-- The largest number of `marker` elements collected; later ones are
+unreferenceable, exactly as `maxClipPaths` bounds `clipPath`. -/
+def maxMarkers : Nat := 4096
+
 structure Doc where
   root : RootInfo
   nodes : Array Node
   /-- The `clipPath` table and the `clip-path` uses (T20). -/
   clips : Array ClipEntry := #[]
   uses : Array ClipUse := #[]
+  /-- The `mask` table and the `mask` uses (T49). -/
+  masks : Array MaskEntry := #[]
+  maskUses : Array MaskUse := #[]
+  /-- The `marker` table (T52); `Marker.expand` resolves references against
+  it and consumes it after `Render.render` no longer needs anything but the
+  expanded `nodes`. -/
+  markers : Array MarkerEntry := #[]
+  /-- T67: the input events after usvg's `fix_recursive_fe_image`, before `use`
+  expansion: what an `feImage` link's sub-document is cut from. -/
+  events : Array Xml.Event := #[]
+  /-- The `<pattern>` geometry table (`Style.patterns` is the same value,
+  reachable from every element for `resolvePaint`) and, parallel to its raw
+  index rather than to `patterns.defs`, each pattern's own collected content —
+  `PatternRender.build` reads `patternContent.getD entry.contentSlot`. -/
+  patterns : Pat.Defs := {}
+  patternContent : Array (Array Node) := #[]
+  /-- T84: the SVG images' sub-documents, rendered by `Render.renderNodes`. -/
+  svgImages : Array SvgImage.Entry := #[]
+  /-- T85: the `context-fill`/`context-stroke` paint-server slots (`CtxUse`). -/
+  ctxUses : Array CtxUse := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -436,14 +692,24 @@ def compIsPercent (bs : ByteArray) : Bool :=
   | some (_, j) => at' t j == 37
   | none => false
 
-/-- Alpha component of `rgb()`/`rgba()`/`hsl()`/`hsla()`: a plain number in
-0..1, *not* a percentage -- svgtypes 0.16.1 (the version resvg 0.48.1
-actually embeds; confirmed against the compiled binary, which falls back to
-black on `rgba(0, 127, 0, 50%)`) parses this argument with `parse_number`,
-not `parse_number_or_percent`, in every one of the four functions, unlike
-the R/G/B or S/L arguments that share this same call site's neighbours.  A
-trailing `%` is therefore not stripped, it invalidates the value, the same
-as any other leftover byte.
+/-- Alpha component of `rgb()`/`rgba()`/`hsl()`/`hsla()`: a number in 0..1 or a
+percentage, CSS Color 4 `<alpha-value>` (`resvg-test-suite`'s
+`painting/fill/rgba-0-127-0-50percent.svg`: the suite PNG, Chromium, Firefox
+and Safari all render `rgba(0, 127, 0, 50%)` as translucent green).
+
+svgtypes 0.16.1 (the version resvg 0.48.1 actually embeds; confirmed against
+the compiled binary) parses this argument with `parse_number`, not
+`parse_number_or_percent`, in every one of the four functions, unlike the
+R/G/B or S/L arguments that share this same call site's neighbours, so a
+trailing `%` invalidates the value there and resvg 0.48.1 falls back to
+black -- a real, verified bug in the exact svgtypes release resvg pins (a
+later, unreleased svgtypes accepts it, matching every browser). Only this one
+file in the whole corpus uses a percentage alpha, so accepting it here does
+not touch resvg parity anywhere else.
+
+Percent-or-not otherwise shares one scale, exactly as `hslFracOf` below
+handles S/L: a trailing `%` divides the decimal by 100 by lowering its
+exponent 2, before the same `scaleDecimal` call the plain form uses.
 
 svgtypes stores it as a `u8` with `round (a * 255)`, and usvg then unpacks it
 again as an opacity (`Color::split_alpha` → `a / 255`), so this has to land on
@@ -454,8 +720,9 @@ def alphaOf (bs : ByteArray) : Option Nat :=
   match parseDecimal t 0 with
   | none => none
   | some (neg, mant, exp10, j) =>
-    if j != t.size then none
-    else some (if neg then 0 else scaleDecimal mant exp10 255 255)
+    let isPct := at' t j == 37
+    if (if isPct then j + 1 else j) != t.size then none
+    else some (if neg then 0 else scaleDecimal mant (if isPct then exp10 - 2 else exp10) 255 255)
 
 def parseRgbFunc (bs : ByteArray) (start : Nat) : Option Rgba :=
   let close := findByte bs start 41
@@ -595,6 +862,8 @@ inductive PaintSpec where
   /-- `url(#id)` with its fallback; `resolvePaint` looks `id` up in the
   style's gradient table (T18). -/
   | url (id : String) (fb : PaintFallback)
+  /-- `context-fill` (`false`) / `context-stroke` (`true`), SVG 2 (T47). -/
+  | context (stroke : Bool)
 deriving Repr, Inhabited
 
 /-- Parse a plain colour (no `none`, no `url()`, no `currentcolor`). -/
@@ -652,6 +921,8 @@ def parsePaint (bs : ByteArray) : Option PaintSpec :=
   if eqAscii t "none" then some .none
   else if eqAscii t "transparent" then some (.solid ⟨0, 0, 0, 0⟩)
   else if eqAscii t "currentcolor" then some .currentColor
+  else if eqAscii t "context-fill" then some (.context false)
+  else if eqAscii t "context-stroke" then some (.context true)
   else if startsWith t 0 "url(" then parseUrlPaint raw t
   else (parseSolidColor t).map .solid
 
@@ -1087,11 +1358,6 @@ def polyPath (pts : Array Fx) (closed : Bool) : Array PathCmd := Id.run do
 def attr (attrs : Array Xml.Attr) (name : String) : Option ByteArray :=
   (attrs.find? (fun a => a.name == name)).map (·.value)
 
-def lengthAttr (attrs : Array Xml.Attr) (name : String) (dflt : Fx) : Fx :=
-  match attr attrs name with
-  | some v => (parseLengthAll v).getD dflt
-  | none => dflt
-
 /-- A length or percentage at a byte offset -- like `parseLength` (which this
 wraps for every non-percent unit), except it also accepts `%`: there is no
 reference to resolve it against here, so the raw `N` of `N%` is returned
@@ -1155,7 +1421,87 @@ def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
     | none => none
   { width := (attr attrs "width").bind parseLengthOrPercent,
     height := (attr attrs "height").bind parseLengthOrPercent,
-    viewBox := vb }
+    viewBox := vb,
+    aspect := ((attr attrs "preserveAspectRatio").map Viewport.parseAspectRatio).getD {} }
+
+/-! ## `marker` attribute grammars (T52)
+
+These four are read straight off a `<marker>` element's own attributes, the
+way `clipPathUnits` already is (`attr`, not the CSS-aware `attrOrStyle`):
+usvg's own resolution for them is `SvgNode::attribute`/`convert_length`, not
+the inherited-property cascade `applyEffective` runs, and no marker test in
+the corpus sets any of them from `style=""` or a stylesheet. -/
+
+/-- A length-or-percentage attribute, resolved against `refLen` -- T52's
+`refX`/`markerWidth` against the viewport's width, `refY`/`markerHeight`
+against its height, exactly like `parseTransformOrigin`'s lengths. -/
+def lengthOrPctAttr (attrs : Array Xml.Attr) (name : String) (dflt refLen : Fx) : Fx :=
+  match attr attrs name with
+  | some v => match parseLengthOrPercent v with
+    | some lp => resolvePct lp refLen
+    | none => dflt
+  | none => dflt
+
+/-- `orient`'s fixed-angle grammar: a number, then an optional lower-case unit
+(`deg` if absent, `grad`, `rad`, `turn`), converted to degrees as `Fx`
+(svgtypes' `Stream::parse_angle`/`Angle::to_degrees`).  `none` on anything
+left over after a recognised suffix or no number at all, matching
+`Angle::from_str`'s error, which `convert_orientation` turns into a fixed
+`0°` (not this function's job -- its caller decides the fallback). -/
+def parseAngleDeg (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseNumber t 0 with
+  | none => none
+  | some (n, j) =>
+    if j == t.size then some n
+    else if startsWith t j "deg" && j + 3 == t.size then some n
+    else if startsWith t j "grad" && j + 4 == t.size then some (Int.ediv (n * 9) 10)
+    else if startsWith t j "rad" && j + 3 == t.size then some (Int.ediv (n * 180 * 65536) pi16)
+    else if startsWith t j "turn" && j + 4 == t.size then some (n * 360)
+    else none
+
+/-- `orient`: `auto`, `auto-start-reverse`, an angle, or (absent/unparseable)
+a fixed `0°` (usvg's `convert_orientation`). -/
+def parseOrientAttr (attrs : Array Xml.Attr) : MarkerOrient :=
+  match attr attrs "orient" with
+  | none => .fixed 0
+  | some v =>
+    let t := trim v
+    if eqAscii t "auto" then .auto
+    else if eqAscii t "auto-start-reverse" then .autoStartReverse
+    else match parseAngleDeg t with
+      | some d => .fixed d
+      | none => .fixed 0
+
+/-- `preserveAspectRatio`: `[defer ]align[ meet|slice]` (svgtypes'
+`AspectRatio`, `defer` accepted and ignored like usvg).  Absent or
+unparseable is the default, `xMidYMid meet` -- as `(alignNone, alignX,
+alignY, slice)` = `(false, 1, 1, false)`, `Marker.viewBoxTransform`'s own
+parameters. -/
+def parseAspectAttr (attrs : Array Xml.Attr) : Bool × Nat × Nat × Bool :=
+  let dflt := (false, 1, 1, false)
+  match attr attrs "preserveAspectRatio" with
+  | none => dflt
+  | some v =>
+    let t := trim v
+    let t := if startsWith t 0 "defer " then trim (t.extract 6 t.size) else t
+    let e := skipWhile t 0 isAlpha
+    let word := t.extract 0 e
+    let align? : Option (Bool × Nat × Nat) :=
+      if eqAscii word "none" then some (true, 0, 0)
+      else if eqAscii word "xMinYMin" then some (false, 0, 0)
+      else if eqAscii word "xMidYMin" then some (false, 1, 0)
+      else if eqAscii word "xMaxYMin" then some (false, 2, 0)
+      else if eqAscii word "xMinYMid" then some (false, 0, 1)
+      else if eqAscii word "xMidYMid" then some (false, 1, 1)
+      else if eqAscii word "xMaxYMid" then some (false, 2, 1)
+      else if eqAscii word "xMinYMax" then some (false, 0, 2)
+      else if eqAscii word "xMidYMax" then some (false, 1, 2)
+      else if eqAscii word "xMaxYMax" then some (false, 2, 2)
+      else none
+    match align? with
+    | none => dflt
+    | some (an, ax, ay) => (an, ax, ay, eqAscii (trim (t.extract e t.size)) "slice")
 
 /-! ## `transform-origin` -/
 
@@ -1264,6 +1610,7 @@ def resolvePaint (st : Style) : PaintSpec → Paint
   | .none => .none
   | .solid c => .solid c
   | .currentColor => .solid st.color
+  | .context stroke => if stroke then st.ctxStroke else st.ctxFill
   | .url id fb =>
     let fallback : Paint := match fb with
       | .absent => .none
@@ -1274,8 +1621,16 @@ def resolvePaint (st : Style) : PaintSpec → Paint
     | some i =>
       match (st.defs.defs.getD i default).shape with
       | .invalid => fallback
-      | _ => .gradient i
-    | none => fallback
+      | _ => .gradient i fallback
+    | none =>
+      match st.patterns.lookup id with
+      | some i => if (st.patterns.defs.getD i default).valid then .pattern i else fallback
+      | none => fallback
+
+/-- T85: the `ctxUses` slot a paint resolved from `context-*` is tied to. -/
+def ctxSlotOf (st : Style) : PaintSpec → Option Nat
+  | .context _ => st.ctxSlot
+  | _ => none
 
 /-- Parse the `color` property.  It is an ordinary colour, never `none` or
 `url(...)`; reusing `parsePaint` and rejecting anything but `.solid` gets that
@@ -1378,17 +1733,59 @@ def parseFontWeight (parent : Nat) (bs : ByteArray) : Nat :=
   else if eqAscii t "700" then 700
   else if eqAscii t "800" then 800
   else if eqAscii t "900" then 900
-  else parent
+  -- usvg's own `resolve_font_weight` only matches these nine literals and a
+  -- number outside them falls through to `_ => weight` (the inherited
+  -- value, unchanged) -- a parsing bug, not a deliberate simplification:
+  -- fontdb's `find_best_match` already implements CSS Fonts 4's
+  -- nearest-installed-weight rule correctly once given a number (confirmed
+  -- against `fontdb`'s source), so e.g. `650` should resolve to the nearest
+  -- installed weight (`pickFace`, `≥ 600 → bold`) rather than being dropped.
+  else match parseNumberAll t with
+    | some n => if n ≥ 256 && n ≤ 256000 then (n / 256).toNat else parent
+    | none => parent
+
+/-- Strip one matching layer of straight quotes (CSS allows a quoted family
+name in a `font-family` list). -/
+def stripQuotes (bs : ByteArray) : ByteArray :=
+  if bs.size ≥ 2 &&
+     ((Bytes.at' bs 0 == 34 && Bytes.at' bs (bs.size - 1) == 34) ||
+      (Bytes.at' bs 0 == 39 && Bytes.at' bs (bs.size - 1) == 39)) then
+    bs.extract 1 (bs.size - 1)
+  else bs
+
+/-- `font-family`, restricted to what this renderer can actually draw: the
+one embedded family, "Noto Sans".  usvg resolves the comma-separated family
+list against `fontdb`'s installed fonts (here, the resvg-test-suite's pinned
+directory) in list order, stopping at the first name that matches an
+installed font; a CSS generic keyword (`serif`, `sans-serif`, …) maps to an
+`Options` generic-family name (`Times New Roman`, `Arial`, …) that is never
+installed either, and an unmatched list falls back to that same default
+family — also never installed. With exactly one family embedded, the only
+thing that can go wrong is a *different* installed family sitting earlier in
+the list than "Noto Sans": the only such name the corpus uses is "Source
+Sans Pro" (its own file is in the pinned fonts dir). Every other name the
+suite tries (Amiri, Mplus 1p, Noto Color Emoji, Noto Sans Devanagari, …)
+either stands alone or already follows "Noto Sans" wherever both appear, so
+treating any other unrecognised name as a non-match (keep looking) matches
+`fontdb::Database::query` exactly for every file in the suite. -/
+def resolveFontFamily (bs : ByteArray) : Bool := Id.run do
+  for tok in Bytes.splitTrim bs 44 do
+    let name := stripQuotes tok
+    if eqAscii name "Noto Sans" then return true
+    if eqAscii name "Source Sans Pro" then return false
+  return false
 
 /-- One item of an `x`/`y`/`dx`/`dy` list: `convert_user_length`, which
-resolves `em`/`ex` against the element's own font size and a percentage
-against the viewport axis the attribute belongs to (`x`/`dx` → width,
-`y`/`dy` → height). -/
-def parseTextLen (fontSize refLen : Fx) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
+resolves `em`/`ex` against the element's own font size, `rem` against the
+root element's (`Style.rootFontSize`), a percentage against the viewport axis
+the attribute belongs to (`x`/`dx` → width, `y`/`dy` → height), and `Q`
+(quarter-millimetres, SVG 2) as a fixed ratio like `mm`/`cm`. -/
+def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
   match parseNumber bs i with
   | none => none
   | some (v, j) =>
     if startsWith bs j "px" then some (v, j + 2)
+    else if startsWith bs j "rem" then some (Fx.mul v rootFontSize, j + 3)
     else if startsWith bs j "em" then some (Fx.mul v fontSize, j + 2)
     else if startsWith bs j "ex" then some (Int.ediv (Fx.mul v fontSize) 2, j + 2)
     else if startsWith bs j "pt" then some (Int.ediv (v * 4) 3, j + 2)
@@ -1396,23 +1793,71 @@ def parseTextLen (fontSize refLen : Fx) (bs : ByteArray) (i : Nat) : Option (Fx 
     else if startsWith bs j "mm" then some (Int.ediv (v * 960) 254, j + 2)
     else if startsWith bs j "cm" then some (Int.ediv (v * 9600) 254, j + 2)
     else if startsWith bs j "in" then some (v * 96, j + 2)
+    -- 1Q = 1/40 cm = 96 / (2.54 * 40) px = 120/127 px, exactly (SVG 2).
+    else if startsWith bs j "Q" then some (Int.ediv (v * 120) 127, j + 1)
     else if at' bs j == 37 then some (Int.ediv (Fx.mul v refLen) 100, j + 1)
     else some (v, j)
 
+/-- Parse a whole attribute value as a single `parseTextLen` length: usvg's
+`convert_user_length`, which every non-text geometry attribute
+(`x`/`y`/`width`/`height`/`cx`/`cy`/`r`/`rx`/`ry`/`x1`/`y1`/`x2`/`y2`) goes
+through as well as text's own `x`/`y`/`dx`/`dy` -- the same em/ex-against-
+font-size and percentage-against-viewport-axis resolution, just for a single
+value instead of a list. -/
+def parseTextLenAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen rootFontSize t 0 with
+  | some (v, j) => if j == t.size then some v else none
+  | none => none
+
+/-- `textLength`: one length, the whole (trimmed) attribute value, negative
+rejected (`n < 0` in usvg's parser turns `text_length` back into `None`
+rather than clamping it). -/
+def parseTextLength (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen rootFontSize t 0 with
+  | some (v, j) => if j == t.size && v ≥ 0 then some v else none
+  | none => none
+
 /-- A whitespace/comma separated list of such lengths.  Stops at the first
 item it cannot read, like `parseNumberList`. -/
-def parseTextLenList (fontSize refLen : Fx) (bs : ByteArray) : Array Fx := Id.run do
+def parseTextLenList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Array Fx := Id.run do
   let mut out : Array Fx := #[]
   let mut i := 0
   for _ in [0:bs.size + 1] do
     i := skipWsComma bs i
     if i ≥ bs.size then break
-    match parseTextLen fontSize refLen bs i with
+    match parseTextLen fontSize refLen rootFontSize bs i with
     | some (v, j) =>
       out := out.push v
       i := j
     | none => break
   return out
+
+/-- `stroke-dasharray`: a whitespace/comma separated list of lengths, resolved
+like `parseTextLen` (`em`/`ex` against `fontSize`, `%` against `refLen`), but
+all-or-nothing like `parseAbsLengthList` — one bad item drops the whole list,
+matching `Geom.dashPattern`'s downstream fallback to an undashed stroke. -/
+def parseDashLengthList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option (Array Fx) := Id.run do
+  let t := trim bs
+  let mut out : Array Fx := #[]
+  let mut i := 0
+  for _ in [0:t.size + 1] do
+    i := skipWsComma t i
+    if i ≥ t.size then break
+    match parseTextLen fontSize refLen rootFontSize t i with
+    | some (v, j) =>
+      out := out.push v
+      i := j
+    | none => return none
+  return some out
+
+/-- `stroke-dashoffset`: a single length, resolved the same way. -/
+def parseDashLengthAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen rootFontSize t 0 with
+  | some (v, j) => if j == t.size then some v else none
+  | none => none
 
 /-- `rotate` is a *number* list, and usvg's `Vec<f32>` reader propagates a
 parse error out of the whole attribute (`n.ok()?`), so one bad item — a unit
@@ -1486,8 +1931,12 @@ def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
 inside a `style` attribute and CSS").  Confirmed by the corpus files
 `painting/mix-blend-mode/as-property.svg` and
 `painting/isolation/as-property.svg`, both of which must render *unblended*. -/
+-- T52: the `marker` shorthand is CSS-only too (`svgtree/parse.rs`'s CSS
+-- declaration parser expands it into the three longhands; presentation
+-- attribute parsing has no such case), confirmed by `the-marker-property.svg`
+-- ("Should be ignored") against `the-marker-property-in-CSS.svg`.
 def isCssOnlyProp (name : String) : Bool :=
-  name == "mix-blend-mode" || name == "isolation"
+  name == "mix-blend-mode" || name == "isolation" || name == "marker"
 
 /-- Parse a `clip-path` value into the referenced id: `url(#id)`, with optional
 whitespace and single or double quotes around the `#id` (svgtypes' `FuncIRI`).
@@ -1530,6 +1979,10 @@ def Box.transformed (m : Mat) (b : Box) : Option Box :=
   let c := Box.cover c (m.apply ⟨b.x0, b.y1⟩)
   Box.cover c (m.apply ⟨b.x1, b.y1⟩)
 
+/-- T85: a box as a closed rectangle path, for `Grad.build`/`Pat.build`. -/
+def Box.cmds (b : Box) : Array PathCmd :=
+  #[.moveTo ⟨b.x0, b.y0⟩, .lineTo ⟨b.x1, b.y0⟩, .lineTo ⟨b.x1, b.y1⟩, .lineTo ⟨b.x0, b.y1⟩, .close]
+
 /-- A path's bounding box in its own user space, from the flattened polylines
 (with the identity as the flattening `ctm`): usvg's `compute_tight_bounds` up
 to the flattening error, which is what `objectBoundingBox` units scale by. -/
@@ -1557,12 +2010,28 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
   | "clip-path" => { st with clipRef := parseClipRef v }
+  | "mask" => { st with maskRef := parseClipRef v }
+  | "mask-type" => { st with maskAlpha := eqAscii (trim v) "alpha" }
+  | "filter" => { st with filterRaw := some v }
+  -- T52: `url(#id)` or `none`, exactly `clip-path`'s grammar, so `parseClipRef`
+  -- (which already yields `none` for `none` and anything else it can't parse
+  -- as a `FuncIRI`) is reused unchanged.  All three are ordinary inherited
+  -- presentation attributes; `marker` (the shorthand) is CSS-only
+  -- (`isCssOnlyProp`) and, when it does apply, sets all three together.
+  | "marker-start" => { st with markerStartId := parseClipRef v }
+  | "marker-mid" => { st with markerMidId := parseClipRef v }
+  | "marker-end" => { st with markerEndId := parseClipRef v }
+  | "marker" =>
+    let r := parseClipRef v
+    { st with markerStartId := r, markerMidId := r, markerEndId := r }
   | "clip-rule" =>
     let t := trim v
     if eqAscii t "evenodd" then { st with clipEvenOdd := true }
     else if eqAscii t "nonzero" then { st with clipEvenOdd := false } else st
-  | "fill" => match parsePaint v with | some p => { st with fill := resolvePaint st p } | none => st
-  | "stroke" => match parsePaint v with | some p => { st with stroke := resolvePaint st p } | none => st
+  | "fill" => match parsePaint v with
+    | some p => { st with fill := resolvePaint st p, fillCtx := ctxSlotOf st p } | none => st
+  | "stroke" => match parsePaint v with
+    | some p => { st with stroke := resolvePaint st p, strokeCtx := ctxSlotOf st p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
   | "stroke-opacity" => match parseOpacity v with | some o => { st with strokeOpacity := o } | none => st
   -- `opacity` is not an inherited property: it belongs to this element alone
@@ -1601,7 +2070,12 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "evenodd" then { st with evenOdd := true }
     else if eqAscii t "nonzero" then { st with evenOdd := false } else st
-  | "stroke-width" => match parseLengthAll v with | some w => { st with strokeWidth := Fx.max 0 w } | none => st
+  -- `em`/`ex` against `fontSize`, `%` against the viewport diagonal
+  -- (`units::convert_length`'s catch-all `aid` arm), exactly like
+  -- `stroke-dasharray`/`stroke-dashoffset` above.
+  | "stroke-width" =>
+    match parseDashLengthAll st.fontSize (viewportDiag st.pctRefW st.pctRefH) st.rootFontSize v with
+    | some w => { st with strokeWidth := Fx.max 0 w } | none => st
   | "stroke-linecap" =>
     let t := trim v
     if eqAscii t "round" then { st with cap := .round }
@@ -1611,13 +2085,22 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "round" then { st with join := .round }
     else if eqAscii t "bevel" then { st with join := .bevel }
-    else if eqAscii t "miter" then { st with join := .miter } else st
+    else if eqAscii t "miter" then { st with join := .miter }
+    -- SVG 2's `miter-clip` is a real usvg `LineJoin` variant (`arcs` is not:
+    -- unrecognised, so it falls through to `else st`, keeping whatever was
+    -- inherited — usvg's own fallback, since `LineJoin::default()` is `Miter`
+    -- and `find_attribute` skips a value that fails to parse).
+    else if eqAscii t "miter-clip" then { st with join := .miterClip } else st
   | "stroke-miterlimit" => match parseNumberAll v with | some m => { st with miterLimit := Fx.max 256 m } | none => st
-  -- `none`, a percentage, an `em` and plain junk all mean "not dashed" rather
-  -- than "inherit": usvg resolves the dash properties on the nearest ancestor
-  -- that *has* the attribute and drops them when that one does not parse.
-  | "stroke-dasharray" => { st with dashes := (parseAbsLengthList v).getD #[] }
-  | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
+  -- `none` and plain junk mean "not dashed" rather than "inherit": usvg
+  -- resolves the dash properties on the nearest ancestor that *has* the
+  -- attribute and drops them when that one does not parse.  `em`/`ex` resolve
+  -- against the current font size and `%` against the viewport diagonal,
+  -- exactly as `letter-spacing` does (`units.rs`'s `convert_length` catch-all).
+  | "stroke-dasharray" =>
+    { st with dashes := (parseDashLengthList st.fontSize (viewportDiag st.pctRefW st.pctRefH) st.rootFontSize v).getD #[] }
+  | "stroke-dashoffset" =>
+    { st with dashOffset := (parseDashLengthAll st.fontSize (viewportDiag st.pctRefW st.pctRefH) st.rootFontSize v).getD 0 }
   | "transform" =>
     -- `translate(originDx, originDy) · transform · translate(-originDx, -originDy)`
     -- (`applyEffective` sets `originDx`/`originDy` from this element's own
@@ -1630,14 +2113,31 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
       if st.originDx == 0 && st.originDy == 0 then localM
       else ((Mat.translate st.originDx st.originDy).mul localM).mul (Mat.translate (-st.originDx) (-st.originDy))
     { st with ctm := st.ctm.mul wrapped, ownMat := st.ownMat.mul wrapped }
+  | "image-rendering" => { st with imageRendering := Image.parseRendering v }
   | "visibility" =>
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  | "shape-rendering" =>
+    let t := trim v
+    if eqAscii t "crispEdges" || eqAscii t "optimizeSpeed" then { st with crisp := true }
+    else if eqAscii t "geometricPrecision" || eqAscii t "auto" then { st with crisp := false }
+    else st
   -- T36: text properties.  Inherited like every other property here; only
   -- `Svg.textShapes` ever reads them.
   | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
+  | "font-family" => { st with fontAvailable := resolveFontFamily v }
+  -- `find_decoration`: space-separated tokens of this element's own raw
+  -- value, freshly parsed (not merged with whatever the parent had).
+  | "text-decoration" =>
+    let has := fun (name : String) => (Bytes.splitTrim v 32).any (fun t => eqAscii t name)
+    { st with ownUnderline := has "underline", ownOverline := has "overline",
+              ownLineThrough := has "line-through" }
+  -- Negative values are ignored (`text_length = None`); `%` is a fraction of
+  -- the viewport width, the axis a left-to-right run measures along.
+  | "textLength" => { st with ownTextLength := parseTextLength st.fontSize st.pctRefW st.rootFontSize v }
+  | "lengthAdjust" => { st with ownLengthAdjustGlyphs := eqAscii (trim v) "spacingAndGlyphs" }
   | "font-style" =>
     let t := trim v
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
@@ -1661,6 +2161,46 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     if eqAscii t "middle" then { st with textAnchor := .middle }
     else if eqAscii t "end" then { st with textAnchor := .atEnd }
     else if eqAscii t "start" then { st with textAnchor := .start } else st
+  -- `convert_writing_mode`: any value at all (including one this renderer
+  -- does not recognise) resets the flag — a nearer ancestor's explicit
+  -- `lr`/`lr-tb`/junk overrides a farther ancestor's `tb`.
+  | "writing-mode" =>
+    let t := trim v
+    { st with writingMode :=
+        eqAscii t "tb" || eqAscii t "tb-rl" || eqAscii t "vertical-rl" || eqAscii t "vertical-lr" }
+  -- T54: `dominant-baseline`/`alignment-baseline`.  Ordinary CSS inheritance
+  -- (nearest ancestor's own value wins, like every other property here);
+  -- `no-change` (and any other unrecognised token) is a no-op, which is
+  -- exactly usvg's "use the parent's own value" for `no-change` — see
+  -- `LeanSvg/Baseline.lean`'s module docs for the one case that differs.
+  | "dominant-baseline" =>
+    let t := trim v
+    if eqAscii t "auto" || eqAscii t "use-script" || eqAscii t "reset-size" then
+      { st with dominantBaseline := .auto }
+    else if eqAscii t "ideographic" then { st with dominantBaseline := .ideographic }
+    else if eqAscii t "alphabetic" then { st with dominantBaseline := .alphabetic }
+    else if eqAscii t "hanging" then { st with dominantBaseline := .hanging }
+    else if eqAscii t "mathematical" then { st with dominantBaseline := .mathematical }
+    else if eqAscii t "central" then { st with dominantBaseline := .central }
+    else if eqAscii t "middle" then { st with dominantBaseline := .middle }
+    else if eqAscii t "text-after-edge" then { st with dominantBaseline := .textAfterEdge }
+    else if eqAscii t "text-before-edge" then { st with dominantBaseline := .textBeforeEdge }
+    else st
+  | "alignment-baseline" =>
+    let t := trim v
+    if eqAscii t "auto" then { st with alignmentBaseline := .auto }
+    else if eqAscii t "baseline" then { st with alignmentBaseline := .baseline }
+    else if eqAscii t "before-edge" then { st with alignmentBaseline := .beforeEdge }
+    else if eqAscii t "text-before-edge" then { st with alignmentBaseline := .textBeforeEdge }
+    else if eqAscii t "middle" then { st with alignmentBaseline := .middle }
+    else if eqAscii t "central" then { st with alignmentBaseline := .central }
+    else if eqAscii t "after-edge" then { st with alignmentBaseline := .afterEdge }
+    else if eqAscii t "text-after-edge" then { st with alignmentBaseline := .textAfterEdge }
+    else if eqAscii t "ideographic" then { st with alignmentBaseline := .ideographic }
+    else if eqAscii t "alphabetic" then { st with alignmentBaseline := .alphabetic }
+    else if eqAscii t "hanging" then { st with alignmentBaseline := .hanging }
+    else if eqAscii t "mathematical" then { st with alignmentBaseline := .mathematical }
+    else st
   -- `get_xmlspace`: `preserve` turns collapsing off, any *other* value turns
   -- it back on, and an absent attribute inherits (which is what not matching
   -- here does).
@@ -1670,7 +2210,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
 
 /-- Parse a `style="a:b; c:d"` attribute into (name, value) pairs. -/
 def parseStyleDecls (v : ByteArray) : Array (String × ByteArray) :=
-  (splitTrim v 59).filterMap fun decl =>
+  (splitTrim (Css.stripComments v) 59).filterMap fun decl =>
     let k := findByte decl 0 58
     if k ≥ decl.size then none
     else some (toStr (lower (trim (decl.extract 0 k))), trim (decl.extract (k + 1) decl.size))
@@ -1685,33 +2225,51 @@ def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
     | none => false
   a || s
 
-def shapeCmds (name : String) (attrs : Array Xml.Attr) : Option (Array PathCmd) :=
+/-- `rx`/`ry` for `rect` and `ellipse` (usvg's `resolve_rx_ry`,
+`crates/usvg/src/parser/shapes.rs`, shared between the two elements): a
+negative value is dropped as if absent -- checked here on the *resolved*
+length rather than usvg's raw pre-unit-conversion number, which agrees for
+every unit this parses since none of their factors are negative; if exactly
+one of the two is present, its value is mirrored onto the other axis; if
+neither is, both are 0 (a later `≤ 0` check then drops the shape, same as an
+explicit 0). -/
+def resolveRxRy (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH rootFontSize : Fx) : Fx × Fx :=
+  let rxo := ((attr attrs "rx").bind (parseTextLenAll fontSize pctRefW rootFontSize)).filter (· ≥ 0)
+  let ryo := ((attr attrs "ry").bind (parseTextLenAll fontSize pctRefH rootFontSize)).filter (· ≥ 0)
+  match rxo, ryo with
+  | some rx, some ry => (rx, ry)
+  | some rx, none => (rx, rx)
+  | none, some ry => (ry, ry)
+  | none, none => (0, 0)
+
+/-- Every shape's geometry attributes go through usvg's `convert_user_length`
+(`parseTextLenAll`): `em`/`ex` against the element's own font size, `%`
+against the viewport axis the attribute names (`x`-like → `pctRefW`, `y`-like
+→ `pctRefH`), same as text's `x`/`y`/`dx`/`dy`.  `r` (`circle`'s only length
+that names neither axis) instead falls to `convert_length`'s catch-all,
+`viewportDiag`, exactly like `letter-spacing`. -/
+def shapeCmds (name : String) (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH rootFontSize : Fx) :
+    Option (Array PathCmd) :=
+  let lx := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefW rootFontSize)).getD dflt
+  let ly := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefH rootFontSize)).getD dflt
   match name with
   | "path" => (attr attrs "d").map parsePathData
   | "rect" =>
-    let w := lengthAttr attrs "width" 0
-    let h := lengthAttr attrs "height" 0
+    let w := lx "width" 0
+    let h := ly "height" 0
     if w ≤ 0 || h ≤ 0 then none
     else
-      let rxo := attr attrs "rx" |>.bind parseLengthAll
-      let ryo := attr attrs "ry" |>.bind parseLengthAll
-      let (rx, ry) := match rxo, ryo with
-        | some rx, some ry => (rx, ry)
-        | some rx, none => (rx, rx)
-        | none, some ry => (ry, ry)
-        | none, none => (0, 0)
-      some (rectPath (lengthAttr attrs "x" 0) (lengthAttr attrs "y" 0) w h rx ry)
+      let (rx, ry) := resolveRxRy attrs fontSize pctRefW pctRefH rootFontSize
+      some (rectPath (lx "x" 0) (ly "y" 0) w h rx ry)
   | "circle" =>
-    let r := lengthAttr attrs "r" 0
-    if r ≤ 0 then none else some (ellipsePath (lengthAttr attrs "cx" 0) (lengthAttr attrs "cy" 0) r r)
+    let r := ((attr attrs "r").bind (parseTextLenAll fontSize (viewportDiag pctRefW pctRefH) rootFontSize)).getD 0
+    if r ≤ 0 then none else some (ellipsePath (lx "cx" 0) (ly "cy" 0) r r)
   | "ellipse" =>
-    let rx := lengthAttr attrs "rx" 0
-    let ry := lengthAttr attrs "ry" 0
+    let (rx, ry) := resolveRxRy attrs fontSize pctRefW pctRefH rootFontSize
     if rx ≤ 0 || ry ≤ 0 then none
-    else some (ellipsePath (lengthAttr attrs "cx" 0) (lengthAttr attrs "cy" 0) rx ry)
+    else some (ellipsePath (lx "cx" 0) (ly "cy" 0) rx ry)
   | "line" =>
-    some #[.moveTo ⟨lengthAttr attrs "x1" 0, lengthAttr attrs "y1" 0⟩,
-           .lineTo ⟨lengthAttr attrs "x2" 0, lengthAttr attrs "y2" 0⟩]
+    some #[.moveTo ⟨lx "x1" 0, ly "y1" 0⟩, .lineTo ⟨lx "x2" 0, ly "y2" 0⟩]
   | "polygon" => (attr attrs "points").map fun v => polyPath (parseNumberList v) true
   | "polyline" => (attr attrs "points").map fun v => polyPath (parseNumberList v) false
   | _ => none
@@ -1857,6 +2415,23 @@ def parseCoord16 (bs : ByteArray) : Option Grad.LenPct :=
       | some fx => some (fx * 256, false)
       | none => none
 
+/-- `parseCoord16`, at `Pat.coordScale` (2^32) instead of 16.16: a `<pattern>`
+`x`/`y`/`width`/`height` may still be multiplied by a bounding box
+(`objectBoundingBox`) after parsing, and 16.16 is too coarse a grid for that
+fraction — `Pat.coordScale`'s doc comment has the worked example. -/
+def parsePatCoordFine (bs : ByteArray) : Option Grad.LenPct :=
+  let t := trim bs
+  match parseDecimal t 0 with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    let mag := Int.ofNat (scaleDecimal mant exp10 Pat.coordScale.toNat (Fx.maxVal.toNat * 16777216))
+    let v := if neg then -mag else mag
+    if j == t.size then some (v, false)
+    else if at' t j == 37 && j + 1 == t.size then some (v, true)
+    else match parseLengthAll t with
+      | some fx => some (fx * 16777216, false)
+      | none => none
+
 /-- A `<stop>`'s `offset`: a number or a percentage, clamped to `[0, 1]`
 (usvg's `f32_bound(0.0, offset, 1.0)`), as 16.16.  `offset` is a
 `<number-or-percentage>`, so *any* unit (`5mm`) keeps the previous stop's
@@ -1915,8 +2490,29 @@ def parseStop (attrs : Array Xml.Attr) (prev : Int) (inhColor : Rgba)
     | none => opacityOne
   { off := parseStopOffset ((pick "offset").getD ByteArray.empty) prev, col := col, op := op }
 
-/-- One `linearGradient`/`radialGradient` element's own attributes. -/
-def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
+/-- Wrap a parsed `gradientTransform`/`patternTransform` matrix with its
+element's own `transform-origin`, exactly like `applyProp`'s `"transform"`
+case does for a plain element: `translate(dx, dy) · m · translate(-dx, -dy)`.
+usvg's `resolve_transform` (`crates/usvg/src/parser/converter.rs`) is generic
+over the transform attribute id and reads both it and `transform-origin` with
+`self.attribute`, i.e. from the gradient/pattern element's own attributes
+only, never its `href` chain — so this runs inside `parseGradDef`/
+`parsePatternDef`, before `href` inheritance (`pickCommon`) ever sees the
+result, matching `resolve_transform` being called on the referenced node
+itself rather than on whichever link in the chain actually supplies the
+matrix. -/
+def wrapTransformOrigin (attrs : Array Xml.Attr) (pctRefW pctRefH : Fx) (m : Mat) : Mat :=
+  match attr attrs "transform-origin" with
+  | none => m
+  | some ov =>
+    let (odx, ody) := parseTransformOrigin ov pctRefW pctRefH
+    if odx == 0 && ody == 0 then m
+    else ((Mat.translate odx ody).mul m).mul (Mat.translate (-odx) (-ody))
+
+/-- One `linearGradient`/`radialGradient` element's own attributes.
+`pctRefW`/`pctRefH` are the same viewport rect `applyEffective` resolves
+`transform-origin` percentages against (`DefsScan.pctRef`'s doc comment). -/
+def parseGradDef (name : String) (attrs : Array Xml.Attr) (pctRefW pctRefH : Fx) : Grad.RawDef :=
   let coord := fun (n : String) => (attr attrs n).bind parseCoord16
   let href := match attr attrs "href" with
     | some v => v
@@ -1937,7 +2533,8 @@ def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
     -- dropped later, by the inversion in `Grad.build`.)
     transform := (attr attrs "gradientTransform").map fun v =>
       let m := parseTransform v
-      if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m,
+      let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m
+      wrapTransformOrigin attrs pctRefW pctRefH m,
     spread := (attr attrs "spreadMethod").bind fun v =>
       let t := trim v
       if eqAscii t "reflect" then some Grad.Spread.reflect
@@ -1946,6 +2543,64 @@ def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
     x1 := coord "x1", y1 := coord "y1", x2 := coord "x2", y2 := coord "y2",
     cx := coord "cx", cy := coord "cy", r := coord "r",
     fx := coord "fx", fy := coord "fy", fr := coord "fr" }
+
+/-- `preserveAspectRatio`: an optional leading `defer` (ignored — this
+renderer has no external image to defer to), one of the nine alignment
+keywords or `none`, and an optional trailing `meet`/`slice`.  `none` on a
+malformed value, which callers treat as "attribute absent" and keep
+searching the `href` chain, exactly like a malformed `viewBox`. -/
+def parsePreserveAspectRatio (bs : ByteArray) : Option (Nat × Nat × Bool × Bool) :=
+  let toks := (splitTrim bs 32).filter (·.size > 0)
+  let toks := match toks[0]? with
+    | some t => if eqAscii t "defer" then toks.extract 1 toks.size else toks
+    | none => toks
+  match toks[0]? with
+  | none => none
+  | some align =>
+    if eqAscii align "none" then some (1, 1, (toks[1]?.map fun s => eqAscii s "slice").getD false, true)
+    else
+      -- The nine keywords are `xAlignYAlign` concatenated; matched whole
+      -- (case-insensitively, as usvg's `svgtypes` does) rather than split,
+      -- since the boundary is not at a fixed offset in general.
+      let table : List (String × Nat × Nat) :=
+        [("xminymin", 0, 0), ("xmidymin", 1, 0), ("xmaxymin", 2, 0),
+         ("xminymid", 0, 1), ("xmidymid", 1, 1), ("xmaxymid", 2, 1),
+         ("xminymax", 0, 2), ("xmidymax", 1, 2), ("xmaxymax", 2, 2)]
+      match table.find? (fun (k, _, _) => eqAsciiCI align k) with
+      | none => none
+      | some (_, ax, ay) =>
+        some (ax, ay, (toks[1]?.map fun s => eqAscii s "slice").getD false, false)
+
+/-- One `<pattern>` element's own attributes: everything but its children,
+which the main walk collects (`patternContentShapes`) because they need the
+cascade.  `pctRefW`/`pctRefH` are `parseGradDef`'s, for `transform-origin`. -/
+def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Nat)
+    (pctRefW pctRefH : Fx) : Pat.RawDef :=
+  let coord := fun (n : String) => (attr attrs n).bind parsePatCoordFine
+  let href := match attr attrs "href" with
+    | some v => v
+    | none => (attr attrs "xlink:href").getD ByteArray.empty
+  let href := let t := trim href; if at' t 0 == 35 then toStr (t.extract 1 t.size) else ""
+  let units := fun (n : String) => (attr attrs n).bind fun v =>
+    let t := trim v
+    if eqAscii t "userSpaceOnUse" then some false
+    else if eqAscii t "objectBoundingBox" then some true else none
+  { id := match attr attrs "id" with | some v => toStr v | none => "",
+    href := if href.length > Pat.maxIdLen then "" else href,
+    oBB := units "patternUnits", contentOBB := units "patternContentUnits",
+    -- Same "invalid transform becomes the identity" rule as `gradientTransform`.
+    transform := match attr attrs "patternTransform" with
+      | none => Mat.identity
+      | some v =>
+        let m := parseTransform v
+        let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m
+        wrapTransformOrigin attrs pctRefW pctRefH m,
+    x := coord "x", y := coord "y", width := coord "width", height := coord "height",
+    viewBox := (attr attrs "viewBox").bind fun v =>
+      let ns := parseNumberList16 v
+      if ns.size == 4 then some (ns.getD 0 0, ns.getD 1 0, ns.getD 2 0, ns.getD 3 0) else none,
+    aspect := (attr attrs "preserveAspectRatio").bind parsePreserveAspectRatio,
+    hadChildren := hadChildren, eventIdx := eventIdx }
 
 /-- What one pass over the events collects for every kind of referenceable
 definition (see "the shape of a defs table" above).
@@ -1962,6 +2617,14 @@ structure DefsScan where
   same rect `applyEffective` uses for `transform-origin`. -/
   pctRef : Grad.PctRef := {}
   clips : Array (String × Nat) := #[]
+  /-- T49: the same slots for `mask` elements. -/
+  masks : Array (String × Nat) := #[]
+  /-- T52: one slot per `marker` element with a usable `id`, same shape as
+  `clips`. -/
+  markers : Array (String × Nat) := #[]
+  /-- Every `<pattern>` element's own attributes, `href` and whether it had
+  any children, wherever it appears (see `Doc.patterns`/`patternContent`). -/
+  patterns : Array Pat.RawDef := #[]
 deriving Inhabited
 
 /-- The one pre-pass.  Collects every gradient element with its direct
@@ -1973,7 +2636,14 @@ document.  At most `Grad.maxDefs` gradients, `Grad.maxStops` stops each and
 def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
   let mut out : Array Grad.RawDef := #[]
   let mut clips : Array (String × Nat) := #[]
+  let mut masks : Array (String × Nat) := #[]
+  let mut markers : Array (String × Nat) := #[]
+  let mut patterns : Array Pat.RawDef := #[]
   let mut pctRef : Grad.PctRef := {}
+  -- `pctRef.w`/`.h` in 16.16, for `Grad`/`Pat`'s own geometry; these are the
+  -- same rect in plain `Fx`, for `transform-origin` (`Mat.translate`'s scale).
+  let mut pctRefW : Fx := 0
+  let mut pctRefH : Fx := 0
   let mut seenRoot := false
   let mut depth : Nat := 0
   let mut cur : Option Nat := none
@@ -2005,13 +2675,36 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
             | some (_, _, vw, vh) => (vw, vh)
             | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
           pctRef := { w := w * 256, h := h * 256 }
+          pctRefW := w
+          pctRefH := h
       if name == "clipPath" then
         match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
         | some cid => if clips.size < maxClipPaths then clips := clips.push (toStr cid, idx)
         | none => pure ()
+      if name == "mask" then
+        match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
+        | some cid => if masks.size < maxClipPaths then masks := masks.push (toStr cid, idx)
+        | none => pure ()
+      if name == "marker" then
+        match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
+        | some mid => if markers.size < maxMarkers then markers := markers.push (toStr mid, idx)
+        | none => pure ()
+      if name == "pattern" then
+        if patterns.size < Pat.maxDefs then
+          -- usvg's `has_children`: at least one child *element*, checked
+          -- before any validity filtering, so a `display:none` child (or one
+          -- this renderer would otherwise skip) still counts.
+          let hadChildren : Bool := Id.run do
+            for j in [idx + 1 : events.size] do
+              match events.getD j default with
+              | .text _ => pure ()
+              | .open_ _ _ => return true
+              | .close => return false
+            return false
+          patterns := patterns.push (parsePatternDef attrs hadChildren idx pctRefW pctRefH)
       if name == "linearGradient" || name == "radialGradient" then
         if out.size < Grad.maxDefs then
-          out := out.push (parseGradDef name attrs)
+          out := out.push (parseGradDef name attrs pctRefW pctRefH)
           cur := some (out.size - 1)
           curDepth := depth
           curStopColor := attrOrStyle attrs "stop-color"
@@ -2027,24 +2720,60 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         | none => pure ()
       colors := colors.push (((attrOrStyle attrs "color").bind parseColor).getD inhColor)
       depth := depth + 1
-  return { grads := out, pctRef := pctRef, clips := clips }
+  return { grads := out, pctRef := pctRef, clips := clips, masks := masks, markers := markers,
+           patterns := patterns }
 
 /-! ## `text` (T36) -/
 
-/-- The text-layout properties of a resolved `Style`. -/
-def spanPropsOf (st : Style) : Text.SpanProps :=
+/-- `baseline-shift`'s own contribution from *one* element (a `tspan`, or the
+`<text>` element for its own direct text — though `textShapes` never actually
+calls this for `<text>` itself, see its `bsStack`), as `(px, isSub, isSuper)`:
+usvg's `convert_baseline_shift` first tries the value as a CSS
+`<length-percentage>` (a percentage of *this* element's own `font-size`,
+`fontSize`); if that fails to parse, it falls back to matching `sub`/`super`
+literally, and anything else (`baseline`, `inherit`, an invalid token, or no
+attribute at all) contributes nothing — the actual `sub`/`super` pixel offset
+needs the *leaf* span's font metrics, not available here, so `textShapes`
+only counts them (`LeanSvg/Baseline.lean`'s `resolveBaseline16` scales the
+count). -/
+def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × Bool :=
+  match attrOrStyle attrs "baseline-shift" with
+  | none => (0, false, false)
+  | some v =>
+    let t := trim v
+    match parseNumber t 0 with
+    | some (n, j) =>
+      match applyFontUnit (t.extract j t.size) n fontSize with
+      | some px => (px, false, false)
+      | none => (0, false, false)
+    | none =>
+      if eqAscii t "sub" then (0, true, false)
+      else if eqAscii t "super" then (0, false, true)
+      else (0, false, false)
+
+/-- The text-layout properties of a resolved `Style`, plus this run's
+`baseline-shift` accumulation (`bpx`/`bsub`/`bsup` — from `textShapes`'s
+`bsStack`, not from `st`: see `baselineShiftDelta`). -/
+def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     size := st.fontSize,
     letterSpacing := st.letterSpacing,
     wordSpacing := st.wordSpacing,
     kerning := st.textKerning,
-    anchor := st.textAnchor }
+    anchor := st.textAnchor,
+    dominantBaseline := st.dominantBaseline,
+    alignmentBaseline := st.alignmentBaseline,
+    baselineShiftPx := bpx,
+    baselineShiftSub := bsub,
+    baselineShiftSuper := bsup,
+    textLength := st.ownTextLength,
+    lengthAdjustGlyphs := st.ownLengthAdjustGlyphs }
 
 /-- The per-character position lists of one `text`/`tspan` element, resolved
 against that element's own font size and the viewport. -/
 def elemPosOf (st : Style) (attrs : Array Xml.Attr) : Text.ElemPos :=
-  let horiz := parseTextLenList st.fontSize st.pctRefW
-  let vert := parseTextLenList st.fontSize st.pctRefH
+  let horiz := parseTextLenList st.fontSize st.pctRefW st.rootFontSize
+  let vert := parseTextLenList st.fontSize st.pctRefH st.rootFontSize
   let rots := (attr attrs "rotate").bind parseStrictNumberList
   { xs := (attr attrs "x").map horiz |>.getD #[],
     ys := (attr attrs "y").map vert |>.getD #[],
@@ -2052,6 +2781,122 @@ def elemPosOf (st : Style) (attrs : Array Xml.Attr) : Text.ElemPos :=
     dys := (attr attrs "dy").map vert |>.getD #[],
     rots := rots.getD #[],
     hasRot := rots.isSome }
+
+/-- The `#id` a `textPath` links to (`href`, else `xlink:href`), if any. -/
+def textPathHref (attrs : Array Xml.Attr) : Option String :=
+  let href := match attr attrs "href" with
+    | some v => v
+    | none => (attr attrs "xlink:href").getD ByteArray.empty
+  let t := trim href
+  if at' t 0 == 35 && t.size ≤ maxIdBytes + 1 then some (toStr (t.extract 1 t.size)) else none
+
+/-- T50: the arc-length tables of every element some `textPath` links to,
+keyed by id, built once per document.  The first element carrying an id wins,
+as in usvg's `svgtree`; an id whose element is not a shape, or whose shape
+draws nothing, gets no table, which makes the `textPath` invalid.  The shape
+is taken with its own `transform` and nothing above it (`resolve_text_flow`). -/
+def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Table := Id.run do
+  let mut wanted : Std.HashMap String Bool := {}
+  for ev in events do
+    match ev with
+    | .open_ "textPath" attrs =>
+      match textPathHref attrs with
+      | some id => wanted := wanted.insert id false
+      | none => pure ()
+    | _ => pure ()
+  let mut out : Std.HashMap String TextPath.Table := {}
+  if wanted.isEmpty then return out
+  for ev in events do
+    match ev with
+    | .open_ nm attrs =>
+      match attr attrs "id" with
+      | some v =>
+        let id := toStr v
+        if wanted.get? id == some false then
+          wanted := wanted.insert id true
+          let m := match attr attrs "transform" with
+            | some t => parseTransform t
+            | none => Mat.identity
+          match (shapeCmds nm attrs 0 0 0 0).bind (fun cmds => TextPath.build cmds m) with
+          | some tbl => out := out.insert id tbl
+          | none => pure ()
+      | none => pure ()
+    | _ => pure ()
+  return out
+
+/-- `startOffset` in 16.16 px: a length (resolved against the `textPath`'s
+own font size), or a percentage of the path's total length.  Anything
+unparsable is `0`, usvg's default. -/
+def startOffsetOf (st : Style) (tbl : TextPath.Table) (attrs : Array Xml.Attr) : Int :=
+  match attr attrs "startOffset" with
+  | none => 0
+  | some v =>
+    let t := trim v
+    match parseNumber t 0 with
+    | some (n, j) =>
+      if at' t j == 37 && j + 1 == t.size then Int.ediv (tbl.total * n) 25600
+      else match parseTextLen st.fontSize 0 st.rootFontSize t 0 with
+        | some (l, k) => if k == t.size then l * 256 else 0
+        | none => 0
+    | none => 0
+
+/-- Every element name usvg's `svgtree` recognises while building its DOM
+(`svgtree/mod.rs`'s tag-name table): an element with any other name is
+dropped, together with its children, before anything downstream — `<switch>`
+child selection and `tref` target resolution both need this, since either can
+land on an arbitrary node the rest of the renderer never otherwise looks at
+(`switch/non-SVG-child.svg`, `tref/link-to-a-non-SVG-element.svg`). -/
+def svgTagNames : List String :=
+  ["a", "circle", "clipPath", "defs", "ellipse", "feBlend", "feColorMatrix",
+   "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting",
+   "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
+   "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge",
+   "feMergeNode", "feMorphology", "feOffset", "fePointLight", "feSpecularLighting",
+   "feSpotLight", "feTile", "feTurbulence", "filter", "g", "image", "line",
+   "linearGradient", "marker", "mask", "path", "pattern", "polygon", "polyline",
+   "radialGradient", "rect", "stop", "svg", "switch", "symbol", "text", "textPath",
+   "tref", "tspan", "use"]
+
+/-- `tref`'s `xlink:href`/`href`, a local IRI only (`#id`): the bare id, or
+`none` for anything else (a fragment-less or external reference, which usvg's
+own `svgtypes::IRI` parser also cannot resolve). -/
+def stripFragmentId (bs : ByteArray) : Option ByteArray :=
+  if bs.size ≥ 2 && bs.size ≤ maxIdBytes + 1 && at' bs 0 == 35 then some (bs.extract 1 bs.size)
+  else none
+
+/-- The event index of the first `.open_` anywhere in the document, of a tag
+name `svgtree` would keep (`tref`'s target can be any element, before or
+after it, but usvg's tree only holds recognised tag names to begin with —
+`resolve_tref_text` runs `parse_tag_name(node)?` before collecting anything),
+whose own `id` attribute is exactly `target`; `none` otherwise. usvg looks
+this up in the *original* XML tree, so a target inside `defs`, or one a
+`<switch>`/`display:none` ancestor would otherwise hide from rendering, still
+resolves — matching that means searching the raw event stream here rather
+than any id table `interpret`'s main walk builds while it decides what is
+actually drawn. -/
+def findById (events : Array Xml.Event) (target : ByteArray) : Option Nat := Id.run do
+  for j in [0:events.size] do
+    match events.getD j default with
+    | .open_ nm attrs => if svgTagNames.contains nm && attr attrs "id" == some target then return some j
+    | _ => pure ()
+  return none
+
+/-- Every character-data byte under the element opened at `events[openIdx]`,
+concatenated across all descendants regardless of nesting (`tref`'s "all
+character data within the referenced element, including character data
+enclosed within additional markup, will be rendered" — usvg just filters the
+subtree for text nodes, so a `<tspan>` or any other child contributes its text
+but not itself). -/
+def collectText (events : Array Xml.Event) (openIdx : Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.empty
+  let mut depth : Nat := 1
+  for j in [openIdx + 1 : events.size] do
+    if depth == 0 then break
+    match events.getD j default with
+    | .open_ _ _ => depth := depth + 1
+    | .close => depth := depth - 1
+    | .text bs => out := out.append bs
+  return out
 
 /-- Turn the `<text>` element opened at `events[idx]` into shapes.
 
@@ -2063,9 +2908,17 @@ single branch.
 
 `applyEff` is `interpret`'s own four-layer cascade, passed in so `tspan`
 styling goes through exactly the same CSS resolution as everything else.
-Elements other than `tspan` (and `a`, which SVG says to treat as a `tspan`
-here) are dropped together with their character data, as usvg's tree builder
-does — that covers `textPath` and `tref`, which this task does not support.
+`tref` is converted to a `tspan` the same way, plus one synthetic text node
+resolved from its `href` (`stripFragmentId`/`findById`/`collectText` above);
+its own children, if any, are dropped unread, exactly as usvg drops them once
+it has taken the tref's own attributes (`with-a-title-child.svg`,
+`with-text.svg`).  Other elements besides `tspan`, `a` (which SVG says to
+treat as a `tspan` here), `tref` and `textPath` are dropped together with
+their character data, as usvg's tree builder does.  A `textPath` that is a
+direct child of the `<text>` element becomes `Text.Ev.openPath` when it links
+to an entry of `paths` (T50), and a non-rendering span otherwise (usvg skips an
+invalid one but its characters keep their position-list slots); one anywhere
+else is dropped whole, as usvg's tree builder does.
 
 Only `Text.SpanProps` and an index into a local table of resolved styles cross
 into `LeanSvg/Text.lean`; the styles come back attached to whole runs of
@@ -2074,16 +2927,72 @@ glyphs, which become ordinary `Shape`s.  `evenOdd` is forced off because
 the `<text>` element's, because `transform` on a `tspan` is not a thing. -/
 def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
     (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
-    (chain : Array Css.ElemInfo) (budget : Nat) : Array Shape × Nat := Id.run do
+    (chain : Array Css.ElemInfo) (budget : Nat)
+    (paths : Std.HashMap String TextPath.Table) (ancestors : Array Style) :
+    Array Shape × Nat × Option Box := Id.run do
   let textAttrs := match events.getD idx default with
     | .open_ _ a => a
     | _ => #[]
   let mut styles : Array Style := #[]
+  -- Vertical text on a path is not implemented: under a vertical
+  -- `writing-mode` on the `<text>` element itself a `textPath` is still
+  -- dropped whole, as before T50.
+  let vertical := match attrOrStyle textAttrs "writing-mode" with
+    | some v =>
+      let t := trim v
+      eqAscii t "tb" || eqAscii t "tb-rl" || eqAscii t "vertical-rl" || eqAscii t "vertical-lr"
+    | none => false
   let mut evs : Array Text.Ev := #[Text.Ev.open_ (elemPosOf textStyle textAttrs)]
-  let mut stStack : Array Style := #[textStyle]
+  -- `ancestors` is the outer walk's own style stack at the point `<text>` was
+  -- reached, i.e. everything *outside* it (`<g>`, `<svg>`, ...): usvg's
+  -- decoration search walks from a tspan up through the document root, not
+  -- just up to `<text>` (`text-decoration/all-types-nested.svg` sets it on
+  -- two ancestor `<g>`s, neither of which is `<text>` or a `tspan`), so it
+  -- has to be part of the same stack `textShapes` searches.
+  let mut stStack : Array Style := ancestors.push textStyle
   let mut chStack : Array (Array Css.ElemInfo) := #[chain]
   let mut ccStack : Array Nat := #[0]
   let mut rendStack : Array Bool := #[true]
+  -- `baseline-shift`'s own accumulator (T54): seeded at `(0, 0, 0)` for the
+  -- `<text>` element itself and pushed to only by a `tspan`'s own attribute
+  -- — deliberately not derived from `Style`, which is what keeps a
+  -- `baseline-shift` set on `<text>` itself, or on some non-`tspan` ancestor
+  -- reached through `textStyle`, from ever contributing.  See
+  -- `LeanSvg/Baseline.lean`'s module docs and `baselineShiftDelta`.
+  let mut bsStack : Array (Fx × Nat × Nat) := #[(0, 0, 0)]
+  -- `resolve_decoration`: *whether* a kind is drawn at all is `.any` over
+  -- every ancestor's own value, all the way to the document root
+  -- (`text-decoration/all-types-nested.svg` sets it on two `<g>`s, neither of
+  -- them `<text>` or a `tspan`). *Which* style colours it is a separate,
+  -- shorter search: nearest declaring element from this run up, but never
+  -- past `<text>` itself — usvg's loop condition is "declares it, OR is the
+  -- `<text>` element", so an outer `<g>` that made the kind active is never
+  -- consulted for colour if `<text>` (or a tspan below it) does not also
+  -- redeclare it (`text-decoration/style-resolving-2.svg`: `<g>` sets
+  -- line-through and fill=stroke=red, but the line comes out in `<text>`'s
+  -- own yellow/green, not red).  Shared by every run, whether its text comes
+  -- from a `.text` node or a `tref`'s resolved target.
+  let resolveDecor := fun (styles : Array Style) (stk : Array Style) => Id.run do
+    let mut styles := styles
+    let underlineActive := stk.any (·.ownUnderline)
+    let overlineActive := stk.any (·.ownOverline)
+    let throughActive := stk.any (·.ownLineThrough)
+    let mut underlineIdx : Option Nat := none
+    let mut overlineIdx : Option Nat := none
+    let mut throughIdx : Option Nat := none
+    if underlineActive || overlineActive || throughActive then
+      for k in [0:stk.size] do
+        let j := stk.size - 1 - k
+        if j ≥ ancestors.size then
+          let s := stk.getD j default
+          let atText := j == ancestors.size
+          if underlineActive && underlineIdx.isNone && (s.ownUnderline || atText) then
+            styles := styles.push s; underlineIdx := some (styles.size - 1)
+          if overlineActive && overlineIdx.isNone && (s.ownOverline || atText) then
+            styles := styles.push s; overlineIdx := some (styles.size - 1)
+          if throughActive && throughIdx.isNone && (s.ownLineThrough || atText) then
+            styles := styles.push s; throughIdx := some (styles.size - 1)
+    return (styles, underlineIdx, overlineIdx, throughIdx)
   let mut skip : Nat := 0
   let mut depth : Nat := 1
   for j in [idx + 1 : events.size] do
@@ -2098,10 +3007,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         chStack := chStack.pop
         ccStack := ccStack.pop
         rendStack := rendStack.pop
+        bsStack := bsStack.pop
     | .open_ nm attrs =>
       depth := depth + 1
       if skip > 0 then skip := skip + 1
-      else if nm == "tspan" || nm == "a" then
+      else if nm == "tspan" || nm == "a" || (nm == "textPath" && depth == 2 && !vertical) then
         let isFirst := ccStack.back?.getD 0 == 0
         ccStack := match ccStack.back? with
           | some c => ccStack.pop.push (c + 1)
@@ -2114,26 +3024,207 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         ccStack := ccStack.push 0
         -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
         -- while its characters keep their slots in the position lists.
-        rendStack := rendStack.push ((rendStack.back?.getD true) && !isDisplayNone attrs)
+        let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
+        let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
+        bsStack := bsStack.push
+          (bpx + dpx, bsub + (if dsub then 1 else 0), bsup + (if dsup then 1 else 0))
+        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs
+        if nm == "textPath" then
+          -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
+          let ep := elemPosOf st attrs
+          let ep : Text.ElemPos := { rots := ep.rots, hasRot := ep.hasRot }
+          match (textPathHref attrs).bind paths.get? with
+          | some tbl =>
+            rendStack := rendStack.push rend
+            let m := textStyle.ctm
+            evs := evs.push (Text.Ev.openPath ep tbl (startOffsetOf st tbl attrs)
+              (TextPath.accuracyFor m.a m.b m.c m.d))
+          | none =>
+            rendStack := rendStack.push false
+            evs := evs.push (Text.Ev.open_ ep)
+        else
+          rendStack := rendStack.push rend
+          evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
+      else if nm == "tref" then
+        -- `resolve_tref_text`: `href` (falling back to `xlink:href`) must be
+        -- a bare local IRI; the target is looked up by id anywhere in the
+        -- document and every character-data byte under it concatenated.
+        -- Converted to a `tspan` carrying the tref's own attributes plus one
+        -- synthetic text node — its own children are never visited at all
+        -- (`with-a-title-child.svg`, `with-text.svg`), which is why this
+        -- branch ends by skipping them exactly like an unrecognised element.
+        let href := match attr attrs "href" with
+          | some v => some v
+          | none => attr attrs "xlink:href"
+        let targetText : ByteArray :=
+          match href.bind stripFragmentId with
+          | some tid => match findById events tid with
+            | some tIdx => collectText events tIdx
+            | none => ByteArray.empty
+          | none => ByteArray.empty
+        let isFirst := ccStack.back?.getD 0 == 0
+        ccStack := match ccStack.back? with
+          | some c => ccStack.pop.push (c + 1)
+          | none => ccStack
+        let info := Css.buildElemInfo "tspan" (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let ch := (chStack.back?.getD #[]).push info
+        let st := applyEff (stStack.back?.getD default) attrs ch
         evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
+        if targetText.size > 0 then
+          let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles (stStack.push st)
+          styles := styles'.push st
+          let selfIdx := styles.size - 1
+          let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
+          let sp := spanPropsOf st bpx bsub bsup
+          evs := evs.push
+            (Text.Ev.text targetText st.spacePreserve selfIdx
+              { sp with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
+                        throughIdx := throughIdx }
+              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && st.fontAvailable))
+        evs := evs.push .close
+        skip := skip + 1
       else skip := skip + 1
     | .text bs =>
       if skip == 0 then
         let st := stStack.back?.getD default
-        styles := styles.push st
+        let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles stStack
+        styles := styles'.push st
+        let selfIdx := styles.size - 1
+        let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
+        let sp := spanPropsOf st bpx bsub bsup
         evs := evs.push
-          (Text.Ev.text bs st.spacePreserve (styles.size - 1) (spanPropsOf st)
+          (Text.Ev.text bs st.spacePreserve selfIdx
+            { sp with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
+                      throughIdx := throughIdx }
             -- usvg's zero-`font-size` guard is per text node (the span's own
             -- size), not inherited: `<text font-size="0"><tspan
-            -- font-size="40">` still draws the tspan.
-            ((rendStack.back?.getD true) && st.fontSize > 0))
-  let (placed, used) := Text.layout evs textStyle.spacePreserve budget
+            -- font-size="40">` still draws the tspan.  A `font-family` that
+            -- does not resolve to an installed font draws nothing either
+            -- (`process_chunk`'s `None => continue`), same as `display:none`.
+            ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
+  let (placed, used, mbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
   let mut out : Array Shape := #[]
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
-  return (out, used)
+      -- `text-rendering`, not `shape-rendering`, decides glyph antialiasing
+      -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
+      -- that property, so glyphs stay antialiased regardless of an ambient
+      -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
+  -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
+  -- comment), not the glyph outlines' -- what a `filter`/`mask`/
+  -- `clipPathUnits="objectBoundingBox"` on this `<text>` actually sizes
+  -- against.
+  return (out, used, mbox)
+
+/-! ## `pattern` content
+
+One `<pattern>` element's own children, collected independently of where (or
+whether) anything ends up using them — `Pat.Defs.build`'s `href` chain
+decides that, by raw index, from `Pat.RawDef.hadChildren` alone.  This
+mirrors `textShapes` just above: a bounded walk over a subrange of `events`,
+reusing `applyEffective` for the cascade, because pattern content needs
+exactly the same style resolution as the main document, just rooted
+differently (a fresh `ctm`, no inherited `clip-path` chain) and written to its
+own array instead of `Doc.nodes`.
+
+Two accepted gaps, both silent: `clip-path` on a content element or group
+(parsed into `Style.clipRef` as usual, but nothing here ever adds it to
+`Doc.uses`, so it is never applied), and `switch`/a nested `<pattern>` as
+content (skipped like any other element this function does not know, which
+for a nested `<pattern>` is correct regardless — it is not a drawable child,
+and it still gets its own top-level slot and content array from the loop
+that calls this function once per raw index). -/
+def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
+    (events : Array Xml.Event) (idx : Nat) (rootStyle : Style) (budget : Nat) :
+    Array Node × Nat := Id.run do
+  let mut nodes : Array Node := #[]
+  let mut stStack : Array Style := #[rootStyle]
+  let mut chStack : Array (Array Css.ElemInfo) := #[#[]]
+  let mut ccStack : Array Nat := #[0]
+  let mut layerOpen : Array Bool := #[]
+  let mut layerDepth : Nat := 0
+  let mut skip : Nat := 0
+  let mut depth : Nat := 1
+  let mut budget := budget
+  -- The "does this element need its own layer" decision, shared by the
+  -- `g`/shape branches below (`interpret`'s own bottom logic, T22).
+  let layerDecision := fun (st : Style) =>
+    let needs := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+    let layered := needs && layerDepth < maxLayerDepth
+    let st' := if needs && !layered then { st with opacity := mulOpacity st.opacity st.ownOpacity }
+               else st
+    (st', layered)
+  for j in [idx + 1 : events.size] do
+    if depth == 0 then break
+    match events.getD j default with
+    | .text _ => pure ()
+    | .close =>
+      depth := depth - 1
+      if skip > 0 then skip := skip - 1
+      else
+        if layerOpen.back?.getD false then
+          nodes := nodes.push .groupEnd
+          layerDepth := layerDepth - 1
+        stStack := stStack.pop
+        chStack := chStack.pop
+        ccStack := ccStack.pop
+        layerOpen := layerOpen.pop
+    | .open_ nm attrs =>
+      depth := depth + 1
+      if skip > 0 then skip := skip + 1
+      else if isDisplayNone attrs || !passesConditions attrs then skip := 1
+      else
+        let isFirst := ccStack.back?.getD 0 == 0
+        ccStack := match ccStack.back? with
+          | some c => ccStack.pop.push (c + 1)
+          | none => ccStack
+        let info := Css.buildElemInfo nm (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let chain := (chStack.back?.getD #[]).push info
+        let parent := stStack.back?.getD rootStyle
+        if nm == "text" then
+          -- `<text>` bypasses the layer machinery below exactly as
+          -- `interpret`'s own `<text>` branch does: it opens and closes its
+          -- own layer right here, because `textShapes` needs the style
+          -- *before* the layer decision folds opacity into it.
+          let st := applyEff parent attrs chain
+          let (st', layered) := layerDecision st
+          if layered then
+            nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
+            layerDepth := layerDepth + 1
+          let (shs, used, _) := textShapes applyEff events j st' chain budget {} stStack
+          budget := budget - used
+          nodes := nodes ++ shs.map Node.shape
+          if layered then nodes := nodes.push .groupEnd
+          skip := 1
+        else if nm == "g" then
+          let st := applyEff parent attrs chain
+          let (st', layered) := layerDecision st
+          if layered then
+            nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
+            layerDepth := layerDepth + 1
+          stStack := stStack.push st'
+          chStack := chStack.push chain
+          ccStack := ccStack.push 0
+          layerOpen := layerOpen.push layered
+        else if isShape nm then
+          -- A shape has no valid children of its own (SVG 1.1's basic
+          -- shapes are never containers), so its subtree — if it has one at
+          -- all — is dropped the same way an unknown element's is, below.
+          let st := applyEff parent attrs chain
+          let (st', layered) := layerDecision st
+          if layered then
+            nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
+            layerDepth := layerDepth + 1
+          match shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH st'.rootFontSize with
+          | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none, none⟩)
+          | none => pure ()
+          if layered then nodes := nodes.push .groupEnd
+          skip := 1
+        else
+          skip := 1
+  return (nodes, budget)
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
 `defs`), or children of the `clipPath` with this table index. -/
@@ -2141,12 +3232,23 @@ inductive ClipMode where
   | render
   | defs
   | clip (k : Nat)
+  /-- T52: everything under a `<marker>` element, at table index `k`.  Behaves
+  like `.render` (shapes get a `shapeNode`, containers may layer, nested
+  `marker-start`/`-mid`/`-end` still resolve) except that every `Node` this
+  subtree would emit goes into `markerNodes[k]` instead of the document's
+  `nodes`, becoming `Doc.markers[k].content` once the `<marker>` element
+  itself closes.  A `<marker>` nested inside another (unusual, but not
+  disallowed) gets its own fresh `k` and is collected into its own slot,
+  independent of the marker it is textually inside. -/
+  | markerDef (k : Nat)
 deriving Inhabited
 
 /-- The mode of a `g`/`switch` opened in this mode: a `g` inside a `clipPath`
 is not a valid child, so usvg skips it and its subtree (`convert_clip_path_
 elements`); it is descended here in `defs` mode so that a `clipPath` inside it
-is still collected, which keeps it referenceable by id as in usvg. -/
+is still collected, which keeps it referenceable by id as in usvg.  A `g`
+inside a `<marker>` stays in that marker's mode, so its whole subtree keeps
+routing to the same `markerNodes` slot (T52). -/
 def ClipMode.inner : ClipMode → ClipMode
   | .clip _ => .defs
   | m => m
@@ -2154,9 +3256,11 @@ def ClipMode.inner : ClipMode → ClipMode
 /-- Is content in this mode actually drawn?  Only rendered content can open a
 compositing layer: a `clipPath` child contributes a fill and nothing else, and
 what is under `defs` is not drawn at all, so usvg never asks `should_isolate`
-about either (T20 × T22). -/
+about either (T20 × T22).  Marker content is drawn too, once per instance
+(T52), so it counts as rendered here as well. -/
 def ClipMode.isRender : ClipMode → Bool
   | .render => true
+  | .markerDef _ => true
   | _ => false
 
 /-- Per-element state kept in lockstep with the style stack (T20). -/
@@ -2170,7 +3274,154 @@ structure Frame where
   /-- Whether a box is wanted at all: this element or an ancestor has a
   `clip-path`.  Everything else skips the flattening the box costs. -/
   want : Bool := false
+  /-- T49: this element's `mask` use; the box goes there on close, as above. -/
+  maskUse : Option Nat := none
+  /-- T49: this element *is* the `mask` with this table index; its close ends
+  the content node stream. -/
+  maskSlot : Option Nat := none
+  /-- T49: inside a `maskContentUnits="objectBoundingBox"` mask, where
+  coordinates are fractions of a box and a fill-only shape is lexed on the
+  16.16 grid, as a `clipPath` child is (`ClipChild.fine`). -/
+  fine : Bool := false
+  /-- Set on a shape element's own frame: usvg's `convert_element_impl` never
+  recurses into a `rect`/`circle`/.../`path`'s children (only `g`/`svg`/
+  `switch` call `convert_children`), so any XML children of a shape are not
+  part of the render tree at all, not even as siblings drawn on top of it.
+  Checked at the very top of the next `.open_`, before any other branch, so
+  such a child is dropped exactly like a `switch`'s non-selected child. -/
+  isShapeLeaf : Bool := false
+  /-- T51: the index in `nodes` of this element's `groupBegin` when it opened
+  a layer for a `filter`, patched with the resolved filters on close. -/
+  filterAt : Option Nat := none
+  /-- T51: whether that layer has a reason besides the filter. -/
+  filterOnly : Bool := false
+  /-- T85: this `use`'s `ctxUses` slot; the box goes there on close. -/
+  ctxUse : Option Nat := none
 deriving Inhabited
+
+/-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
+theorem use_maxDepth_le : Use.maxDepth ≤ maxLayerDepth := by decide
+
+/-- The rect percentages resolve against at the root, as `defsScan` computes
+it: the root's `viewBox` size, else its own resolved size (T47 hands it to
+`Use.expand`). -/
+def rootViewport (events : Array Xml.Event) : Fx × Fx :=
+  match events.find? (fun e => match e with | .open_ _ _ => true | _ => false) with
+  | some (.open_ "svg" attrs) =>
+    let r := parseRoot attrs
+    match r.viewBox with
+    | some (_, _, vw, vh) => (vw, vh)
+    | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+  | _ => (Fx.ofNat 100, Fx.ofNat 100)
+/-- A `mask` link that `fixRecursiveMaskLinks` may cut: a `mask` element's own
+`mask` attribute, or a use. -/
+inductive MaskLink where
+  | self_ (k : Nat)
+  | use (u : Nat)
+deriving Inhabited
+
+/-- Record a rendered element's `mask` as a use (like `addClipUse`) and list it
+as a link held inside every `mask` element it sits in (`openMasks`). -/
+def addMaskUse (ref : Option String) (ctm : Mat) (uses : Array MaskUse)
+    (holders : Array (Array MaskLink)) (openMasks : Array Nat) :
+    Array MaskUse × Array (Array MaskLink) × Option Nat :=
+  match ref with
+  | none => (uses, holders, none)
+  | some id =>
+    let u := uses.size
+    (uses.push ⟨id, none, ctm, none⟩,
+     openMasks.foldl (fun hs k => hs.modify k (·.push (.use u))) holders, some u)
+
+/-- usvg's `fix_recursive_links(EId::Mask, AId::Mask)`: while some `mask`
+element `M` has, among its descendants (itself included, in document order), a
+link to `M`, or a link to a mask `L` one of whose descendants links to `M`, set
+the first such link to `none`.  `holders[m]` lists the links under mask `m` in
+document order.  Each round removes a link, so `total + 1` rounds suffice. -/
+def fixRecursiveMaskLinks (masks : Array MaskEntry) (uses : Array MaskUse)
+    (holders : Array (Array MaskLink)) : Array MaskEntry × Array MaskUse := Id.run do
+  let target := fun (ms : Array MaskEntry) (us : Array MaskUse) (l : MaskLink) => match l with
+    | .self_ k => (ms.getD k default).selfMask
+    | .use u => (us.getD u default).entry
+  let total := holders.foldl (fun n h => n + h.size) 0
+  let mut ms := masks
+  let mut us := uses
+  for _ in [0:total + 1] do
+    let found : Option MaskLink := Id.run do
+      for m in [0:ms.size] do
+        for l in holders.getD m #[] do
+          match target ms us l with
+          | none => pure ()
+          | some t =>
+            if t == m then return some l
+            for l2 in holders.getD t #[] do
+              if target ms us l2 == some m then return some l2
+      return none
+    match found with
+    | none => break
+    | some (.self_ k) => ms := ms.modify k fun e => { e with selfMask := none }
+    | some (.use u) => us := us.modify u fun x => { x with entry := none }
+  return (ms, us)
+
+/-- T63: an `<image>` element's rectangle and placed pixels, or `none` when it
+draws nothing: no embedded (`data:`) PNG/JPEG that decodes, one that would
+overrun the `budget` of decoded pixels left, or an empty viewport.  Also the
+budget left afterwards.  Lengths as `shapeCmds` resolves them; a `width`/`height` that does
+not parse (`auto`, say) is absent, i.e. taken from the image. -/
+def imageShape (attrs : Array Xml.Attr) (st : Style) (budget : Nat) :
+    Option (Array PathCmd × Image.Placed × Option (Fx × Fx × Fx × Fx)) × Nat :=
+  let href := (attr attrs "href").orElse (fun _ => attr attrs "xlink:href")
+  -- Past the document's pixel budget nothing more is even decoded, and the
+  -- first image that overruns it spends it all, so at most one decode is
+  -- ever thrown away.
+  match if budget == 0 then none else href.bind Image.load with
+  | none => (none, budget)
+  | some pix =>
+    if pix.w * pix.h > budget then (none, 0) else
+    let lx := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefW st.rootFontSize)
+    let ly := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefH st.rootFontSize)
+    let ar := match attr attrs "preserveAspectRatio" with
+      | some v => Viewport.parseAspectRatio v
+      | none => {}
+    (Image.place pix ((lx "x").getD 0) ((ly "y").getD 0) (lx "width") (ly "height") ar
+      st.imageRendering, budget - pix.w * pix.h)
+
+/-- T84: an `<image>` of an SVG document (`LeanSvg/SvgImage.lean`) with source
+`src`: its entry, the elements it spends of the `elems` left, and the viewport
+as a clip for `slice`.  `depth` is the element's nesting and `layerDepth` the
+layers above its content, both shared with the sub-document.  `none` when it
+draws nothing: over a budget, a sub-document that does not parse, or an empty
+size. -/
+def svgImageEntry (attrs : Array Xml.Attr) (st : Style) (src : ByteArray) (elems depth layerDepth : Nat) :
+    Option (SvgImage.Entry × Nat × Option (Fx × Fx × Fx × Fx)) := do
+  let evs ← match Xml.parse src with
+    | .ok e => some e
+    | .error _ => none
+  let (n, d) := SvgImage.stats evs
+  if n > elems || depth + d > Xml.maxDepth then none
+  let r ← match evs.find? (fun e => match e with | .open_ _ _ => true | _ => false) with
+    | some (.open_ "svg" a) => some (parseRoot a)
+    | _ => none
+  let (sw, sh) ← resolveRootSize r
+  let rootMat := match r.viewBox with
+    | some vb => (Viewport.viewBoxTransform vb r.aspect sw sh).getD Mat.identity
+    | none => Mat.identity
+  let lx := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefW st.rootFontSize)
+  let ly := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefH st.rootFontSize)
+  let ar := match attr attrs "preserveAspectRatio" with
+    | some v => Viewport.parseAspectRatio v
+    | none => {}
+  let (x, y, w, h, inner) ←
+    SvgImage.place sw sh rootMat ((lx "x").getD 0) ((ly "y").getD 0) (lx "width") (ly "height") ar
+  let clip := if ar.slice && ar.align.isSome then some (x, y, w, h) else none
+  some (⟨evs, layerDepth, x, y, w, h, inner⟩, n, clip)
+
+/-- T84: how a document is interpreted.  The top level is `{}`; an SVG
+image's sub-document starts at the layer depth its image sits at, and loads no
+images of its own (usvg drops external ones; here every one, so SVG images
+never nest). -/
+structure SubCfg where
+  layerDepth : Nat := 0
+  nested : Bool := false
 
 /-- Walk the event stream with a style stack.
 
@@ -2196,7 +3447,12 @@ bounded forward lookahead to find the first direct child whose tag usvg
 recognises and whose own `passesConditions` holds; that index becomes its
 `switchSel` target.  All three stacks move together at every push/pop site
 so CSS resolution and switch selection never drift out of sync. -/
-def interpret (events : Array Xml.Event) : Except String Doc := do
+def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc := do
+  -- T47: `use` references are copied in first; everything below sees the
+  -- expanded stream (see `LeanSvg/Use.lean`).
+  let events := FeImage.fixRecursive events
+  let srcEvents := events
+  let events ← Use.expand events (rootViewport events) maxClipPaths
   let combinedCss : ByteArray := Id.run do
     let mut out := ByteArray.empty
     let mut curDepth : Nat := 0
@@ -2224,17 +3480,30 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- copying, and T20's `clipPath` slots, which the walk below fills in
   -- because their contents need the cascade.  See "the shape of a defs table".
   let scan := defsScan events
+  let textPaths := textPathTables events
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
+  -- T51: every `<filter>` element, collected up front like the gradients.
+  let fparsers : Filter.Parsers := ⟨parseColor, parseOpacity, opacityOne⟩
+  let ftab := Filter.scan fparsers events
+  -- Geometry only, no content yet: `Pat.resolve` needs nothing but the raw
+  -- attributes and `href` chain, so the table can be complete before the
+  -- main walk starts, exactly like `gradTable` (`Doc.patterns`'s doc
+  -- comment).  `resolvePaint` reaches it through every `Style` from here.
+  let patTable := Pat.Defs.build scan.patterns scan.pctRef
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
-    -- `transform-origin` percentages resolve against the same rect for every
-    -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it,
-    -- so usvg's per-element `state.view_box` is one constant for the whole
-    -- document): the root's `viewBox` if it has one, else the root's own
-    -- resolved size (`resolveRootSize`).  Established once, from the root
-    -- `<svg>`'s own attrs, and inherited unchanged from then on.
+    -- `transform-origin` percentages resolve against usvg's per-element
+    -- `state.view_box`: the root's `viewBox` if it has one, else the root's
+    -- own resolved size (`resolveRootSize`).  Established here from the root
+    -- `<svg>`'s own attrs and inherited; only a nested `<svg>` rescopes it.
     -- `parent.pctRefSet` is false only for the literal `default : Style`
     -- passed as the parent of the root element itself -- the one call where
-    -- `attrs` *are* the root's own `width`/`height`/`viewBox`.
+    -- `attrs` *are* the root's own `width`/`height`/`viewBox`.  Captured
+    -- before the shadowing below: `rootFontSize` (what `rem` resolves
+    -- against) is set from this call's own resolved `fontSize` only when it
+    -- is processing the root, then just inherited like `pctRefW`/`pctRefH`
+    -- for every descendant -- but unlike them, never rescoped by a nested
+    -- `<svg>` (SVG 2 `rem` always means the *document* root).
+    let isRoot := !parent.pctRefSet
     let parent :=
       if parent.pctRefSet then parent
       else
@@ -2285,7 +3554,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     let base := { base with ownOpacity := opacityOne, blend := .normal, isolate := false }
     -- `clip-path` and the element's own transform are per-element too, and for
     -- the same reason (T20).
-    let base := { base with clipRef := none, ownMat := Mat.identity }
+    let base := { base with clipRef := none, ownMat := Mat.identity, maskRef := none,
+                            maskAlpha := false, filterRaw := none }
+    -- `text-decoration` and `textLength`/`lengthAdjust` are per-element for
+    -- the same reason (T55): see the field docs on `Style`.
+    let base := { base with ownUnderline := false, ownOverline := false, ownLineThrough := false,
+                            ownTextLength := none, ownLengthAdjustGlyphs := false }
     let early (n : String) := n == "color" || n == "transform-origin"
     -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
     -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and
@@ -2295,10 +3569,17 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     -- layers below still apply all three.
     let skipName (n : String) := n == "style" || early n || n == "font-kerning"
                                  || isCssOnlyProp n
-    let afterAttrs := attrs.foldl (fun st a => if skipName a.name then st else applyProp st a.name a.value) base
+    -- T63: usvg also drops the attribute form of `image-rendering` for its
+    -- CSS-only values (`svgtree/parse.rs`).
+    let cssOnlyValue (a : Xml.Attr) := a.name == "image-rendering" &&
+      (eqAscii a.value "smooth" || eqAscii a.value "high-quality" ||
+       eqAscii a.value "crisp-edges" || eqAscii a.value "pixelated")
+    let afterAttrs := attrs.foldl (fun st a =>
+      if skipName a.name || cssOnlyValue a then st else applyProp st a.name a.value) base
     let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
     let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
-    importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
+    let final := importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
+    if isRoot then { final with rootFontSize := final.fontSize } else final
   let mut stack : Array Style := #[]
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
@@ -2306,7 +3587,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- T22's fifth stack, again in lockstep with `stack`: did this element open a
   -- compositing layer (so its `.close` must emit a `groupEnd`)?
   let mut layerOpen : Array Bool := #[]
-  let mut layerDepth : Nat := 0
+  let mut layerDepth : Nat := cfg.layerDepth
   -- T20: a sixth stack, in lockstep with the other five, for `clipPath`
   -- collection and object bounding boxes (see `Frame`).
   let mut frames : Array Frame := #[]
@@ -2318,6 +3599,32 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       selfClipId := none, selfClip := none, children := #[], filled := false }
   let mut clipCursor : Nat := 0
   let mut uses : Array ClipUse := #[]
+  -- T49: the same for `mask`, plus the content streams being collected: while
+  -- inside a `mask` element, `nodes` is that mask's content and the enclosing
+  -- stream (with its `layerDepth`) waits on `maskSaved`.
+  let mut maskTable : Array MaskEntry := scan.masks.map fun (mid, _) => { id := mid }
+  let mut maskHolders : Array (Array MaskLink) := scan.masks.map fun _ => #[]
+  let mut maskCursor : Nat := 0
+  let mut maskUses : Array MaskUse := #[]
+  let mut ctxUses : Array CtxUse := #[]
+  let mut openMasks : Array Nat := #[]
+  let mut maskSaved : Array (Array Node × Nat) := #[]
+  -- T52: one slot per `<marker id>` the pre-pass found, mirroring `clipTable`.
+  -- `markerCursor` steps through them the same way `clipCursor` does.  Unlike
+  -- a `clipPath`, a marker's own geometry attributes (`refX`/`markerWidth`/
+  -- `viewBox`/`orient`/...) are all on the element itself, so the slot is
+  -- filled in as soon as the walk opens it; only `content` waits for `.close`,
+  -- once every descendant routed into `markerNodes[k]` (see `ClipMode.
+  -- markerDef`) has been collected.
+  let mut markerTable : Array MarkerEntry := scan.markers.map fun (mid, _) =>
+    { id := mid, filled := false }
+  let mut markerCursor : Nat := 0
+  let mut markerNodes : Array (Array Node) := scan.markers.map fun _ => #[]
+  -- Seventh lockstep stack: `some k` on the element that opened marker slot
+  -- `k` (so `.close` knows when to freeze `markerNodes[k]` into
+  -- `markerTable[k].content`), `none` on every other element, including ones
+  -- nested inside a marker.
+  let mut markerOpenSlot : Array (Option Nat) := #[]
   let mut skip : Nat := 0
   let mut nodes : Array Node := #[]
   let mut root : Option RootInfo := none
@@ -2325,6 +3632,13 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- `<text>` element draws from this one budget, so glyph generation is
   -- bounded by a constant however much text the input contains.
   let mut textBudget : Nat := 100000
+  -- T63: decoded image pixels the whole document may keep (`Image.maxTotalPixels`).
+  let mut imageBudget : Nat := if cfg.nested then 0 else Image.maxTotalPixels
+  -- T84: what SVG images may still add to the document: elements (with the
+  -- document's own, at most `Xml.maxElements`) and bytes of source.
+  let mut svgImages : Array SvgImage.Entry := #[]
+  let mut svgElems : Nat := Xml.maxElements - (SvgImage.stats events).1
+  let mut svgBytes : Nat := if cfg.nested then 0 else SvgImage.maxTotalBytes
   for idx in [0:events.size] do
     match events.getD idx default with
     | .text _ => pure ()
@@ -2334,7 +3648,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let st := stack.back?.getD default
         let fr := frames.back?.getD default
         if layerOpen.back?.getD false then
-          nodes := nodes.push .groupEnd
+          match fr.mode with
+          | .markerDef k => markerNodes := markerNodes.setIfInBounds k ((markerNodes.getD k #[]).push .groupEnd)
+          | _ => nodes := nodes.push .groupEnd
           layerDepth := layerDepth - 1
         stack := stack.pop
         elemStack := elemStack.pop
@@ -2342,6 +3658,15 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         switchSel := switchSel.pop
         layerOpen := layerOpen.pop
         frames := frames.pop
+        -- T52: this element is exactly where marker slot `k` was opened (not
+        -- merely inside it), so its whole content has finished arriving in
+        -- `markerNodes[k]`.
+        match markerOpenSlot.back?.getD none with
+        | some k =>
+          let e := markerTable.getD k default
+          markerTable := markerTable.setIfInBounds k { e with content := markerNodes.getD k #[] }
+        | none => pure ()
+        markerOpenSlot := markerOpenSlot.pop
         -- T20: the element's object bounding box is complete now.  It goes to
         -- the element's own use, and (through the element's own transform)
         -- into the parent's box -- but only for rendered content: what is
@@ -2350,6 +3675,36 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         match fr.useSlot with
         | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox })
         | none => pure ()
+        match fr.maskUse with
+        | some k => maskUses := maskUses.modify k (fun u => { u with bbox := fr.bbox })
+        | none => pure ()
+        match fr.ctxUse with
+        | some k => ctxUses := ctxUses.modify k (fun u => { u with bbox := fr.bbox })
+        | none => pure ()
+        match fr.maskSlot with
+        | some k =>
+          maskTable := maskTable.modify k fun e => { e with nodes := nodes }
+          let (sv, ld) := maskSaved.back?.getD (#[], 0)
+          nodes := sv
+          layerDepth := ld
+          maskSaved := maskSaved.pop
+          openMasks := openMasks.pop
+        | none => pure ()
+        -- T51: the object bounding box is complete, so the `filter` can be
+        -- resolved; the layer's `groupBegin` is patched with the outcome.
+        match fr.filterAt, st.filterRaw with
+        | some k, some raw =>
+          let bbox : Option Filter.URect := fr.bbox.bind fun b =>
+            if Box.nonZero b then some ⟨b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0⟩ else none
+          let cx : Filter.ElemCtx := ⟨bbox, st.color, st.fontSize, st.pctRefW, st.pctRefH⟩
+          nodes := nodes.modify k fun n => match n with
+            | .groupBegin g =>
+              match Filter.resolve fparsers ftab raw cx with
+              | .filters fs => .groupBegin { g with filters := fs, filterCtm := st.ctm }
+              | .drop => .groupBegin { g with dropped := true }
+              | .noFilter => .groupBegin { g with passthrough := fr.filterOnly }
+            | n => n
+        | _, _ => pure ()
         match fr.mode, frames.back? with
         | .render, some pf =>
           if pf.want then
@@ -2386,6 +3741,14 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let mut frame : Frame := {}
         let mut renders : Bool := false
         let mut container : Bool := false
+        -- T48: a nested `<svg>`'s viewport clip use, which rides the layer
+        -- beside (outside) the element's own `clip-path`.
+        let mut viewportClip : Option Nat := none
+        let mut fineShape : Bool := false
+        -- T52: `some k` only from the `marker` branch below, when this
+        -- element is exactly where slot `k` was opened; pushed onto
+        -- `markerOpenSlot` alongside the other six stacks.
+        let mut markerSlot : Option Nat := none
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
@@ -2397,10 +3760,16 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             -- applies (`masking/clipPath/on-the-root-svg-with-size`).  T18's
             -- gradient table reaches every element from here, by inheritance.
             let (st, uses', slot) :=
-              addClipUse (applyEffective { (default : Style) with defs := gradTable } attrs chain) uses
+              addClipUse
+                (applyEffective { (default : Style) with defs := gradTable, patterns := patTable }
+                  attrs chain) uses
             uses := uses'
+            let (mu, mh, mslot) := addMaskUse st.maskRef st.ctm maskUses maskHolders openMasks
+            maskUses := mu
+            maskHolders := mh
             enter := some st
-            frame := { mode := .render, useSlot := slot, want := slot.isSome }
+            frame := { mode := .render, useSlot := slot, maskUse := mslot,
+                       want := slot.isSome || mslot.isSome }
             renders := true
             container := true
         | some _ =>
@@ -2409,6 +3778,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             | some none => false
             | some (some target) => idx == target
           if !allowed then skip := 1
+          else if pf.isShapeLeaf then skip := 1
           else if name == "clipPath" then
             -- T20: collect the clip wherever it appears.  Its contents live in
             -- the user space of the element that will reference it, so the
@@ -2436,18 +3806,99 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               enter := some { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none }
               frame := { mode := .clip k }
             | none => skip := 1
+          else if name == "mask" then
+            -- T49: like `clipPath`, collected wherever it appears, in the user
+            -- space of the referencing element (its own `transform` has no
+            -- effect).  Its children are rendered content, but into the mask's
+            -- own node stream (see `maskSaved`).
+            while maskCursor < scan.masks.size && (scan.masks.getD maskCursor ("", 0)).2 < idx do
+              maskCursor := maskCursor + 1
+            let slotK :=
+              if maskCursor < scan.masks.size && (scan.masks.getD maskCursor ("", 0)).2 == idx
+              then some maskCursor else none
+            match slotK with
+            | some k =>
+              let stM := applyEffective
+                { parent with ctm := Mat.identity, clips := #[], opacity := opacityOne } attrs chain
+              let isUser := fun (n : String) (dflt : Bool) => match attr attrs n with
+                | some v =>
+                  let t := trim v
+                  if eqAscii t "userSpaceOnUse" then true
+                  else if eqAscii t "objectBoundingBox" then false else dflt
+                | none => dflt
+              maskTable := maskTable.modify k fun e =>
+                { e with userUnits := isUser "maskUnits" false,
+                         contentBBox := !(isUser "maskContentUnits" true),
+                         alpha := stM.maskAlpha,
+                         x := (attr attrs "x").bind parseCoord16,
+                         y := (attr attrs "y").bind parseCoord16,
+                         w := (attr attrs "width").bind parseCoord16,
+                         h := (attr attrs "height").bind parseCoord16,
+                         pctW := stM.pctRefW, pctH := stM.pctRefH,
+                         selfMaskId := stM.maskRef, filled := true }
+              openMasks := openMasks.push k
+              if stM.maskRef.isSome then
+                maskHolders := openMasks.foldl (fun hs j => hs.modify j (·.push (.self_ k))) maskHolders
+              maskSaved := maskSaved.push (nodes, layerDepth)
+              nodes := #[]
+              layerDepth := 0
+              enter := some { stM with ctm := Mat.identity, ownMat := Mat.identity,
+                                       clipRef := none, maskRef := none }
+              frame := { mode := .render, maskSlot := some k,
+                         fine := (maskTable.getD k default).contentBBox }
+            | none => skip := 1
           else if name == "defs" then
             -- T20: descended, not rendered, so the `clipPath`s inside are
             -- collected.
             enter := some (applyEffective parent attrs chain)
             frame := { mode := .defs }
-          else if name == "g" then
+          else if name == "g" || name == "a" then
+            -- usvg's tree builder rewrites `<a>`'s tag name to `EId::G` before
+            -- conversion ever sees it (`svgtree/parse.rs`): a link has no
+            -- rendering behaviour of its own, only its `<g>`-identical
+            -- properties and children.
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
               enter := some st
-              frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
+              frame := { mode := pf.mode.inner, useSlot := slot, maskUse := mslot,
+                         want := slot.isSome || mslot.isSome || pf.want, fine := pf.fine }
+              renders := pf.mode.isRender
+              container := true
+          else if name == "use" then
+            -- T47: `Use.expand` has put the linked content inside.  A `use` is a
+            -- group whose `x`/`y` translate after its own transform, and it
+            -- keeps its parent's mode: a `use` of a shape is a valid `clipPath`
+            -- child, while the `g` it may contain is not (`.inner`).
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let st := applyEffective parent attrs chain
+              let len := fun (n : String) (ref : Fx) =>
+                (((attr attrs n).bind parseLengthOrPercent).map (resolvePct · ref)).getD 0
+              let tr := Mat.translate (len "x" st.pctRefW) (len "y" st.pctRefH)
+              let noAlpha := fun (p : Paint) => match p with
+                | .solid c => Paint.solid { c with a := 255 }
+                | p => p
+              -- T85: a paint-server context needs this `use`'s box and CTM.
+              let server := fun (p : Paint) => match p with
+                | .gradient .. | .pattern _ => true
+                | _ => false
+              let cslot := if pf.mode matches .render && (server st.fill || server st.stroke)
+                then some ctxUses.size else none
+              let st := { st with ctm := st.ctm.mul tr, ownMat := st.ownMat.mul tr,
+                                  ctxFill := noAlpha st.fill, ctxStroke := noAlpha st.stroke,
+                                  ctxSlot := cslot }
+              if cslot.isSome then ctxUses := ctxUses.push ⟨st.ctm, none⟩
+              let (st, uses', slot) := addClipUse st uses
+              uses := uses'
+              enter := some st
+              frame := { mode := pf.mode, useSlot := slot, ctxUse := cslot,
+                         want := slot.isSome || cslot.isSome || pf.want }
               renders := pf.mode.isRender
               container := true
           else if name == "switch" then
@@ -2467,16 +3918,6 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               -- child.svg`: `switch` skips straight past `<random/>` to the
               -- next real child) — every other SVG 1.1 element name usvg
               -- knows still is, whether or not *we* render it.
-              let svgTagNames : List String :=
-                ["a", "circle", "clipPath", "defs", "ellipse", "feBlend", "feColorMatrix",
-                 "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting",
-                 "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
-                 "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge",
-                 "feMergeNode", "feMorphology", "feOffset", "fePointLight", "feSpecularLighting",
-                 "feSpotLight", "feTile", "feTurbulence", "filter", "g", "image", "line",
-                 "linearGradient", "marker", "mask", "path", "pattern", "polygon", "polyline",
-                 "radialGradient", "rect", "stop", "svg", "switch", "symbol", "text", "textPath",
-                 "tref", "tspan", "use"]
               let target : Option Nat := Id.run do
                 let mut depth : Nat := 0
                 for j in [idx + 1 : events.size] do
@@ -2491,8 +3932,67 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                 return none
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
               enter := some st
               sel := some target
+              frame := { mode := pf.mode.inner, useSlot := slot, maskUse := mslot,
+                         want := slot.isSome || mslot.isSome || pf.want, fine := pf.fine }
+              renders := pf.mode.isRender
+              container := true
+          else if name == "svg" then
+            -- T48: a nested viewport, as usvg's `use_node::convert_svg`: the
+            -- element's own `transform`, then (unless `overflow` is
+            -- visible/auto, or `width`/`height` is missing) a clip to
+            -- `x y width height`, then `translate(x, y)` and the `viewBox`
+            -- map.  Percentages resolve against the parent viewport, and
+            -- the children's against the new one.
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let st0 := applyEffective parent attrs chain
+              let len := fun (n : String) (ref dflt : Fx) =>
+                match (attr attrs n).bind parseLengthOrPercent with
+                | some l => resolvePct l ref
+                | none => dflt
+              let pw := parent.pctRefW
+              let ph := parent.pctRefH
+              let x := len "x" pw 0
+              let y := len "y" ph 0
+              let w := len "width" pw pw
+              let h := len "height" ph ph
+              let r := parseRoot attrs
+              let vbT := r.viewBox.bind fun vb => Viewport.viewBoxTransform vb r.aspect w h
+              let newTs := match vbT with
+                | some m => (Mat.translate x y).mul m
+                | none => Mat.translate x y
+              let (refW, refH) := match r.viewBox with
+                | some (_, _, vw, vh) => if vw > 0 && vh > 0 then (vw, vh) else (pw, ph)
+                | none => if w > 0 && h > 0 then (w, h) else (pw, ph)
+              let visibleOverflow := match attrOrStyle attrs "overflow" with
+                | some v => eqAscii (trim v) "visible" || eqAscii (trim v) "auto"
+                | none => false
+              let clipped := pf.mode.isRender && !visibleOverflow
+                && (attr attrs "width").isSome && (attr attrs "height").isSome && w > 0 && h > 0
+              -- The viewport clip is a synthetic one-rect `clipPath` in the
+              -- space after the element's own `transform` (usvg's
+              -- `clip_element`); its use is appended to the chain exactly
+              -- like a `clip-path` one, and the bottom hands it to the layer.
+              let mut st0 := st0
+              if clipped then
+                let child : ClipChild := ⟨rectPath x y w h 0 0, false, Mat.identity, true, #[], false⟩
+                clipTable := clipTable.push
+                  { id := "", transform := Mat.identity, transformValid := true, objectBBox := false,
+                    selfClipId := none, selfClip := none, children := #[child] }
+                uses := uses.push ⟨"", some (clipTable.size - 1), st0.ctm, none⟩
+                st0 := { st0 with clips := st0.clips.push (uses.size - 1) }
+                viewportClip := some (uses.size - 1)
+              let st1 := { st0 with ctm := st0.ctm.mul newTs, ownMat := st0.ownMat.mul newTs,
+                                    pctRefW := refW, pctRefH := refH }
+              let (st, uses', slot) := addClipUse st1 uses
+              uses := uses'
+              enter := some st
               frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
               renders := pf.mode.isRender
               container := true
@@ -2505,12 +4005,33 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             -- `.close`.  A `<text>` is a container like a `g` — its runs and
             -- glyphs can overlap — so a `clip-path` on it takes the layer
             -- route too, on the same terms as the bottom's.
-            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            -- T52: `<text>` inside a `<marker>`'s content is not supported
+            -- (`with-a-text-child.svg`) -- skipped like any other unsupported
+            -- element, rather than routed through `markerNodes` alongside the
+            -- three `nodes.push` sites below, which stay pointed at the
+            -- document unconditionally.
+            if (match pf.mode with | .markerDef _ => true | _ => false) then skip := 1
+            else if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
-              let needs := pf.mode.isRender &&
-                (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || slot.isSome)
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
+              -- T81: a `filter` is `should_isolate`'s third case, same as the
+              -- generic shape/image path (`hasFilter` below).  Unlike that
+              -- path, `<text>` opens and closes its own layer right here, so
+              -- there is no need for the generic path's `.close`-time patch
+              -- (`frame.filterAt`): the object bounding box (`tbox`, from
+              -- `textShapes`) is already in hand by the time the layer is
+              -- decided, so `Filter.resolve` runs inline, below.
+              let hasFilter := pf.mode.isRender && match st.filterRaw with
+                | some v => !(eqAscii (trim v) "none")
+                | none => false
+              let other := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+                || slot.isSome || mslot.isSome
+              let needs := pf.mode.isRender && (other || hasFilter)
               let layered := needs && layerDepth < maxLayerDepth
               let st := if needs && !layered then
                   { st with opacity := mulOpacity st.opacity st.ownOpacity } else st
@@ -2519,18 +4040,37 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let layerClips : Array Nat :=
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
-              if layered then
-                nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
-              let (shs, used) := textShapes applyEffective events idx st chain textBudget
+              let (shs, used, mbox) := textShapes applyEffective events idx st chain textBudget textPaths stack
               textBudget := textBudget - used
-              -- The laid-out glyph outlines are in this `<text>`'s own user
-              -- space (`textShapes` gives every run the element's `ctm`), so
-              -- their union is its object bounding box.
-              let want := slot.isSome || pf.want
-              let tbox :=
-                if want then shs.foldl (fun b sh => Box.union b (cmdsBox sh.cmds)) none else none
+              -- T81: usvg's `objectBoundingBox` for `<text>` is the union of
+              -- each glyph's *font-metric* box, not its outline (`Text.
+              -- layout`'s doc comment) -- `mbox` is already that, in this
+              -- `<text>`'s own user space (`textShapes` gives every run the
+              -- element's `ctm`).
+              let want := slot.isSome || mslot.isSome || pf.want || hasFilter
+              let tbox := if want then mbox else none
+              if layered then
+                let gi : GroupInfo :=
+                  { opacity := st.ownOpacity, blend := st.blend, isolate := st.isolate,
+                    clips := layerClips, mask := mslot }
+                let gi := if hasFilter then
+                    let fbox : Option Filter.URect := tbox.bind fun b =>
+                      if Box.nonZero b then some ⟨b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0⟩ else none
+                    let cx : Filter.ElemCtx := ⟨fbox, st.color, st.fontSize, st.pctRefW, st.pctRefH⟩
+                    match st.filterRaw with
+                    | some raw =>
+                      match Filter.resolve fparsers ftab raw cx with
+                      | .filters fs => { gi with filters := fs, filterCtm := st.ctm }
+                      | .drop => { gi with dropped := true }
+                      | .noFilter => { gi with passthrough := !other }
+                    | none => gi
+                  else gi
+                nodes := nodes.push (.groupBegin gi)
               match slot with
               | some k => uses := uses.modify k (fun u => { u with bbox := tbox })
+              | none => pure ()
+              match mslot with
+              | some k => maskUses := maskUses.modify k (fun u => { u with bbox := tbox })
               | none => pure ()
               match pf.mode with
               | .render =>
@@ -2542,6 +4082,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                       { pf' with bbox := Box.union pf'.bbox (tbox.bind (Box.transformed st.ownMat)) }
                   | none => pure ()
               | .defs => pure ()
+              | .markerDef _ => pure ()  -- unreachable: gated above, kept for exhaustiveness
               | .clip k =>
                 -- T36 landed, so `<text>` *is* a valid `clipPath` child:
                 -- usvg converts it to paths first and clips with those.  Each
@@ -2560,11 +4101,48 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
-              let cmds := shapeCmds name attrs
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
+              let cmds := shapeCmds name attrs st.fontSize st.pctRefW st.pctRefH st.rootFontSize
+              -- T64: `has_bbox` (SVG 7.11) — an `objectBoundingBox` paint
+              -- server cannot paint a shape whose own geometry has a
+              -- degenerate (zero-width or zero-height) bounding box, e.g. a
+              -- horizontal/vertical `line`; usvg checks this once, from the
+              -- shape's own untransformed path, when resolving `fill`/
+              -- `stroke`, and uses the `url(#id) <fallback>` colour instead.
+              -- Distinct from `Grad.build`'s `.skip` (a singular transform,
+              -- decided at render time, which paints nothing, never a
+              -- fallback).
+              let hasBbox := (cmds.bind cmdsBox).any Box.nonZero
+              let fixPaint := fun (p : Paint) => match p with
+                | .gradient i fb => if hasBbox || !(st.defs.defs.getD i default).oBB then p else fb
+                | _ => p
+              -- A `context-*` paint was checked on the `use`, not here (T85).
+              let st := { st with fill := if st.fillCtx.isSome then st.fill else fixPaint st.fill,
+                                  stroke := if st.strokeCtx.isSome then st.stroke else fixPaint st.stroke }
+              -- T52: usvg 0.48.1 actually instantiates markers on every basic
+              -- shape (`converter.rs`'s `EId::Rect | Circle | Ellipse |
+              -- Polyline | Polygon | Path` all take the same `convert_path`
+              -- route that calls `marker::convert`) -- confirmed against
+              -- `marker-on-rect.svg`/`-circle.svg`/`-rounded-rect.svg`,
+              -- titled "(SVG 2)" -- but never on `<text>`, which is not in
+              -- that list (`marker-on-text.svg`).
+              let markerable := isShape name
               match pf.mode with
-              | .render =>
-                match cmds with
-                | some cmds => if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st⟩
+              | .render | .markerDef _ =>
+                -- T49: in `objectBoundingBox` mask content a fill-only shape
+                -- whose paint does not live in user units takes the 16.16
+                -- coordinates; `fineCtm` divides the 256 back out.
+                let fine := pf.fine && st.stroke matches .none &&
+                  (match st.fill with
+                   | .gradient i _ => (st.defs.defs.getD i default).oBB
+                   | _ => true) && (shapeCmds16 name attrs).isSome
+                fineShape := fine
+                match (if fine then shapeCmds16 name attrs else cmds) with
+                | some cmds =>
+                  if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none, none⟩
                 | none => pure ()
               | .defs => pure ()
               | .clip k =>
@@ -2584,10 +4162,151 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                     let child : ClipChild := ⟨cmds, st.clipEvenOdd, st.ctm, st.visible, st.clips, fine⟩
                     clipTable := clipTable.modify k fun e => { e with children := e.children.push child }
                 | none => pure ()
-              let want := slot.isSome || pf.want
+              let want := slot.isSome || mslot.isSome || pf.want || st.filterRaw.isSome
               enter := some st
-              frame := { mode := pf.mode, useSlot := slot, want,
-                         bbox := if want then cmds.bind cmdsBox else none }
+              frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
+                         bbox := if want then cmds.bind cmdsBox else none,
+                         isShapeLeaf := true }
+              renders := pf.mode.isRender
+          else if name == "marker" then
+            -- T52: like `clipPath`, a `<marker>` never renders itself -- only
+            -- `.markerDef k` routing of its descendants and, on `.close`,
+            -- freezing `markerNodes[k]` into `markerTable[k].content`.  The
+            -- slot the pre-pass reserved for *this* element, found by event
+            -- index; no slot means no usable `id` (or past `maxMarkers`), so
+            -- the element is collected (its subtree still routes through
+            -- `.markerDef` machinery harmlessly) but stays unreferenceable --
+            -- matching `clipPath`'s `none => skip := 1` would instead drop a
+            -- `<path>` inside it from `defsScan`'s later, unrelated passes,
+            -- which nothing here does, so there is no reason to skip.
+            while markerCursor < scan.markers.size &&
+                (scan.markers.getD markerCursor ("", 0)).2 < idx do
+              markerCursor := markerCursor + 1
+            let slotK :=
+              if markerCursor < scan.markers.size &&
+                  (scan.markers.getD markerCursor ("", 0)).2 == idx
+              then some markerCursor else none
+            match slotK with
+            | none => skip := 1
+            | some k =>
+              markerSlot := some k
+              let stM := applyEffective
+                { parent with ctm := Mat.identity, ownMat := Mat.identity,
+                              clips := #[], clipRef := none } attrs chain
+              let refX := lengthOrPctAttr attrs "refX" 0 stM.pctRefW
+              let refY := lengthOrPctAttr attrs "refY" 0 stM.pctRefH
+              let width := lengthOrPctAttr attrs "markerWidth" (Fx.ofNat 3) stM.pctRefW
+              let height := lengthOrPctAttr attrs "markerHeight" (Fx.ofNat 3) stM.pctRefH
+              let viewBox := match attr attrs "viewBox" with
+                | some v =>
+                  let ns := parseNumberList v
+                  if ns.size == 4 then some (ns.getD 0 0, ns.getD 1 0, ns.getD 2 0, ns.getD 3 0)
+                  else none
+                | none => none
+              let (alignNone, alignX, alignY, slice) := parseAspectAttr attrs
+              let orient := parseOrientAttr attrs
+              let unitsUser := match attr attrs "markerUnits" with
+                | some v => eqAscii (trim v) "userSpaceOnUse"
+                | none => false
+              let clip := match attr attrs "overflow" with
+                | none => true
+                | some v =>
+                  let t := trim v
+                  eqAscii t "hidden" || eqAscii t "scroll"
+              let valid := width > 0 && height > 0
+              -- The `overflow:hidden` clip rectangle, built once here so
+              -- `Marker.expand` only has to add one `ClipUse` per instance:
+              -- the `viewBox` rect if there is one, else `(0, 0, width,
+              -- height)` -- `refX`/`refY` do *not* shift it (`convert_rect`'s
+              -- `r.size()` drops the rect's own origin before this step).
+              let mut clipEntryIdx : Option Nat := none
+              if clip && valid then
+                let (rx, ry, rw, rh) := viewBox.getD (0, 0, width, height)
+                let rect := rectPath rx ry rw rh 0 0
+                let child : ClipChild := ⟨rect, false, Mat.identity, true, #[], false⟩
+                let entry : ClipEntry :=
+                  { id := "", transform := Mat.identity, transformValid := true,
+                    objectBBox := false, selfClipId := none, selfClip := none,
+                    children := #[child], filled := true }
+                clipTable := clipTable.push entry
+                clipEntryIdx := some (clipTable.size - 1)
+              markerTable := markerTable.setIfInBounds k
+                { (markerTable.getD k default) with
+                  refX, refY, width, height, viewBox, alignNone, alignX, alignY, slice,
+                  orient, unitsUser, clip, clipEntryIdx, valid, filled := true }
+              enter := some stM
+              frame := { mode := .markerDef k }
+          else if name == "image" then
+            -- T63: a leaf like a shape (`LeanSvg/Image.lean`): its coverage is
+            -- the placed rectangle and its paint the image, so opacity,
+            -- `clip-path`, `mask` and `transform` take the shape's route.  Not
+            -- a valid `clipPath` child, and never decoded outside a render.
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
+              uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
+              let (placed, budget') :=
+                if pf.mode.isRender then imageShape attrs st imageBudget else (none, imageBudget)
+              imageBudget := budget'
+              -- T84: not a raster image, so maybe an SVG document.
+              let mut svgImg : Option (Nat × Array PathCmd × Option (Fx × Fx × Fx × Fx)) := none
+              if placed.isNone && pf.mode.isRender && !cfg.nested then
+                let href := (attr attrs "href").orElse (fun _ => attr attrs "xlink:href")
+                let (src?, spent) := match href with
+                  | some v => SvgImage.load v svgBytes
+                  | none => (none, 0)
+                svgBytes := svgBytes - spent
+                match src?.bind (svgImageEntry attrs st · svgElems (stack.size + 1) (layerDepth + 1)) with
+                | some (e, ne, clip) =>
+                  svgElems := svgElems - ne
+                  svgImages := svgImages.push e
+                  svgImg := some (svgImages.size - 1, Image.rectCmds e.x e.y e.w e.h, clip)
+                | none => pure ()
+              let sliceClip := match placed, svgImg with
+                | some (_, _, c), _ => c
+                | none, some (_, _, c) => c
+                | none, none => none
+              -- `slice`: usvg's group clipped to the viewport, as a synthetic
+              -- one-rect `clipPath` on this element's chain (like T48's).
+              let mut st := st
+              if let some (x, y, w, h) := sliceClip then
+                let child : ClipChild := ⟨rectPath x y w h 0 0, false, Mat.identity, true, #[], false⟩
+                clipTable := clipTable.push
+                  { id := "", transform := Mat.identity, transformValid := true,
+                    objectBBox := false, selfClipId := none, selfClip := none,
+                    children := #[child] }
+                uses := uses.push ⟨"", some (clipTable.size - 1), st.ctm, none⟩
+                -- Inside this element's own `clip-path` use, which stays last on
+                -- the chain because a layer takes it back off from there.
+                let k := uses.size - 1
+                st := { st with clips := match slot with
+                  | some own => (st.clips.pop.push k).push own
+                  | none => st.clips.push k }
+              match placed with
+              | some (cmds, p, _) =>
+                if st.visible then
+                  shapeNode := some ⟨cmds, { st with fill := .solid ⟨0, 0, 0, 255⟩, stroke := .none },
+                    false, some p, none⟩
+              | none =>
+                match svgImg with
+                | some (k, cmds, _) =>
+                  if st.visible then
+                    shapeNode := some { cmds, style := { st with fill := .none, stroke := .none },
+                                        svgImage := some k }
+                | none => pure ()
+              let want := slot.isSome || mslot.isSome || pf.want || st.filterRaw.isSome
+              let cmds? := match placed, svgImg with
+                | some (c, _, _), _ => some c
+                | none, some (_, c, _) => some c
+                | none, none => none
+              enter := some st
+              frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
+                         bbox := if want then cmds?.bind cmdsBox else none,
+                         isShapeLeaf := true }
               renders := pf.mode.isRender
           else
             skip := 1
@@ -2608,9 +4327,15 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           -- shape has nothing to overlap with, so its own `clip-path` keeps
           -- T20's cheaper per-coverage multiply unless the element is getting
           -- a layer anyway, in which case the clip rides it.
-          let clipLayer := container && st.clipRef.isSome
-          let needs := renders &&
-            (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer)
+          let clipLayer := container && (st.clipRef.isSome || viewportClip.isSome)
+          let other := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer
+            || frame.maskUse.isSome
+          -- T51: a `filter` is `should_isolate`'s third case.  Whether it
+          -- resolves to anything is only known on close (it needs the box).
+          let hasFilter := renders && match st.filterRaw with
+            | some v => !(eqAscii (trim v) "none")
+            | none => false
+          let needs := renders && (other || hasFilter)
           -- Past `maxLayerDepth` the layer is dropped: the opacity is folded
           -- into the subtree's paint the way it was before T22 (wrong where
           -- children overlap, but bounded and never an error) and the blend
@@ -2624,11 +4349,31 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           let layerClips : Array Nat :=
             if layered then (match frame.useSlot with | some k => #[k] | none => #[]) else #[]
           let st := if layered && frame.useSlot.isSome then { st with clips := st.clips.pop } else st
+          -- T48: the viewport clip sits under the own use on the chain, and is
+          -- the outer of the two (applied last, like usvg's outer group).
+          let layerClips := match viewportClip with
+            | some k => if layered then #[k] ++ layerClips else layerClips
+            | none => layerClips
+          let st := if layered && viewportClip.isSome then { st with clips := st.clips.pop } else st
           if layered then
-            nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
+            if hasFilter then
+              frame := { frame with filterAt := some nodes.size, filterOnly := !other,
+                                    want := true }
+            let gb := Node.groupBegin
+              { opacity := st.ownOpacity, blend := st.blend, isolate := st.isolate,
+                clips := layerClips, mask := if layered then frame.maskUse else none }
+            match frame.mode with
+            | .markerDef k => markerNodes := markerNodes.setIfInBounds k ((markerNodes.getD k #[]).push gb)
+            | _ => nodes := nodes.push gb
             layerDepth := layerDepth + 1
           match shapeNode with
-          | some s => nodes := nodes.push (.shape { s with style := st })
+          | some s =>
+            let st := if fineShape then { st with ctm := st.ctm.mul (Mat.mk' 256 0 0 256 0 0) } else st
+            match frame.mode with
+            | .markerDef k =>
+              markerNodes := markerNodes.setIfInBounds k
+                ((markerNodes.getD k #[]).push (.shape { s with style := st }))
+            | _ => nodes := nodes.push (.shape { s with style := st })
           | none => pure ()
           stack := stack.push st
           elemStack := chain
@@ -2636,6 +4381,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           switchSel := switchSel.push sel
           layerOpen := layerOpen.push layered
           frames := frames.push frame
+          markerOpenSlot := markerOpenSlot.push markerSlot
   -- T20: resolve the ids, over the slots the walk actually filled.  Like
   -- usvg's `links` map, a duplicated id resolves to the last such element.
   let idMap : Std.HashMap String Nat := Id.run do
@@ -2645,10 +4391,44 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       if e.filled then m := m.insert e.id i
     return m
   let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
-  let usesResolved := uses.map fun u => { u with entry := idMap.get? u.id }
+  -- A use that already has its entry (T48's viewport clips) keeps it.
+  let usesResolved := uses.map fun u =>
+    { u with entry := match u.entry with | some k => some k | none => idMap.get? u.id }
+  -- T49: the same for masks, then usvg's cycle cutting.
+  let maskIdMap : Std.HashMap String Nat := Id.run do
+    let mut m : Std.HashMap String Nat := {}
+    for i in [0:maskTable.size] do
+      let e := maskTable.getD i default
+      if e.filled then m := m.insert e.id i
+    return m
+  let (masksFixed, maskUsesFixed) := fixRecursiveMaskLinks
+    (maskTable.map fun e => { e with selfMask := e.selfMaskId.bind maskIdMap.get? })
+    (maskUses.map fun u => { u with entry := maskIdMap.get? u.id }) maskHolders
+  -- One content array per raw `<pattern>` index, collected now that the walk
+  -- above is done — `Doc.patterns`'s doc comment explains why this cannot
+  -- run any earlier than `gradTable`/`patTable` themselves, and does not need
+  -- to: nothing before this point ever reads a pattern's *content*, only its
+  -- geometry and its index (`resolvePaint`'s `.pattern i`). `patRootStyle` is
+  -- the ambient style pattern content inherits from: fresh defaults (colour
+  -- black, fill black, etc.) rather than whatever element the `<pattern>`
+  -- happens to sit under in the markup, which usvg's own cascade would use —
+  -- an accepted gap, since every `<pattern>` in this task's corpus sits
+  -- directly under `<svg>` or `<defs>`, where that is the same thing anyway.
+  let prW := Int.ediv scan.pctRef.w 256
+  let prH := Int.ediv scan.pctRef.h 256
+  let patRootStyle : Style :=
+    { (default : Style) with defs := gradTable, patterns := patTable, pctRefSet := true, pctRefW := prW, pctRefH := prH }
+  let mut patternContent : Array (Array Node) := #[]
+  for raw in scan.patterns do
+    let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget
+    textBudget := used
+    patternContent := patternContent.push shs
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, nodes, clipsResolved, usesResolved⟩
+  | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,
+      srcEvents, patTable, patternContent, svgImages, ctxUses⟩
+
+def interpret (events : Array Xml.Event) : Except String Doc := interpretWith {} events
 
 end Svg
 end LeanSvg

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <!-- T65: feTurbulence, both types, stitching, seeds, octaves, composited -->
+  <defs>
+    <filter id="t1" x="0" y="0" width="1" height="1">
+      <feTurbulence baseFrequency="0.03" numOctaves="3" seed="7"/>
+    </filter>
+    <filter id="t2" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+      <feTurbulence baseFrequency="0.02 0.08" numOctaves="4" type="fractalNoise" stitchTiles="stitch"/>
+    </filter>
+    <filter id="t3" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence baseFrequency="0.05" seed="-3" result="n"/>
+      <feColorMatrix in="n" type="luminanceToAlpha" result="a"/>
+      <feComposite in="SourceGraphic" in2="a" operator="in"/>
+    </filter>
+  </defs>
+  <rect x="10" y="10" width="130" height="130" filter="url(#t1)"/>
+  <rect x="160" y="10" width="130" height="130" filter="url(#t2)"/>
+  <circle cx="75" cy="225" r="60" fill="teal" filter="url(#t3)"/>
+  <g transform="translate(225 225) rotate(20) scale(1.5)">
+    <rect x="-40" y="-40" width="80" height="80" filter="url(#t1)"/>
+  </g>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <!-- no fill of its own: every use picks its own colour -->
+    <path id="leaf" d="M 0 -30 C 18 -18 18 18 0 30 C -18 18 -18 -18 0 -30 Z"/>
+    <!-- four leaves through nested use, each rotated -->
+    <g id="flower">
+      <use href="#leaf" transform="rotate(0)"/>
+      <use href="#leaf" transform="rotate(45)" fill-opacity="0.7"/>
+      <use href="#leaf" transform="rotate(90)"/>
+      <use href="#leaf" transform="rotate(135)" fill-opacity="0.7"/>
+      <circle r="8" fill="context-stroke"/>
+    </g>
+    <!-- a symbol whose content overflows its viewBox: clipped at the use rect -->
+    <symbol id="badge" viewBox="0 0 40 40" preserveAspectRatio="xMidYMid meet">
+      <rect x="-10" y="-10" width="60" height="60" fill="#e8e0c8"/>
+      <circle cx="20" cy="20" r="16" fill="context-fill" stroke="#333" stroke-width="2"/>
+    </symbol>
+    <symbol id="wide" viewBox="0 0 40 20" overflow="visible">
+      <ellipse cx="20" cy="10" rx="26" ry="8" fill="#6a4"/>
+    </symbol>
+  </defs>
+
+  <use xlink:href="#flower" x="75" y="75" fill="#c33" stroke="#fc0"/>
+  <use href="#flower" x="225" y="75" fill="#36c" stroke="#fff" opacity="0.6"/>
+  <g fill="#393">
+    <use href="#flower" transform="translate(150 150) scale(0.8)" stroke="#000"/>
+  </g>
+
+  <use href="#badge" x="20" y="200" width="80" height="80" fill="#c6f"/>
+  <use href="#badge" x="110" y="210" width="80" height="60" fill="#f93"/>
+  <use href="#wide" x="200" y="220" width="80" height="40"/>
+</svg>

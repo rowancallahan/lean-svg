@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:l="http://www.w3.org/1999/xlink" width="300" height="300">
+  <defs>
+    <rect id="sq" width="80" height="80"/>
+  </defs>
+  <!-- prefixed SVG elements, and a non-SVG default namespace that hides <rect>/<text> -->
+  <s:g xmlns="http://example.org/notsvg" xmlns:s="http://www.w3.org/2000/svg" s:fill="green">
+    <s:rect x="20" y="20" width="120" height="120"/>
+    <rect x="20" y="20" width="120" height="120" fill="red"/>
+    <g><s:rect x="0" y="0" width="300" height="300" fill="red"/></g>
+  </s:g>
+  <!-- xlink under another prefix; a non-XLink "xlink:" is ignored -->
+  <use l:href="#sq" x="160" y="20" fill="blue"/>
+  <g xmlns:xlink="http://example.org/notxlink">
+    <use xlink:href="#sq" x="160" y="160" fill="red"/>
+  </g>
+  <svg:circle xmlns:svg="http://www.w3.org/2000/svg" cx="80" cy="220" r="50" fill="orange"/>
+</svg>

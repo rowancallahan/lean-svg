@@ -1,0 +1,174 @@
+name: CI
+
+# Pushes to main and pull requests only: many agent branches are pushed
+# while work is fanned out, and each one is gated locally before merging.
+# Run any other branch by hand from the Actions tab (workflow_dispatch).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# No secrets are used anywhere in this workflow, but a fork PR still can't
+# run privileged steps, so keep the guard for the day one is added.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  invariants:
+    name: invariants
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      # actions/cache's combined action only saves in its post step under
+      # `post-if: success()`, so a job that ends red (a genuine invariant
+      # violation here) would never cache its toolchain/build for next time.
+      # restore/save split so the save runs regardless via `if: always()`.
+      - name: Restore elan cache
+        id: elan-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Restore Lake build cache
+        id: lake-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-${{ github.sha }}
+          restore-keys: |
+            lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-
+
+      - name: Install Lean
+        run: bash scripts/install-lean.sh
+
+      - name: lake build
+        run: |
+          export PATH="$HOME/.elan/bin:$PATH"
+          lake build
+
+      - name: Invariants (axioms, three effects, no stray IO, mechanical checks)
+        run: bash scripts/check-theorems.sh
+
+      - name: Save elan cache
+        if: always() && steps.elan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.elan
+          key: ${{ steps.elan-cache.outputs.cache-primary-key }}
+
+      - name: Save Lake build cache
+        if: always() && steps.lake-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .lake
+          key: ${{ steps.lake-cache.outputs.cache-primary-key }}
+
+  tests:
+    name: tests
+    needs: invariants
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore elan cache
+        id: elan-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Restore Lake build cache
+        id: lake-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-${{ github.sha }}
+          restore-keys: |
+            lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml') }}-
+
+      # This is the expensive step (cargo build from source, ~60-85s cold).
+      # It must survive a red run_tests.py later in this same job, which is
+      # exactly the case that broke the combined action's `success()`-gated
+      # save above.
+      - name: Restore resvg/usvg 0.48.1 cache
+        id: resvg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/bin/resvg
+            ~/.cargo/bin/usvg
+          key: resvg-0.48.1-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Lean
+        run: bash scripts/install-lean.sh
+
+      - name: Install resvg/usvg 0.48.1 (oracle)
+        run: |
+          command -v resvg >/dev/null || time cargo install resvg --version 0.48.1 --locked
+          command -v usvg >/dev/null || time cargo install usvg --version 0.48.1 --locked
+
+      - name: Install Python deps
+        run: pip install -q numpy pillow
+
+      - name: Clone resvg test suite
+        run: |
+          mkdir -p tests/corpora
+          git clone --depth 1 https://github.com/linebender/resvg-test-suite \
+            tests/corpora/resvg-test-suite
+
+      - name: lake build
+        run: |
+          export PATH="$HOME/.elan/bin:$PATH"
+          lake build
+
+      - name: Elaborate Lean test files
+        run: |
+          export PATH="$HOME/.elan/bin:$PATH"
+          for f in tests/*.lean; do
+            echo "-- lake env lean $f"
+            lake env lean "$f"
+          done
+
+      # Each harness is independent; run all three even if an earlier one
+      # fails so a red run still reports every result instead of stopping
+      # at the first failure.
+      - name: run_tests.py
+        if: always()
+        run: python3 tests/run_tests.py
+
+      - name: run_tiles.py
+        if: always()
+        run: python3 tests/run_tiles.py
+
+      - name: run_adversarial.py
+        if: always()
+        run: python3 tests/run_adversarial.py
+
+      - name: Save elan cache
+        if: always() && steps.elan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.elan
+          key: ${{ steps.elan-cache.outputs.cache-primary-key }}
+
+      - name: Save Lake build cache
+        if: always() && steps.lake-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .lake
+          key: ${{ steps.lake-cache.outputs.cache-primary-key }}
+
+      - name: Save resvg/usvg cache
+        if: always() && steps.resvg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/bin/resvg
+            ~/.cargo/bin/usvg
+          key: ${{ steps.resvg-cache.outputs.cache-primary-key }}

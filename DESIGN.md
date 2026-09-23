@@ -5,18 +5,22 @@
 **Claimed and machine-checked** (see `LeanSvg/Effect.lean`):
 
 - The top-level program is a value of `Prog (Except String Unit)`. `Prog` is a
-  free monad with exactly two operations, `readInput` and `writeOutput`.
-  There is no constructor for any other effect, so the type checker rejects a
-  program that tries to do anything else.
-- Against a model file system `FS := String → ByteArray`:
+  free monad with exactly three operations, `readInput`, `outputExists` and
+  `writeOutput`. There is no constructor for any other effect, so the type
+  checker rejects a program that tries to do anything else.
+- Against a model file system `FS := String → Option ByteArray` (`none` means
+  the path is absent):
   - `runFS_frame`: running any `Prog` leaves every path except the output
     path unchanged.
-  - `runFS_input_only`: the result depends only on the input path's contents.
+  - `runFS_input_only`: the result depends only on the input path's contents
+    and on whether the output path is present.
   - `renderProgram_spec`: the renderer program's run equals
-    `match render input with | ok png => (ok, fs[out ↦ png]) | error e => (error e, fs)`.
-  - Corollaries: on error nothing is written; on success the output path holds
-    exactly `render input`.
-- `#print axioms` on all of these: `propext` only. No `sorry`, no `Classical`.
+    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok png => (ok, fs[out ↦ png]) | error e => (error e, fs)`.
+  - `renderProgram_no_clobber`: if the output path already holds something,
+    running the program changes the file system not at all.
+  - Corollaries (each additionally given `fs out = none`): on error nothing is
+    written; on success the output path holds exactly `some (render input)`.
+- `#print axioms` on all seven of these: `propext` only. No `sorry`, no `Classical`.
 
 **Claimed by construction** (enforced by the language, checked by grep):
 
@@ -26,15 +30,18 @@
 - Memory safety: no FFI, no `@[extern]`, no `panic!`, no `!`-indexing. All
   array access is `getD` / `setIfInBounds` or proof-carrying.
 - No floats anywhere.
-- Bounded resources: output canvas ≤ 16384 px per side and ≤ 2^24 px; every
-  parsed number clamped to ±2^22 px; XML depth ≤ 64; elements ≤ 10^6.
+- Bounded resources: output canvas ≤ 16384 px per side and ≤ 2^24 px; input
+  size ≤ 64 MiB, rejected before parsing (`render_rejects_large`,
+  `proofs/SizeBound.lean`); every parsed number clamped to ±2^22 px; XML depth
+  ≤ 64; elements ≤ 10^6.
 
 **Not claimed:** pixel-level correctness. SVG has no formal rendering
 semantics. Fidelity is measured against resvg (`tests/run_tests.py`).
 
 **Trusted:** the Lean compiler and runtime (C), the C compiler, the OS,
-`Prog.execIO` (6 lines mapping the two ops to `IO.FS.readBinFile` /
-`writeBinFile`), and `Main.lean` (argument parsing, stderr message).
+`Prog.execIO` (eleven lines mapping the three ops to
+`System.FilePath.pathExists` / `IO.FS.readBinFile` / `writeBinFile`), and
+`Main.lean` (argument parsing, stderr message).
 
 ## 2. Threat model
 
@@ -51,6 +58,8 @@ An attacker controls the input file completely. Goals we defend against:
 | CPU exhaustion via numbers (`1e999999999`, megabytes of digits) | number parsing, big-int math | 18 significant digits kept, exponent saturates at 10^5 and clamps at ±60, result clamped |
 | Malformed input crashes | parser | every read past the end returns 0; every array op is bounds-checked |
 | Writing somewhere unexpected | I/O layer | `runFS_frame` |
+| Overwriting an existing file at the output path | I/O layer | `Op.outputExists` checked before any write; `renderProgram_no_clobber` |
+| Memory exhaustion via input file size | file read | input capped at 64 MiB, checked before parsing; `render_rejects_large` |
 
 Remaining cost bound, not a vulnerability: rendering is O(shapes × visible
 area of each shape). A file with 10^6 full-canvas shapes at 16 Mpx is slow.
@@ -97,7 +106,9 @@ Text content is never interpreted.
 
 Elements: `svg g path rect circle ellipse line polygon polyline`, plus
 `defs`, `clipPath`, `switch`, `text`/`tspan`, `style` and the two gradient
-elements. Unknown elements and `use`, `image`, `mask`, `marker`, `pattern`,
+elements, and same-document `use`/`symbol` (T47: expanded on the event stream
+before interpretation, bounded by `Use.maxDepth` nesting and the parser's own
+element cap). Unknown elements and `image`, `mask`, `marker`, `pattern`,
 filters are skipped with their subtrees. Attributes: `fill stroke
 fill-opacity stroke-opacity opacity fill-rule stroke-width stroke-linecap
 stroke-linejoin stroke-miterlimit transform visibility display style`.
@@ -114,7 +125,7 @@ Also `opacity`, `mix-blend-mode` and `isolation`, which make an element a
 compositing layer (§3.9), and `clip-path`/`clip-rule`/`clipPathUnits`
 (§3.10).
 
-Known deviations: nested `<svg>` skipped; `color-dodge` and `color-burn` are
+Nested `<svg>` is a viewport (T48, `LeanSvg/Viewport.lean`). Known deviations: `color-dodge` and `color-burn` are
 within two levels of resvg rather than exact, and a `normal` layer composite is
 an exact integer source-over rather than the f32 pipeline, within one level
 (§3.9).
@@ -333,6 +344,67 @@ Known gaps: `use` children of a `clipPath` (needs `use` support), the legacy
 `clipPathUnits="objectBoundingBox"`, whose glyph outlines are already on the
 `Fx` grid when the box is taken.
 
+### 3.11 Filters (T51)
+
+`filter` is `should_isolate`'s third case.  `LeanSvg/Filter.lean` ports usvg's
+`parser/filter.rs`: one bounded pre-pass collects every `<filter>` with its
+primitives, and when the referencing element *closes* (its object bounding box
+is known) `Filter.resolve` turns the `filter` value — `url(#id)` lists and the
+CSS functions — into user-space regions, subregions and wired inputs, with
+usvg's three outcomes: filters, no filter, or "element not rendered".  The
+`groupBegin` pushed at open is patched with the outcome.
+
+`LeanSvg/FilterApply.lean` ports resvg's `filter/mod.rs` on the premultiplied
+canvas, quirks included (images anchored at the layer origin, per-result colour
+spaces converted through resvg's 8-bit tables, subregions cleared by whole
+pixels).  The box blur is exact integer arithmetic; the IIR blur is 2^-16 fixed
+point; formulas that end in resvg's truncating `as u8` (colour matrix, transfer
+functions, arithmetic composite) run on the `F32` emulation, since a one-level
+truncation difference in linearRGB is up to thirteen levels in sRGB.
+
+A filter layer is a coordinate frame of its own: its canvas is the filter
+region in whole-image pixels, cut to resvg's `max_filter_bbox` (the canvas and
+twice its size past each edge), and the subtree is rasterised with the root
+matrix shifted onto it.  That shift is a whole number of pixels, so coverage is
+unchanged (§3.5), and a blur or offset sees content that lies off the band:
+tiles and `--threads` stay byte-identical.  Past `Render.maxFilterPixels` the
+region is cut to the enclosing canvas instead (bounded, no longer
+tile-invariant); primitives × area is capped per group (`maxFilterWork`) and
+per render (`maxFilterTotal`), and a `<filter>` has at most `Filter.maxPrims`
+primitives.
+
+Primitives usvg knows but this renderer does not implement (lighting,
+turbulence, morphology, convolution, tile, displacement, a `gamma`
+transfer function) make the whole `filter` value resolve to "no filter": the
+element renders exactly as before T51.
+
+turbulence, morphology, convolution, image) make the whole `filter` value
+resolve to "no filter": the element renders exactly as before T51. `feTile`,
+`feDisplacementMap` (`LeanSvg/Filter/Tile.lean`, `LeanSvg/Filter/DisplacementMap.lean`)
+and a `gamma` transfer function (`LeanSvg/Filter/Gamma.lean`) were added in T70.
+
+`feImage` (T67, `LeanSvg/Filter/Image.lean`, `Filter/ImageRender.lean`): a
+link to an element is rendered, at `groupEnd` just before the filter runs, by
+`renderNodes` on `fuel - 1` over a *sub-document* — the input events with the
+root's children moved into a `<defs>`, then the target under `<g>` wrappers
+that keep only its ancestors' inherited properties — with resvg's
+`[sx 0 0 sy subregion.x subregion.y]` onto a region-sized canvas.
+`Svg.interpret` applies usvg's `fix_recursive_fe_image` first and keeps the
+events in `Doc.events`.  Each link costs `1 + events/4096` of
+`maxMaskRenders`.  `data:` images go through one stub (`FeImage.dataCanvas`)
+until the decoders land; everything else is usvg's dummy primitive.
+
+Primitives usvg knows but this renderer does not implement (turbulence,
+morphology, convolution, tile, image, displacement, a `gamma` transfer
+function) make the whole `filter` value resolve to "no filter": the
+element renders exactly as before T51.
+
+The lighting pair (T66, `LeanSvg/Filter/Lighting.lean`) runs resvg's `f32`
+arithmetic operation for operation on `F32`, with a scalar correctly-rounded
+`sqrt` and a `powf` that is computed on a 2^-44 grid with an error bound and
+falls back to an exact 2^-80 computation only near a rounding tie (at most
+`exactBudget` times per primitive).
+
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
 | file | exact | ≤ 8 | ≤ 32 | max d |
@@ -378,6 +450,10 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/Text.lean` | text layout: runs, glyph outlines, anchoring |
 | `LeanSvg/Svg.lean` | paints, transforms, path data, shapes, style stack, `Node`/`GroupInfo`, defs pre-pass |
 | `LeanSvg/Clip.lean` | `clipPath` → device masks, cache, coverage and layer application |
+| `LeanSvg/Filter.lean` | filter model, `<filter>` pre-pass, usvg's `filter` resolution |
+| `LeanSvg/FilterApply.lean` | filter primitives on pixels (resvg `filter/`) |
+| `LeanSvg/Filter/Image.lean` | `feImage` spec, `fix_recursive_fe_image`, link sub-documents |
+| `LeanSvg/Filter/ImageRender.lean` | `feImage` jobs and geometry for `Render` |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |

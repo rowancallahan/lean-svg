@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <!-- T48: nested viewports -->
+  <rect width="400" height="300" fill="#f4f4f0"/>
+  <!-- clipped to x y width height; percentages against the parent viewport -->
+  <svg x="5%" y="20" width="25%" height="120">
+    <rect width="100%" height="100%" fill="#dde"/>
+    <circle cx="50%" cy="50%" r="80" fill="teal" opacity="0.8"/>
+  </svg>
+  <!-- viewBox with every align, meet and slice -->
+  <svg x="130" y="20" width="120" height="60" viewBox="0 0 100 100" preserveAspectRatio="xMinYMid meet">
+    <rect width="100" height="100" fill="orange"/>
+  </svg>
+  <svg x="130" y="90" width="120" height="60" viewBox="0 0 100 100" preserveAspectRatio="xMaxYMax slice">
+    <circle cx="50" cy="50" r="50" fill="crimson"/>
+  </svg>
+  <svg x="270" y="20" width="120" height="130" viewBox="-10 -10 20 40" preserveAspectRatio="none">
+    <ellipse rx="10" ry="20" cy="10" fill="navy"/>
+  </svg>
+  <!-- overflow visible, a transform, a nested clip-path and group opacity -->
+  <defs>
+    <clipPath id="half"><rect width="40" height="100"/></clipPath>
+  </defs>
+  <svg x="20" y="170" width="100" height="100" overflow="visible" transform="rotate(5 70 220)">
+    <rect x="-10" y="-10" width="120" height="120" fill="none" stroke="black" stroke-width="4"/>
+  </svg>
+  <svg x="150" y="170" width="100" height="100" viewBox="0 0 50 50" opacity="0.6" clip-path="url(#half)">
+    <rect x="-10" y="-10" width="70" height="70" fill="purple"/>
+    <svg x="10" y="10" width="30" height="30">
+      <circle cx="15" cy="15" r="25" fill="gold"/>
+    </svg>
+  </svg>
+  <svg x="280" y="170" viewBox="0 0 10 10" width="100" height="100" style="overflow:auto">
+    <path d="M -2 5 L 5 -2 L 12 5 L 5 12 Z" fill="green"/>
+  </svg>
+</svg>

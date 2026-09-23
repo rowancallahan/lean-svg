@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">
+  <!-- T51: blur cost must not grow with stdDeviation -->
+  <filter id="f"><feGaussianBlur stdDeviation="1e9 1e30"/><feDropShadow stdDeviation="99999999" dx="1e9"/></filter>
+  <rect x="50" y="50" width="300" height="300" fill="teal" filter="url(#f)"/>
+  <rect x="50" y="50" width="300" height="300" fill="teal" filter="blur(1e12px) drop-shadow(1e9px 1e9px 1e9px red)"/>
+</svg>

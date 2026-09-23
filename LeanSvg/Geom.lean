@@ -480,7 +480,7 @@ inductive Cap where
 deriving Repr, Inhabited, BEq
 
 inductive Join where
-  | miter | round | bevel
+  | miter | round | bevel | miterClip
 deriving Repr, Inhabited, BEq
 
 structure StrokeStyle where
@@ -664,6 +664,47 @@ def outerJoin (st : StrokeStyle) (hw : Fx) (outer : Array Pt) (pivot o1 o2 : Pt)
                        Fx.clamp (pivot.y + Int.ediv (sy * 2 * hw * hw) l2)⟩
       (outer.push tip).push (pivot.add o2)
     else outer.push (pivot.add o2)
+  | .miterClip =>
+    let sx := o1.x + o2.x
+    let sy := o1.y + o2.y
+    let l2 := sx * sx + sy * sy
+    let ok := l2 > 0 && (512 * hw) * (512 * hw) ≤ st.miterLimit * st.miterLimit * l2
+    if ok then
+      -- Within the limit, SVG 2's `miter-clip` is the same pointed tip as
+      -- `miter` (tiny-skia's `do_miter` runs whether or not `miter_clip` is
+      -- set; only the past-the-limit branch differs).
+      let tip : Pt := ⟨Fx.clamp (pivot.x + Int.ediv (sx * 2 * hw * hw) l2),
+                       Fx.clamp (pivot.y + Int.ediv (sy * 2 * hw * hw) l2)⟩
+      (outer.push tip).push (pivot.add o2)
+    else
+      -- Past the limit, `miter-clip` does not fall back to a plain bevel like
+      -- `miter` does: it keeps the miter direction but clips the tip flat at
+      -- distance `miterLimit·hw` from `pivot` along the bisector `o1+o2`
+      -- (tiny-skia's `miter_joiner_inner`'s `do_blunt_or_clipped` with
+      -- `miter_clip = true`).  `c1`/`c2` are where that clip line meets the
+      -- offset lines of the two segments, extended from their anchors
+      -- `pivot+o1`/`pivot+o2` along each segment's own tangent
+      -- (`rotate_cw`/`rotate_ccw` of the normal, tiny-skia's naming, in the
+      -- same `x` right/`y` down axes `normalOf` already uses) by the same
+      -- signed multiple `x` of that tangent.  Writing `u` for the bisector
+      -- unit vector and `T = rotate_cw o1`, matching each anchor's condition
+      -- `(o + x·T) · u = miterLimit·hw` against `T · (o1+o2) = o1 × (o1+o2) =
+      -- o1 × o2` (and, since `|o1| = |o2| = hw`, the same cross product and
+      -- the same `o1 · (o1+o2) = o2 · (o1+o2)` for the other anchor) gives one
+      -- `x` for both corners, scaled up by `hw · |o1+o2|` to stay exact:
+      --   `x = (miterLimit·hw·|o1+o2| − o1·(o1+o2)) / (o1 × o2)`.
+      let midLen := Fx.hypot sx sy
+      let dotOM := o1.x * sx + o1.y * sy
+      let crossO1O2 := o1.x * o2.y - o1.y * o2.x
+      let (xNum, xDen) :=
+        if crossO1O2 == 0 then (st.miterLimit, (256 : Int))
+        else (Int.ediv (st.miterLimit * hw * midLen) 256 - dotOM, crossO1O2)
+      if xDen == 0 then outer.push (pivot.add o2) else
+      let c1 : Pt := ⟨Fx.clamp (pivot.x + o1.x + Int.ediv (-o1.y * xNum) xDen),
+                      Fx.clamp (pivot.y + o1.y + Int.ediv (o1.x * xNum) xDen)⟩
+      let c2 : Pt := ⟨Fx.clamp (pivot.x + o2.x + Int.ediv (o2.y * xNum) xDen),
+                      Fx.clamp (pivot.y + o2.y + Int.ediv (-o2.x * xNum) xDen)⟩
+      ((outer.push c1).push c2).push (pivot.add o2)
 
 /-- Skia's `handle_inner_join`: the inside of a turn goes through the pivot and
 on to its own offset for the next segment.  This over-covers the corner

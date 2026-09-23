@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="180"
+     xmlns:xlink="http://www.w3.org/1999/xlink" font-family="Noto Sans">
+  <rect width="400" height="180" fill="#fdfdfb"/>
+  <defs>
+    <text id="source" fill="red">Some <tspan stroke="red">styled</tspan> text</text>
+  </defs>
+  <!-- only character data crosses a `tref`: none of `source`'s own fill,
+       stroke or tspan nesting comes along for the ride -->
+  <text x="12" y="040" font-size="24" fill="#1d3557"><tref xlink:href="#source"/></text>
+  <!-- the `tref` element's own attributes apply like any tspan's -->
+  <text x="12" y="080" font-size="24" fill="#1d3557" text-decoration="underline">
+    <tref xlink:href="#source" fill="#e63946" dy="0"/>
+  </text>
+  <!-- a `tref` with its own children: they are dropped, only the resolved
+       target text renders -->
+  <text x="12" y="120" font-size="24" fill="#1d3557">Before <tref
+      xlink:href="#source">ignored</tref> after</text>
+  <!-- an unresolvable target draws nothing, not the literal fallback text -->
+  <text x="12" y="160" font-size="24" fill="#1d3557">Before <tref
+      xlink:href="#missing"/> after</text>
+</svg>

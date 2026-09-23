@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <title>A pattern tile far past Pat.maxTileDim/maxTilePixels, and one whose
+  patternTransform scale alone would blow the tile resolution up past the
+  cap even though the tile's own width/height are small.</title>
+  <defs>
+    <pattern id="p1" patternUnits="userSpaceOnUse" width="500000" height="500000">
+      <rect width="500000" height="500000" fill="green"/>
+    </pattern>
+    <pattern id="p2" patternUnits="userSpaceOnUse" width="4" height="4"
+             patternTransform="scale(100000)">
+      <rect width="4" height="4" fill="blue"/>
+    </pattern>
+  </defs>
+  <rect x="0" y="0" width="200" height="400" fill="url(#p1)"/>
+  <rect x="200" y="0" width="200" height="400" fill="url(#p2)"/>
+</svg>

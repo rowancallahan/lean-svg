@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="4000" viewBox="0 0 4000 4000">
+  <title>A microscopic pattern tile tiled across a large canvas: the tile
+  itself rounds to 0 device pixels, which must degrade to painting nothing
+  rather than dividing by zero or looping per repeat.</title>
+  <defs>
+    <pattern id="p" patternUnits="userSpaceOnUse" width="0.0001" height="0.0001">
+      <rect width="0.0001" height="0.0001" fill="red"/>
+    </pattern>
+  </defs>
+  <rect x="0" y="0" width="4000" height="4000" fill="url(#p)"/>
+</svg>

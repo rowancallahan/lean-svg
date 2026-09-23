@@ -58,14 +58,19 @@ TINY_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
 # --------------------------------------------------------------------------
 
 
-def time_runs(cmd, runs):
+def time_runs(cmd, runs, out_path=None):
     """Run `cmd` `runs` times. Returns (median_ms, rc, stderr, timed_out).
 
     Stops early on a timeout or a non-zero exit so a broken cell costs one run.
+    `out_path`, if given, is deleted before every run: lean-svg refuses to
+    overwrite an existing output file, and repeated runs here target the same
+    path on purpose.
     """
     samples = []
     rc, err = None, ""
     for _ in range(runs):
+        if out_path is not None:
+            out_path.unlink(missing_ok=True)
         rc, ms, err, timed_out = run_renderer(cmd)
         if timed_out:
             return None, None, err, True
@@ -86,14 +91,17 @@ def measure_baseline(binary, tmp, runs):
     svg = tmp / "baseline.svg"
     svg.write_text(TINY_SVG, encoding="utf-8")
     n = max(runs, 5)
+    ours_out = tmp / "b_ours.png"
+    ref_out = tmp / "b_ref.png"
     cmds = {
-        "ours": [str(binary), str(svg), str(tmp / "b_ours.png")],
-        "resvg": ["resvg", str(svg), str(tmp / "b_ref.png")],
+        "ours": ([str(binary), str(svg), str(ours_out)], ours_out),
+        "resvg": (["resvg", str(svg), str(ref_out)], ref_out),
     }
     out = {}
-    for key, cmd in cmds.items():
+    for key, (cmd, out_path) in cmds.items():
+        out_path.unlink(missing_ok=True)
         run_renderer(cmd)  # warm-up, discarded
-        ms, _, _, _ = time_runs(cmd, n)
+        ms, _, _, _ = time_runs(cmd, n, out_path)
         out[key] = ms or 0.0
     return out["ours"], out["resvg"]
 
@@ -133,7 +141,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
     ref_png = tmp / ("%s_%d_ref.png" % (svg.stem, width))
 
     ms_ours, rc_ours, err_ours, to_ours = time_runs(
-        [str(binary), str(svg), str(ours_png), "--width", str(width)], runs
+        [str(binary), str(svg), str(ours_png), "--width", str(width)], runs, ours_png
     )
     if to_ours:
         if (svg.stem, width) in SKIPPABLE:
@@ -153,7 +161,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
         return cell
 
     ms_resvg, rc_resvg, err_resvg, to_resvg = time_runs(
-        ["resvg", "-w", str(width), str(svg), str(ref_png)], runs
+        ["resvg", "-w", str(width), str(svg), str(ref_png)], runs, ref_png
     )
     if to_resvg:
         cell["status"] = "error"

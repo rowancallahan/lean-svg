@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" font-family="Noto Sans">
+  <rect width="400" height="200" fill="#fdfdfb"/>
+  <!-- stretched to twice its natural width -->
+  <text x="12" y="040" font-size="24" fill="#1d3557" textLength="300">Stretch</text>
+  <!-- compressed -->
+  <text x="12" y="080" font-size="24" fill="#1d3557" textLength="60">Squeeze</text>
+  <!-- textLength on one tspan leaves its neighbours alone -->
+  <text x="12" y="120" font-size="24" fill="#1d3557">Some <tspan textLength="140"
+      fill="#e63946">long</tspan> word</text>
+  <!-- negative and unparseable values have no effect -->
+  <text x="12" y="160" font-size="24" fill="#1d3557" textLength="-50">Unaffected</text>
+</svg>

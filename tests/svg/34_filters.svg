@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <!-- T51: filter foundation and the simple primitives -->
+  <defs>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feOffset in="SourceAlpha" dx="6" dy="6" result="off"/>
+      <feGaussianBlur in="off" stdDeviation="3" result="sh"/>
+      <feFlood flood-color="navy" flood-opacity="0.6"/>
+      <feComposite in2="sh" operator="in" result="col"/>
+      <feMerge>
+        <feMergeNode in="col"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="matrix" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix"
+        values="0 0 1 0 0  1 0 0 0 0  0 1 0 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="blend" x="0" y="0" width="1" height="1">
+      <feFlood flood-color="gold" result="f"/>
+      <feBlend in="SourceGraphic" in2="f" mode="multiply"/>
+    </filter>
+    <filter id="sub">
+      <feFlood flood-color="seagreen" x="215" y="215" width="40" height="40"/>
+    </filter>
+  </defs>
+  <rect x="20" y="20" width="110" height="110" fill="seagreen" filter="url(#blur)"/>
+  <g filter="url(#shadow)">
+    <circle cx="210" cy="75" r="45" fill="tomato"/>
+    <rect x="175" y="95" width="60" height="30" fill="gold" opacity="0.7"/>
+  </g>
+  <rect x="30" y="170" width="90" height="90" fill="#c83264" filter="url(#matrix)"/>
+  <circle cx="75" cy="215" r="25" fill="white" filter="grayscale(100%) drop-shadow(3px 3px 2px black)"/>
+  <rect x="160" y="160" width="120" height="120" fill="steelblue" filter="url(#blend)"/>
+  <rect x="200" y="200" width="70" height="70" fill="none" filter="url(#sub)"/>
+  <!-- straddles the quadrant seam of the 800 px tile test -->
+  <rect x="135" y="135" width="30" height="30" fill="purple" filter="blur(3)"/>
+</svg>

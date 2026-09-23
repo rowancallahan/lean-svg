@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200">
+  <!-- percentage geometry: resolves against the viewport's own axis -->
+  <rect x="5%" y="5%" width="40%" height="30%" rx="10%" fill="#e63946"/>
+  <!-- rx present, ry auto (SVG 2): mirrors rx -->
+  <ellipse cx="150" cy="45" rx="30" fill="#457b9d"/>
+  <!-- negative rx is dropped (auto), so ry mirrors onto both axes -->
+  <rect x="10" y="80" width="80" height="50" rx="-20" ry="15" fill="#2a9d8f"/>
+  <!-- percent coordinates on a line -->
+  <line x1="10%" y1="90%" x2="90%" y2="90%" stroke="black" stroke-width="4"/>
+  <!-- `<a>` is a plain container, same as `<g>` -->
+  <a xlink:href="https://example.invalid/">
+    <rect x="110" y="80" width="70" height="50" fill="#f4a261" style="/* comment */ stroke: black /* comment */"/>
+  </a>
+  <!-- a shape's own children are never rendered (usvg never recurses into one) -->
+  <rect x="100" y="140" width="80" height="50" fill="#264653">
+    <rect x="100" y="140" width="80" height="50" fill="red"/>
+  </rect>
+</svg>

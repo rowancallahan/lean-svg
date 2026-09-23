@@ -71,7 +71,8 @@ def main (args : List String) : IO UInt32 := do
     if out == "" then
       IO.eprintln usage
       return 2
-    let result ← (Prog.renderProgram (render opts)).execIO ⟨inp⟩ ⟨out⟩
+    let clobberError := s!"refusing to overwrite existing file {out}"
+    let result ← (Prog.renderProgram clobberError (render opts)).execIO ⟨inp⟩ ⟨out⟩
     match result with
     | .ok () => return 0
     | .error e =>
