@@ -76,6 +76,9 @@ structure Font where
   cmapOff : Nat
   /-- `4`, `12`, or `0` for "no usable cmap". -/
   cmapFormat : Nat
+  /-- The chosen subtable passes `isCmapSorted`, so lookups binary-search it
+  (T94). -/
+  cmapSorted : Bool := false
   numberOfHMetrics : Nat
   hmtxOff : Nat
   /-- Cap on points per glyph: `maxp.maxPoints` if present, else `10000`. -/
@@ -234,6 +237,24 @@ def resolveCmap (bs : ByteArray) (cOff cLen : Nat) : Nat × Nat := Id.run do
   if bestScore == 0 then return (0, 0)
   return (bestOff, u16 bs bestOff)
 
+/-- How many format 12 groups a lookup may read. `numGroups` is a `u32` and
+cannot be trusted directly (a malicious font could claim billions), so it is
+capped at whatever the subtable could actually hold given `bs.size`, and at a
+further constant `100000` — generous for any real font. -/
+def format12Cap (bs : ByteArray) (so : Nat) : Nat :=
+  let groupsOff := so + 16
+  let byAvail := if bs.size > groupsOff then (bs.size - groupsOff) / 12 else 0
+  Nat.min (u32 bs (so + 12)) (Nat.min 100000 byAvail)
+
+/-- The glyph format 4 segment `i` (starting at `sc`) maps `codepoint` to. -/
+@[inline] def format4Glyph (bs : ByteArray) (idDeltaOff idRangeOff i sc codepoint : Nat) : Nat :=
+  let delta := i16 bs (idDeltaOff + 2 * i)
+  let iro := u16 bs (idRangeOff + 2 * i)
+  if iro == 0 then (Int.emod ((codepoint : Int) + delta) 65536).toNat
+  else
+    let g := u16 bs (idRangeOff + 2 * i + iro + 2 * (codepoint - sc))
+    if g == 0 then 0 else (Int.emod ((g : Int) + delta) 65536).toNat
+
 /-- Format 4 `cmap` lookup: BMP-only, segmented by `endCode`/`startCode`.
 Linear scan over `segCount ≤ 32767` (`segCountX2` is a `u16`). -/
 def glyphIdFormat4 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
@@ -247,29 +268,54 @@ def glyphIdFormat4 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run
     let ec := u16 bs (endCodeOff + 2 * i)
     let sc := u16 bs (startCodeOff + 2 * i)
     if sc ≤ codepoint && codepoint ≤ ec then
-      let delta := i16 bs (idDeltaOff + 2 * i)
-      let iro := u16 bs (idRangeOff + 2 * i)
-      if iro == 0 then
-        return (Int.emod ((codepoint : Int) + delta) 65536).toNat
-      else
-        let addr := idRangeOff + 2 * i + iro + 2 * (codepoint - sc)
-        let g := u16 bs addr
-        if g == 0 then return 0
-        else return (Int.emod ((g : Int) + delta) 65536).toNat
+      return format4Glyph bs idDeltaOff idRangeOff i sc codepoint
+  return 0
+
+/-- Whether a format 4 subtable's segments, or a format 12 subtable's groups
+(as many as `glyphIdFormat12` would scan), are sorted and disjoint: every
+`start ≤ end` and every `end` below the next `start`.  Then at most one
+segment holds any codepoint, so a binary search finds the same one the
+linear scan finds first (T94).  Checked once, when the font is parsed. -/
+def isCmapSorted (bs : ByteArray) (so fmt : Nat) : Bool := Id.run do
+  let (n, startOff, endOff, stride) :=
+    if fmt == 4 then
+      let segCount := u16 bs (so + 6) / 2
+      (segCount, so + 14 + segCount * 2 + 2, so + 14, 2)
+    else if fmt == 12 then (format12Cap bs so, so + 16, so + 20, 12)
+    else (0, 0, 0, 0)
+  let get := fun (off : Nat) => if fmt == 4 then u16 bs off else u32 bs off
+  let mut prevEnd : Int := -1
+  for i in [0:n] do
+    let sc := get (startOff + stride * i)
+    let ec := get (endOff + stride * i)
+    if (sc : Int) ≤ prevEnd || ec < sc then return false
+    prevEnd := ec
+  return true
+
+/-- `glyphIdFormat4` by binary search, for a subtable `isCmapSorted` accepts. -/
+def glyphIdFormat4Sorted (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
+  if codepoint > 0xFFFF then return 0
+  let segCount := u16 bs (so + 6) / 2
+  let endCodeOff := so + 14
+  let startCodeOff := endCodeOff + segCount * 2 + 2
+  let idDeltaOff := startCodeOff + segCount * 2
+  let idRangeOff := idDeltaOff + segCount * 2
+  let mut lo := 0
+  let mut hi := segCount
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let sc := u16 bs (startCodeOff + 2 * mid)
+    if codepoint < sc then hi := mid
+    else if codepoint > u16 bs (endCodeOff + 2 * mid) then lo := mid + 1
+    else return format4Glyph bs idDeltaOff idRangeOff mid sc codepoint
   return 0
 
 /-- Format 12 `cmap` lookup: contiguous `(startChar, endChar, startGlyph)`
-groups. `numGroups` is a `u32` and cannot be trusted directly (a malicious
-font could claim billions), so the scan is capped at whatever the subtable
-could actually hold given `bs.size`, and at a further constant `100000` —
-generous for any real font, and cheap even so since this runs once per
-character. -/
+groups, scanned up to `format12Cap`. -/
 def glyphIdFormat12 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
-  let numGroups := u32 bs (so + 12)
   let groupsOff := so + 16
-  let byAvail := if bs.size > groupsOff then (bs.size - groupsOff) / 12 else 0
-  let cap := Nat.min numGroups (Nat.min 100000 byAvail)
-  for i in [0:cap] do
+  for i in [0:format12Cap bs so] do
     let go := groupsOff + 12 * i
     let startChar := u32 bs go
     let endChar := u32 bs (go + 4)
@@ -278,11 +324,30 @@ def glyphIdFormat12 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.ru
       return startGlyph + (codepoint - startChar)
   return 0
 
+/-- `glyphIdFormat12` by binary search, for a subtable `isCmapSorted` accepts. -/
+def glyphIdFormat12Sorted (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
+  let groupsOff := so + 16
+  let mut lo := 0
+  let mut hi := format12Cap bs so
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let go := groupsOff + 12 * mid
+    let startChar := u32 bs go
+    if codepoint < startChar then hi := mid
+    else if codepoint > u32 bs (go + 4) then lo := mid + 1
+    else return u32 bs (go + 8) + (codepoint - startChar)
+  return 0
+
 /-- Glyph id for a Unicode codepoint via the font's chosen `cmap` subtable.
 `0` (`.notdef`) if there is none, or the codepoint is not mapped. -/
 def glyphId (f : Font) (codepoint : Nat) : Nat :=
-  if f.cmapFormat == 4 then glyphIdFormat4 f.data f.cmapOff codepoint
-  else if f.cmapFormat == 12 then glyphIdFormat12 f.data f.cmapOff codepoint
+  if f.cmapFormat == 4 then
+    if f.cmapSorted then glyphIdFormat4Sorted f.data f.cmapOff codepoint
+    else glyphIdFormat4 f.data f.cmapOff codepoint
+  else if f.cmapFormat == 12 then
+    if f.cmapSorted then glyphIdFormat12Sorted f.data f.cmapOff codepoint
+    else glyphIdFormat12 f.data f.cmapOff codepoint
   else 0
 
 /-! ## Legacy `kern` table (format 0, horizontal) -/
@@ -956,6 +1021,7 @@ def parse (bs : ByteArray) : Option Font :=
             glyfLen := gLen
             cmapOff := cmapOff
             cmapFormat := cmapFormat
+            cmapSorted := isCmapSorted bs cmapOff cmapFormat
             numberOfHMetrics := u16 bs (heOff + 34)
             hmtxOff := htOff
             maxPointsCap := maxPointsCap
@@ -1005,19 +1071,23 @@ def hexDecodeChunks (chunks : Array String) : ByteArray := Id.run do
     out := out.append (hexDecode c)
   return out
 
-/-- Decode padded base64 into bytes, four characters (three bytes) at a time.
-Total: a quad with an invalid character stops decoding, and `=` padding in the
+/-- The byte at `i` of `s`'s UTF-8, or 0 past its end. -/
+@[inline] def strByte (s : String) (i : Nat) : UInt8 :=
+  if h : (⟨i⟩ : String.Pos.Raw) < s.rawEndPos then s.getUTF8Byte ⟨i⟩ h else 0
+
+/-- Append the bytes padded base64 `s` encodes to `out`, four characters (three
+bytes) at a time, reading `s` in place (T94: no `toUTF8` copy).  Total: a
+quad with an invalid character stops decoding, and `=` padding in the
 third/fourth place emits only the bytes that precede it (T91: the embedded
 fonts are base64, 4/3 of the binary size instead of hex's 2×). -/
-def base64Decode (s : String) : ByteArray := Id.run do
-  let sb := s.toUTF8
-  let mut out := ByteArray.emptyWithCapacity (sb.size / 4 * 3)
-  for q in [0:sb.size / 4] do
+def base64DecodeInto (out : ByteArray) (s : String) : ByteArray := Id.run do
+  let mut out := out
+  for q in [0:s.utf8ByteSize / 4] do
     let i := 4 * q
-    let a := b64Digit (at' sb i)
-    let b := b64Digit (at' sb (i + 1))
-    let c := b64Digit (at' sb (i + 2))
-    let d := b64Digit (at' sb (i + 3))
+    let a := b64Digit (strByte s i)
+    let b := b64Digit (strByte s (i + 1))
+    let c := b64Digit (strByte s (i + 2))
+    let d := b64Digit (strByte s (i + 3))
     if a ≥ 64 || b ≥ 64 then break
     out := out.push ((a <<< 2 ||| b >>> 4).toUInt8)
     if c ≥ 64 then break
@@ -1026,11 +1096,17 @@ def base64Decode (s : String) : ByteArray := Id.run do
     out := out.push (((c &&& 3) <<< 6 ||| d).toUInt8)
   return out
 
-/-- `base64Decode` over chunks, each a whole number of quads. -/
+/-- Decode padded base64 into bytes (`base64DecodeInto` from empty). -/
+def base64Decode (s : String) : ByteArray :=
+  base64DecodeInto (ByteArray.emptyWithCapacity (s.utf8ByteSize / 4 * 3)) s
+
+/-- `base64Decode` over chunks, each a whole number of quads, into one buffer
+sized for all of them. -/
 def base64DecodeChunks (chunks : Array String) : ByteArray := Id.run do
-  let mut out := ByteArray.emptyWithCapacity 0
+  let total := chunks.foldl (fun n c => n + c.utf8ByteSize / 4 * 3) 0
+  let mut out := ByteArray.emptyWithCapacity total
   for c in chunks do
-    out := out.append (base64Decode c)
+    out := base64DecodeInto out c
   return out
 
 /-- An embedded font (T94): `front` is base64 of every byte before its `glyf`
