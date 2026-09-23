@@ -258,6 +258,66 @@ def generate_cases():
         '<rect x="30" y="30" width="0" height="80" fill="url(#g)"/>\n</svg>\n',
     )
 
+    # ---- T47: use / symbol ----------------------------------------------
+    # (the checked-in use_billion_laughs.svg and use_cycle.svg cover the
+    # exponential fan-out and the reference cycle usvg's checks miss.)
+    use_head = (
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink='
+        '"http://www.w3.org/1999/xlink" width="200" height="200">\n'
+    )
+
+    def use_chain(n):
+        return (
+            use_head
+            + '<rect id="c0" width="20" height="20" fill="#3366cc"/>\n'
+            + "".join(
+                '<g id="c%d"><use xlink:href="#c%d" x="1"/></g>\n' % (i, i - 1)
+                for i in range(1, n + 1)
+            )
+            + "</svg>\n"
+        )
+
+    # Use.maxDepth (10) nested expansions render; one more is rejected.
+    write_text("use_chain_10.svg", use_chain(9))
+    write_text("use_chain_11.svg", use_chain(12))
+
+    # 10^5 rects reached through a 10-way fan-out: large but within the
+    # element budget, so it must render.
+    fan = '<rect id="f0" width="1" height="1" fill="#000"/>\n'
+    for i in range(1, 6):
+        fan += '<g id="f%d">%s</g>\n' % (
+            i,
+            "".join('<use xlink:href="#f%d" x="%d"/>' % (i - 1, k) for k in range(10)),
+        )
+    write_text("use_fanout_1e5.svg", use_head + "<defs>" + fan + "</defs>"
+               '<use xlink:href="#f5"/>\n</svg>\n')
+
+    # Every use points at a big group that contains a use back to itself: each
+    # one costs a scan of the group and copies nothing.  The work budget
+    # rejects this instead of doing 10^9 steps.
+    write_text(
+        "use_recursion_scan.svg",
+        use_head
+        + '<g id="big">'
+        + '<rect width="1" height="1"/>' * 100_000
+        + '<use xlink:href="#big"/></g>\n'
+        + '<use xlink:href="#big"/>' * 10_000
+        + "\n</svg>\n",
+    )
+
+    # 5000 symbol instances, each with a viewport clip: past Svg.maxClipPaths
+    # the clip could not be honoured, so the document is rejected.
+    write_text(
+        "use_symbol_5000.svg",
+        use_head
+        + '<symbol id="s" viewBox="0 0 10 10"><rect width="20" height="20"/></symbol>\n'
+        + "".join(
+            '<use xlink:href="#s" x="%d" y="%d" width="2" height="2"/>' % (i % 200, i // 200)
+            for i in range(5000)
+        )
+        + "\n</svg>\n",
+    )
+
     # 64 KiB of deterministic noise that is not XML at all.
     write_bytes(
         "random_bytes.bin",
