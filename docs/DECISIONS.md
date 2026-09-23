@@ -28,3 +28,35 @@ Open items in `docs/QUESTIONS.md`; diagnoses in `docs/resvg-wrong/`,
 **Not now:** `enable-background` (deprecated), emoji, legacy CSS `clip`.
 **Still open (ask Rowan):** DTD internal entities, legacy encodings,
 bidi/RTL scope, `textPath` Chromium-vs-suite disagreements.
+
+## The road to shipping (Rowan, 2026-09-23)
+
+After items 1–3 above, in this order:
+
+4. **Review pass.** Quick full run; Rowan looks at every file that is not
+   close (a click-through gallery: reference | ours | diff) and marks each
+   acceptable or not.
+5. **Compressed PNG output.** Real DEFLATE instead of stored blocks. Keep
+   the size bound (`proofs/SizeBound.lean`) true: a conforming encoder falls
+   back to stored blocks, so the upper bound survives. Prefer a pure
+   in-repo encoder, or lean-zip at proof time only (ROADMAP §4), so the
+   shipped binary stays dependency- and FFI-free.
+6. **Lock down behaviour.** Accept the current outputs as golden images
+   (byte hashes of our own PNGs for the whole corpus plus the local tests),
+   and make any change to a locked output fail CI unless explicitly
+   re-blessed. After this point regressions are caught exactly, not by a
+   tolerance.
+7. **Extreme optimisation pass.** Profile and optimise with the golden
+   images as the safety net (outputs must stay byte-identical). Measure
+   against resvg; it may already be fast enough.
+8. **Theorems.** Rowan reorganises and reviews every theorem; each gets a
+   plain-language statement.
+9. **Introduction and docs.** A complete introduction: what is proved, what
+   is trusted, what is tested, how to use it.
+10. **Tests in Lean.** Long term, move the Python harness to Lean.
+11. **Ship** as a safe SVG rendering backend. The summary lists the CVE
+    classes (and specific CVEs) in other SVG renderers that this design
+    rules out, and says for each which property (effect confinement,
+    totality, bounds, no external resources, no FFI) does it. Start from
+    DESIGN.md §2's threat model and ROADMAP's CVE mentions
+    (librsvg CVE-2023-38633, CVE-2019-20446, Inkscape CVE-2026-4980).
