@@ -281,12 +281,12 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
   | error e => simp [hp] at hr
   | ok events =>
     simp only [hp] at hr
-    cases hd : Svg.interpret events with
+    cases hd : Svg.interpretWith { outSize := Render.outSize events opts } events with
     | error e => simp [hd] at hr
     | ok doc =>
       simp only [hd] at hr
       -- T52/T86: `render` expands markers and refits the root size (pure
-      -- `Doc → Doc` transforms) between `Svg.interpret` and `canvasSetup`;
+      -- `Doc → Doc` transforms) between `Svg.interpretWith` and `canvasSetup`;
       -- whatever size they lead to is checked below.
       cases hs : Render.canvasSetup (RootFit.apply (Marker.expand doc)).root opts with
       | error e => simp [hs] at hr
