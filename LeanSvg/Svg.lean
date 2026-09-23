@@ -2420,8 +2420,29 @@ def parseStop (attrs : Array Xml.Attr) (prev : Int) (inhColor : Rgba)
     | none => opacityOne
   { off := parseStopOffset ((pick "offset").getD ByteArray.empty) prev, col := col, op := op }
 
-/-- One `linearGradient`/`radialGradient` element's own attributes. -/
-def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
+/-- Wrap a parsed `gradientTransform`/`patternTransform` matrix with its
+element's own `transform-origin`, exactly like `applyProp`'s `"transform"`
+case does for a plain element: `translate(dx, dy) · m · translate(-dx, -dy)`.
+usvg's `resolve_transform` (`crates/usvg/src/parser/converter.rs`) is generic
+over the transform attribute id and reads both it and `transform-origin` with
+`self.attribute`, i.e. from the gradient/pattern element's own attributes
+only, never its `href` chain — so this runs inside `parseGradDef`/
+`parsePatternDef`, before `href` inheritance (`pickCommon`) ever sees the
+result, matching `resolve_transform` being called on the referenced node
+itself rather than on whichever link in the chain actually supplies the
+matrix. -/
+def wrapTransformOrigin (attrs : Array Xml.Attr) (pctRefW pctRefH : Fx) (m : Mat) : Mat :=
+  match attr attrs "transform-origin" with
+  | none => m
+  | some ov =>
+    let (odx, ody) := parseTransformOrigin ov pctRefW pctRefH
+    if odx == 0 && ody == 0 then m
+    else ((Mat.translate odx ody).mul m).mul (Mat.translate (-odx) (-ody))
+
+/-- One `linearGradient`/`radialGradient` element's own attributes.
+`pctRefW`/`pctRefH` are the same viewport rect `applyEffective` resolves
+`transform-origin` percentages against (`DefsScan.pctRef`'s doc comment). -/
+def parseGradDef (name : String) (attrs : Array Xml.Attr) (pctRefW pctRefH : Fx) : Grad.RawDef :=
   let coord := fun (n : String) => (attr attrs n).bind parseCoord16
   let href := match attr attrs "href" with
     | some v => v
@@ -2442,7 +2463,8 @@ def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
     -- dropped later, by the inversion in `Grad.build`.)
     transform := (attr attrs "gradientTransform").map fun v =>
       let m := parseTransform v
-      if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m,
+      let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m
+      wrapTransformOrigin attrs pctRefW pctRefH m,
     spread := (attr attrs "spreadMethod").bind fun v =>
       let t := trim v
       if eqAscii t "reflect" then some Grad.Spread.reflect
@@ -2481,8 +2503,9 @@ def parsePreserveAspectRatio (bs : ByteArray) : Option (Nat × Nat × Bool × Bo
 
 /-- One `<pattern>` element's own attributes: everything but its children,
 which the main walk collects (`patternContentShapes`) because they need the
-cascade. -/
-def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Nat) : Pat.RawDef :=
+cascade.  `pctRefW`/`pctRefH` are `parseGradDef`'s, for `transform-origin`. -/
+def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Nat)
+    (pctRefW pctRefH : Fx) : Pat.RawDef :=
   let coord := fun (n : String) => (attr attrs n).bind parsePatCoordFine
   let href := match attr attrs "href" with
     | some v => v
@@ -2500,7 +2523,8 @@ def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Na
       | none => Mat.identity
       | some v =>
         let m := parseTransform v
-        if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m,
+        let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m
+        wrapTransformOrigin attrs pctRefW pctRefH m,
     x := coord "x", y := coord "y", width := coord "width", height := coord "height",
     viewBox := (attr attrs "viewBox").bind fun v =>
       let ns := parseNumberList16 v
@@ -2546,6 +2570,10 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
   let mut markers : Array (String × Nat) := #[]
   let mut patterns : Array Pat.RawDef := #[]
   let mut pctRef : Grad.PctRef := {}
+  -- `pctRef.w`/`.h` in 16.16, for `Grad`/`Pat`'s own geometry; these are the
+  -- same rect in plain `Fx`, for `transform-origin` (`Mat.translate`'s scale).
+  let mut pctRefW : Fx := 0
+  let mut pctRefH : Fx := 0
   let mut seenRoot := false
   let mut depth : Nat := 0
   let mut cur : Option Nat := none
@@ -2577,6 +2605,8 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
             | some (_, _, vw, vh) => (vw, vh)
             | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
           pctRef := { w := w * 256, h := h * 256 }
+          pctRefW := w
+          pctRefH := h
       if name == "clipPath" then
         match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
         | some cid => if clips.size < maxClipPaths then clips := clips.push (toStr cid, idx)
@@ -2601,10 +2631,10 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
               | .open_ _ _ => return true
               | .close => return false
             return false
-          patterns := patterns.push (parsePatternDef attrs hadChildren idx)
+          patterns := patterns.push (parsePatternDef attrs hadChildren idx pctRefW pctRefH)
       if name == "linearGradient" || name == "radialGradient" then
         if out.size < Grad.maxDefs then
-          out := out.push (parseGradDef name attrs)
+          out := out.push (parseGradDef name attrs pctRefW pctRefH)
           cur := some (out.size - 1)
           curDepth := depth
           curStopColor := attrOrStyle attrs "stop-color"
