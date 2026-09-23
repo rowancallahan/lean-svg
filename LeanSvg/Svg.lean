@@ -215,6 +215,14 @@ structure Style where
   colour's alpha (usvg's `ContextElement` carries `Fill::paint` alone). -/
   ctxFill : Paint := .none
   ctxStroke : Paint := .none
+  /-- T85: the `Doc.ctxUses` slot of the nearest enclosing `use`, when that
+  `use`'s own fill or stroke is a gradient or pattern; inherited. -/
+  ctxSlot : Option Nat := none
+  /-- T85: set when `fill`/`stroke` came from `context-fill`/`context-stroke`
+  (to `ctxSlot`), reset by any other paint.  usvg then resolves the paint
+  server against that `use`'s transform and content bbox, not the shape's. -/
+  fillCtx : Option Nat := none
+  strokeCtx : Option Nat := none
   /-- This element's own `mask` reference (T49), not inherited, like `clipRef`. -/
   maskRef : Option String := none
   /-- `mask-type: alpha` on this element (T49), not inherited; only a `mask`
@@ -329,6 +337,14 @@ structure ClipEntry where
   /-- Whether the main walk reached this slot and filled the fields above in.
   An unfilled slot never enters the id map, so references to it are ignored. -/
   filled : Bool := false
+deriving Inhabited
+
+/-- T85: a `use` whose fill or stroke is a paint server: its CTM (after `x`/`y`)
+and the object bounding box of its whole content in that space, filled in when
+the `use` closes. -/
+structure CtxUse where
+  ctm : Mat
+  bbox : Option Box
 deriving Inhabited
 
 /-- One `clip-path="url(#id)"` on an element: which clip, the referencing
@@ -528,6 +544,8 @@ structure Doc where
   `PatternRender.build` reads `patternContent.getD entry.contentSlot`. -/
   patterns : Pat.Defs := {}
   patternContent : Array (Array Node) := #[]
+  /-- T85: the `context-fill`/`context-stroke` paint-server slots (`CtxUse`). -/
+  ctxUses : Array CtxUse := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -1586,6 +1604,11 @@ def resolvePaint (st : Style) : PaintSpec → Paint
       | some i => if (st.patterns.defs.getD i default).valid then .pattern i else fallback
       | none => fallback
 
+/-- T85: the `ctxUses` slot a paint resolved from `context-*` is tied to. -/
+def ctxSlotOf (st : Style) : PaintSpec → Option Nat
+  | .context _ => st.ctxSlot
+  | _ => none
+
 /-- Parse the `color` property.  It is an ordinary colour, never `none` or
 `url(...)`; reusing `parsePaint` and rejecting anything but `.solid` gets that
 for free (`none`/`url()` parse to `PaintSpec.none`, and `currentcolor` to
@@ -1920,6 +1943,10 @@ def Box.transformed (m : Mat) (b : Box) : Option Box :=
   let c := Box.cover c (m.apply ⟨b.x0, b.y1⟩)
   Box.cover c (m.apply ⟨b.x1, b.y1⟩)
 
+/-- T85: a box as a closed rectangle path, for `Grad.build`/`Pat.build`. -/
+def Box.cmds (b : Box) : Array PathCmd :=
+  #[.moveTo ⟨b.x0, b.y0⟩, .lineTo ⟨b.x1, b.y0⟩, .lineTo ⟨b.x1, b.y1⟩, .lineTo ⟨b.x0, b.y1⟩, .close]
+
 /-- A path's bounding box in its own user space, from the flattened polylines
 (with the identity as the flattening `ctm`): usvg's `compute_tight_bounds` up
 to the flattening error, which is what `objectBoundingBox` units scale by. -/
@@ -1965,8 +1992,10 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "evenodd" then { st with clipEvenOdd := true }
     else if eqAscii t "nonzero" then { st with clipEvenOdd := false } else st
-  | "fill" => match parsePaint v with | some p => { st with fill := resolvePaint st p } | none => st
-  | "stroke" => match parsePaint v with | some p => { st with stroke := resolvePaint st p } | none => st
+  | "fill" => match parsePaint v with
+    | some p => { st with fill := resolvePaint st p, fillCtx := ctxSlotOf st p } | none => st
+  | "stroke" => match parsePaint v with
+    | some p => { st with stroke := resolvePaint st p, strokeCtx := ctxSlotOf st p } | none => st
   | "fill-opacity" => match parseOpacity v with | some o => { st with fillOpacity := o } | none => st
   | "stroke-opacity" => match parseOpacity v with | some o => { st with strokeOpacity := o } | none => st
   -- `opacity` is not an inherited property: it belongs to this element alone
@@ -3191,6 +3220,8 @@ structure Frame where
   filterAt : Option Nat := none
   /-- T51: whether that layer has a reason besides the filter. -/
   filterOnly : Bool := false
+  /-- T85: this `use`'s `ctxUses` slot; the box goes there on close. -/
+  ctxUse : Option Nat := none
 deriving Inhabited
 
 /-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
@@ -3455,6 +3486,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let mut maskHolders : Array (Array MaskLink) := scan.masks.map fun _ => #[]
   let mut maskCursor : Nat := 0
   let mut maskUses : Array MaskUse := #[]
+  let mut ctxUses : Array CtxUse := #[]
   let mut openMasks : Array Nat := #[]
   let mut maskSaved : Array (Array Node × Nat) := #[]
   -- T52: one slot per `<marker id>` the pre-pass found, mirroring `clipTable`.
@@ -3520,6 +3552,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         | none => pure ()
         match fr.maskUse with
         | some k => maskUses := maskUses.modify k (fun u => { u with bbox := fr.bbox })
+        | none => pure ()
+        match fr.ctxUse with
+        | some k => ctxUses := ctxUses.modify k (fun u => { u with bbox := fr.bbox })
         | none => pure ()
         match fr.maskSlot with
         | some k =>
@@ -3724,12 +3759,21 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let noAlpha := fun (p : Paint) => match p with
                 | .solid c => Paint.solid { c with a := 255 }
                 | p => p
+              -- T85: a paint-server context needs this `use`'s box and CTM.
+              let server := fun (p : Paint) => match p with
+                | .gradient .. | .pattern _ => true
+                | _ => false
+              let cslot := if pf.mode matches .render && (server st.fill || server st.stroke)
+                then some ctxUses.size else none
               let st := { st with ctm := st.ctm.mul tr, ownMat := st.ownMat.mul tr,
-                                  ctxFill := noAlpha st.fill, ctxStroke := noAlpha st.stroke }
+                                  ctxFill := noAlpha st.fill, ctxStroke := noAlpha st.stroke,
+                                  ctxSlot := cslot }
+              if cslot.isSome then ctxUses := ctxUses.push ⟨st.ctm, none⟩
               let (st, uses', slot) := addClipUse st uses
               uses := uses'
               enter := some st
-              frame := { mode := pf.mode, useSlot := slot, want := slot.isSome || pf.want }
+              frame := { mode := pf.mode, useSlot := slot, ctxUse := cslot,
+                         want := slot.isSome || cslot.isSome || pf.want }
               renders := pf.mode.isRender
               container := true
           else if name == "switch" then
@@ -3926,7 +3970,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let fixPaint := fun (p : Paint) => match p with
                 | .gradient i fb => if hasBbox || !(st.defs.defs.getD i default).oBB then p else fb
                 | _ => p
-              let st := { st with fill := fixPaint st.fill, stroke := fixPaint st.stroke }
+              -- A `context-*` paint was checked on the `use`, not here (T85).
+              let st := { st with fill := if st.fillCtx.isSome then st.fill else fixPaint st.fill,
+                                  stroke := if st.strokeCtx.isSome then st.stroke else fixPaint st.stroke }
               -- T52: usvg 0.48.1 actually instantiates markers on every basic
               -- shape (`converter.rs`'s `EId::Rect | Circle | Ellipse |
               -- Polyline | Polygon | Path` all take the same `convert_path`
@@ -4203,7 +4249,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,
-      srcEvents, patTable, patternContent⟩
+      srcEvents, patTable, patternContent, ctxUses⟩
 
 end Svg
 end LeanSvg

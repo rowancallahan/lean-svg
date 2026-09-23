@@ -266,10 +266,17 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
   -- the layer instead of the canvas so the two agree — `Mat.translate` has an
   -- identity linear part, so that composition is exact and a layer's gradient
   -- pixels equal the full render's.
-  let gctm := if tgt.ox == 0 && tgt.oy == 0 then ctm
-    else (Mat.translate (-((tgt.ox : Int) * 256)) (-((tgt.oy : Int) * 256))).mul ctm
-  let paintMask := fun (cv : Canvas) (p : Svg.Paint) (m0 : Raster.Mask) (op : Nat) =>
+  let toLayer := fun (c : Mat) => if tgt.ox == 0 && tgt.oy == 0 then c
+    else (Mat.translate (-((tgt.ox : Int) * 256)) (-((tgt.oy : Int) * 256))).mul c
+  let gctm := toLayer ctm
+  -- T85: a `context-fill`/`-stroke` paint server is resolved against its
+  -- `use`'s content box and CTM (usvg's `process_context_paint`).
+  let paintSpace := fun (ctx : Option Nat) => match ctx.bind (doc.ctxUses[·]?) with
+    | some u => ((u.bbox.map Svg.Box.cmds).getD #[], toLayer (rootMat.mul u.ctm))
+    | none => (s.cmds, gctm)
+  let paintMask := fun (cv : Canvas) (p : Svg.Paint) (ctx : Option Nat) (m0 : Raster.Mask) (op : Nat) =>
     let m := shiftMask tgt m0
+    let (pcmds, pctm) := paintSpace ctx
     -- T63: an `<image>` paints its own sampler through the same mask.
     match s.image with
     | some im =>
@@ -281,13 +288,13 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
     | .none => cv
     | .solid c => cv.fillMask m c (opacityToU8 c.a op st.opacity)
     | .gradient i _ =>
-      match Grad.build st.defs i s.cmds gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
+      match Grad.build st.defs i pcmds pctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
               op st.opacity with
       | .skip => cv
       | .solid c a8 => cv.fillMask m c a8
       | .grad sh => cv.fillMaskShader m sh
     | .pattern i =>
-      match Pat.build doc Pat.patternFuel i s.cmds gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
+      match Pat.build doc Pat.patternFuel i pcmds pctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
               op st.opacity with
       | .skip => cv
       | .tile sh => cv.fillMaskPattern m sh
@@ -301,7 +308,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
       let dev := polys.map fun p => p.pts.map ctm.apply
       match ((raster W H dev st.evenOdd).bind (clipMask clip)).map
           (Clip.applyChain chain) with
-      | some m => paintMask cv st.fill m st.fillOpacity
+      | some m => paintMask cv st.fill st.fillCtx m st.fillOpacity
       | none => cv
   let drawStroke := fun (cv : Canvas) => match st.stroke with
     | .none => cv
@@ -333,7 +340,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
           match ((Raster.hairline W H dev st.cap a8 covScale clip.vx clip.vy).bind
               (clipMask clip)).map
               (Clip.applyChain chain) with
-          | some m => paintMask cv st.stroke m st.strokeOpacity
+          | some m => paintMask cv st.stroke st.strokeCtx m st.strokeOpacity
           | none => cv
         | none =>
           let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
@@ -341,7 +348,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
           let dev := outline.map fun p => p.map ctm.apply
           match ((raster W H dev false).bind (clipMask clip)).map
               (Clip.applyChain chain) with
-          | some m => paintMask cv st.stroke m st.strokeOpacity
+          | some m => paintMask cv st.stroke st.strokeCtx m st.strokeOpacity
           | none => cv
   -- `paint-order`: normally fill then stroke; `st.strokeFirst` (set when
   -- `stroke` precedes `fill` in the property's resolved order) swaps them.
