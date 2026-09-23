@@ -3328,7 +3328,23 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             -- does not resolve to an installed font draws nothing either
             -- (`process_chunk`'s `None => continue`), same as `display:none`.
             ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
-  let (placed, used, mbox, sbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
+  -- T96: under a large scale (`transform="scale(100)"` on tiny text) an
+  -- outline rounded to `Fx` user units is visibly jagged, so it is laid out
+  -- `outK` times larger and drawn through `ctm · scale(1 / outK)`; only for
+  -- plain paints, whose meaning does not depend on the user-space scale.
+  let m := textStyle.ctm
+  let sc := Nat.sqrt (Nat.sqrt (m.a.natAbs * m.a.natAbs + m.b.natAbs * m.b.natAbs)
+    * Nat.sqrt (m.c.natAbs * m.c.natAbs + m.d.natAbs * m.d.natAbs))
+  let plain := fun (p : Paint) => match p with | .none | .solid _ => true | _ => false
+  let outK : Nat := Id.run do
+    let mut k := 1
+    for _ in [0:8] do
+      if 2 * k * 65536 ≤ sc then k := 2 * k
+    return if k < 16 || !(styles.all fun s => plain s.fill && plain s.stroke) then 1 else k
+  let (placed, used, mbox, sbox) :=
+    Text.layout evs textStyle.spacePreserve budget textStyle.writingMode outK
+  let outCtm := if outK == 1 then textStyle.ctm
+    else textStyle.ctm.mul (Mat.scale16 (65536 / outK) (65536 / outK))
   let mut out : Array Shape := #[]
   let mut chains : Array (Array Nat) := #[]
   let mut oboxes : Array (Option Box) := owners.map fun _ => none
@@ -3342,7 +3358,10 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
       -- that property, so glyphs stay antialiased regardless of an ambient
       -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
+      let st := if outK == 1 then st else
+        { st with strokeWidth := st.strokeWidth * outK, dashes := st.dashes.map (· * outK),
+                  dashOffset := st.dashOffset * outK }
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := false }, false, none, none⟩
       chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
