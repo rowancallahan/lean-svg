@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="450" font-family="Noto Sans" font-size="30">
+  <rect width="600" height="450" fill="#fdfdfb"/>
+  <!-- stroke-dasharray/stroke-dashoffset in em (font-relative) and % (viewport-diagonal) units -->
+  <g fill="none" stroke="#1d3557" stroke-width="12">
+    <circle cx="90" cy="90" r="66" stroke-dasharray="1.5em 0.75em"/>
+    <circle cx="240" cy="90" r="66" stroke-dasharray="12% 6%"/>
+    <circle cx="390" cy="90" r="66" stroke-dasharray="15 30" stroke-dashoffset="2em"/>
+    <circle cx="540" cy="90" r="66" stroke-dasharray="15 30" stroke-dashoffset="8%"/>
+  </g>
+  <!-- shape-rendering: crispEdges/optimizeSpeed fill with binary (non-antialiased)
+       coverage instead of the default's exact area, inherited through a group,
+       and overridable per element -->
+  <g shape-rendering="optimizeSpeed">
+    <circle cx="90" cy="240" r="60" fill="#e63946"/>
+    <circle cx="240" cy="240" r="60" fill="#e63946" shape-rendering="crispEdges"/>
+    <circle cx="390" cy="240" r="60" fill="#e63946" shape-rendering="geometricPrecision"/>
+    <line x1="474" y1="210" x2="594" y2="210" stroke="#e63946" stroke-width="4"/>
+    <line x1="474" y1="225" x2="594" y2="225" stroke="#e63946" stroke-width="4" shape-rendering="auto"/>
+  </g>
+  <!-- shape-rendering must not affect text, even when inherited -->
+  <text x="450" y="278" shape-rendering="optimizeSpeed" fill="#2a2a2a">Aa</text>
+  <!-- stroke-linejoin: miter-clip within the limit (a plain point) and past it
+       (the tip is clipped flat rather than falling back to a bevel) -->
+  <path d="M 60 420 C 60 360 135 330 210 330 C 157 360 135 390 135 420"
+        fill="none" stroke="#2a9d8f" stroke-width="15"
+        stroke-linejoin="miter-clip" stroke-miterlimit="4"/>
+  <path d="M 300 420 C 300 360 375 337 450 336 C 397 366 375 396 375 420"
+        fill="none" stroke="#6a4c93" stroke-width="15"
+        stroke-linejoin="miter-clip" stroke-miterlimit="2"/>
+</svg>
