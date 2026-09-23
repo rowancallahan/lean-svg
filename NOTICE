@@ -8,14 +8,27 @@ Licences verified against upstream licence files and package manifests on
 
 REDISTRIBUTED BY THIS PROJECT
 
-Noto Sans — https://github.com/notofonts/latin-greek-cyrillic
-  Copyright 2015 Google Inc. All Rights Reserved.
-  Noto is a trademark of Google Inc.; trademarks are not licensed under the
-  SIL Open Font License. Version 2.000 (GOOG). Latin subsets of the Regular,
-  Bold and Italic faces are embedded in the binary as LeanSvg/Fonts/*.lean.
-  SIL Open Font License 1.1; full text and copyright notice in
-  LeanSvg/Fonts/LICENSE-OFL.txt. The faces are subsetted, which the OFL
-  permits; Noto declares no Reserved Font Name.
+Embedded fonts — all SIL Open Font License 1.1, subsetted (and variable fonts
+  pinned to one static instance), which the OFL permits. Embedded in the
+  binary as LeanSvg/Fonts/*.lean; names, versions, sizes and sources are in
+  LeanSvg/Fonts/README.md, licence texts next to them.
+  Noto Sans Regular/Bold/Italic 2.000 —
+    https://github.com/notofonts/latin-greek-cyrillic
+    Copyright 2015 Google Inc. All Rights Reserved. Noto is a trademark of
+    Google Inc.; trademarks are not licensed under the OFL. Noto declares no
+    Reserved Font Name. LeanSvg/Fonts/LICENSE-OFL.txt.
+  Mplus 1p Regular 1.061 — https://github.com/google/fonts/tree/main/ofl/mplus1p
+    Copyright 2016 The M+ Project Authors. LeanSvg/Fonts/LICENSE-OFL-Mplus1p.txt.
+  Noto Sans SC and Noto Sans KR 2.004 —
+    https://github.com/google/fonts/tree/main/ofl/notosans{sc,kr}
+    Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name
+    'Source'; the embedded modified versions do not use that name.
+    LeanSvg/Fonts/LICENSE-OFL-NotoSansCJK.txt.
+  Noto Sans Thai 2.002, Armenian 2.008, Georgian 2.005, Ethiopic 2.102 —
+    https://github.com/google/fonts/tree/main/ofl/notosans{thai,armenian,
+    georgian,ethiopic}. Copyright 2022 The Noto Project Authors
+    (https://github.com/notofonts/{thai,armenian,georgian,ethiopic}).
+    LeanSvg/Fonts/LICENSE-OFL-NotoScripts.txt.
 
 Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
   README.md. Apache-2.0, authored for this project.
