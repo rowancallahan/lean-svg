@@ -12,6 +12,9 @@ import LeanSvg.Fonts.NotoSansEthiopic
 import LeanSvg.Fonts.Amiri
 import LeanSvg.Fonts.NotoSansHebrew
 import LeanSvg.Fonts.NotoSansDevanagari
+import LeanSvg.Fonts.NotoSansThin
+import LeanSvg.Fonts.NotoSansLight
+import LeanSvg.Fonts.NotoSansBlack
 
 /-!
 # The embedded font set (T91)
@@ -33,6 +36,11 @@ usvg skips a fallback face only when its style, weight *and* stretch all
 differ from the base face's.  Every face here has normal stretch and the base
 face always does too (`font-stretch` selects nothing), so no face is ever
 skipped on that ground.
+
+T97 appends Noto Sans Thin, Light and Black, the other weights `Text.pickFace`
+chooses among.  They sit last so that the fallback order of every other font
+is unchanged; they map exactly what Noto Sans Regular maps, so fallback never
+reaches them.
 -/
 
 namespace LeanSvg
@@ -60,8 +68,17 @@ def entries : Array Entry := #[
   -- T93: the shaped scripts (GSUB/GPOS kept; `LeanSvg/Shape.lean`)
   ⟨"Amiri", Fonts.Amiri.font, Fonts.Amiri.coverage⟩,
   ⟨"Noto Sans Hebrew", Fonts.NotoSansHebrew.font, Fonts.NotoSansHebrew.coverage⟩,
-  ⟨"Noto Sans Devanagari", Fonts.NotoSansDevanagari.font, Fonts.NotoSansDevanagari.coverage⟩
+  ⟨"Noto Sans Devanagari", Fonts.NotoSansDevanagari.font, Fonts.NotoSansDevanagari.coverage⟩,
+  -- T97: the other Noto Sans weights
+  ⟨"Noto Sans", Fonts.NotoSansThin.font, Fonts.NotoSansThin.coverage⟩,
+  ⟨"Noto Sans", Fonts.NotoSansLight.font, Fonts.NotoSansLight.coverage⟩,
+  ⟨"Noto Sans", Fonts.NotoSansBlack.font, Fonts.NotoSansBlack.coverage⟩
 ]
+
+/-- The `entries` indices of Noto Sans Thin, Light and Black (T97). -/
+def notoSansThin : Nat := 13
+def notoSansLight : Nat := 14
+def notoSansBlack : Nat := 15
 
 /-- The number of embedded fonts. -/
 def count : Nat := entries.size
@@ -80,7 +97,7 @@ the renderer loads it (for `fontdump --embedded`). -/
 def byModule (name : String) : Option Font :=
   let names := #["NotoSans", "NotoSansBold", "NotoSansItalic", "Mplus1p", "NotoSansSC",
     "NotoSansKR", "NotoSansThai", "NotoSansArmenian", "NotoSansGeorgian", "NotoSansEthiopic",
-    "Amiri", "NotoSansHebrew", "NotoSansDevanagari"]
+    "Amiri", "NotoSansHebrew", "NotoSansDevanagari", "NotoSansThin", "NotoSansLight", "NotoSansBlack"]
   match names.findIdx? (· == name) with
   | some i => (entries[i]?).bind (fun e => e.font ())
   | none => none
