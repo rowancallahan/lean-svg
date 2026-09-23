@@ -1414,6 +1414,31 @@ def parseTextLenList (fontSize refLen : Fx) (bs : ByteArray) : Array Fx := Id.ru
     | none => break
   return out
 
+/-- `stroke-dasharray`: a whitespace/comma separated list of lengths, resolved
+like `parseTextLen` (`em`/`ex` against `fontSize`, `%` against `refLen`), but
+all-or-nothing like `parseAbsLengthList` — one bad item drops the whole list,
+matching `Geom.dashPattern`'s downstream fallback to an undashed stroke. -/
+def parseDashLengthList (fontSize refLen : Fx) (bs : ByteArray) : Option (Array Fx) := Id.run do
+  let t := trim bs
+  let mut out : Array Fx := #[]
+  let mut i := 0
+  for _ in [0:t.size + 1] do
+    i := skipWsComma t i
+    if i ≥ t.size then break
+    match parseTextLen fontSize refLen t i with
+    | some (v, j) =>
+      out := out.push v
+      i := j
+    | none => return none
+  return some out
+
+/-- `stroke-dashoffset`: a single length, resolved the same way. -/
+def parseDashLengthAll (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen t 0 with
+  | some (v, j) => if j == t.size then some v else none
+  | none => none
+
 /-- `rotate` is a *number* list, and usvg's `Vec<f32>` reader propagates a
 parse error out of the whole attribute (`n.ok()?`), so one bad item — a unit
 suffix, say — makes the element carry no rotation at all rather than a
@@ -1611,13 +1636,22 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "round" then { st with join := .round }
     else if eqAscii t "bevel" then { st with join := .bevel }
-    else if eqAscii t "miter" then { st with join := .miter } else st
+    else if eqAscii t "miter" then { st with join := .miter }
+    -- SVG 2's `miter-clip` is a real usvg `LineJoin` variant (`arcs` is not:
+    -- unrecognised, so it falls through to `else st`, keeping whatever was
+    -- inherited — usvg's own fallback, since `LineJoin::default()` is `Miter`
+    -- and `find_attribute` skips a value that fails to parse).
+    else if eqAscii t "miter-clip" then { st with join := .miterClip } else st
   | "stroke-miterlimit" => match parseNumberAll v with | some m => { st with miterLimit := Fx.max 256 m } | none => st
-  -- `none`, a percentage, an `em` and plain junk all mean "not dashed" rather
-  -- than "inherit": usvg resolves the dash properties on the nearest ancestor
-  -- that *has* the attribute and drops them when that one does not parse.
-  | "stroke-dasharray" => { st with dashes := (parseAbsLengthList v).getD #[] }
-  | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
+  -- `none` and plain junk mean "not dashed" rather than "inherit": usvg
+  -- resolves the dash properties on the nearest ancestor that *has* the
+  -- attribute and drops them when that one does not parse.  `em`/`ex` resolve
+  -- against the current font size and `%` against the viewport diagonal,
+  -- exactly as `letter-spacing` does (`units.rs`'s `convert_length` catch-all).
+  | "stroke-dasharray" =>
+    { st with dashes := (parseDashLengthList st.fontSize (viewportDiag st.pctRefW st.pctRefH) v).getD #[] }
+  | "stroke-dashoffset" =>
+    { st with dashOffset := (parseDashLengthAll st.fontSize (viewportDiag st.pctRefW st.pctRefH) v).getD 0 }
   | "transform" =>
     -- `translate(originDx, originDy) · transform · translate(-originDx, -originDy)`
     -- (`applyEffective` sets `originDx`/`originDy` from this element's own
