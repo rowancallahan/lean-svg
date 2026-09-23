@@ -276,11 +276,15 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
       | .skip => cv
       | .solid c a8 => cv.fillMask m c a8
       | .grad sh => cv.fillMaskShader m sh
+  -- `shape-rendering: crispEdges`/`optimizeSpeed` swaps in the non-antialiased
+  -- rasterizer for both fill and stroke (`use_shape_antialiasing` in DESIGN.md
+  -- §3.5's non-AA note); every other rendering mode keeps the default path.
+  let raster := if st.crisp then Raster.rasterizeCrisp else Raster.rasterize
   let drawFill := fun (cv : Canvas) => match st.fill with
     | .none => cv
     | _ =>
       let dev := polys.map fun p => p.pts.map ctm.apply
-      match ((Raster.rasterize W H dev st.evenOdd).bind (clipMask clip)).map
+      match ((raster W H dev st.evenOdd).bind (clipMask clip)).map
           (Clip.applyChain chain) with
       | some m => paintMask cv st.fill m st.fillOpacity
       | none => cv
@@ -293,7 +297,9 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
         -- actually inked, before stroking, so every dash end gets a cap.  The
         -- fill above uses the undashed polylines; dashes are a stroke property.
         let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
-        match hairCoverage ctm st.strokeWidth with
+        -- `treat_as_hairline` refuses whenever `!paint.anti_alias`, so a crisp
+        -- stroke never takes the hairline shortcut, however thin.
+        match (if st.crisp then none else hairCoverage ctm st.strokeWidth) with
         | some cov16 =>
           -- `scale = ⌊coverage·256⌋`, `new_alpha = (255·scale) >> 8`; folded into
           -- the coverage rather than the paint alpha (see `Raster.hairline`).
@@ -318,7 +324,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
           let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
           let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
           let dev := outline.map fun p => p.map ctm.apply
-          match ((Raster.rasterize W H dev false).bind (clipMask clip)).map
+          match ((raster W H dev false).bind (clipMask clip)).map
               (Clip.applyChain chain) with
           | some m => paintMask cv st.stroke m st.strokeOpacity
           | none => cv

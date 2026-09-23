@@ -316,6 +316,156 @@ def rasterize (W H : Nat) (polys : Array (Array Pt)) (evenOdd : Bool) : Option M
           alpha := alpha.setIfInBounds p 0
   return some ⟨x0i, y0i, bw, bh, cov⟩
 
+/-! ## Non-antialiased fill (`shape-rendering: crispEdges` / `optimizeSpeed`)
+
+resvg turns off `tiny-skia`'s antialiasing for these (`path.rs`'s
+`paint.anti_alias = path.rendering_mode().use_shape_antialiasing()`), which
+sends the fill to `scan::path::fill_path` instead of `scan::path_aa::fill_path`
+above.  That converter sits at native pixel resolution (`shift = 0`, i.e. no
+4× supersampling in either axis) and asks one question per pixel: is the
+row's centre inside the shape?  A LineEdge is the same construction as
+`mkEdge` with the sub-scanline unit widened from a quarter pixel (`64` `Fx`,
+`shift = 2`) to a whole one (`256` `Fx`, `shift = 0`), so `top`/`bot` round to
+the nearest *row* instead of the nearest quarter-row, and `x` lands in 16.16
+*pixel columns* instead of 16.16 sub-columns.  Coverage is then binary: `w`'s
+winding at the row decides the whole pixel, blitted with `blit_h` rather than
+`AlphaRuns::add`, so every covered pixel gets the full `65536` and every other
+one `0`. This is deliberately a separate function from `rasterize`/`mkEdge`
+above rather than a shared one parameterised on the unit, so that this mode
+cannot perturb the default antialiased path (DESIGN.md §3.5). -/
+
+/-- `mkEdge`'s formulas at `shift = 0` instead of `shift = 2`: the rounding
+unit is one whole pixel (`256` `Fx`, half `128`) rather than a quarter
+(`64` `Fx`, half `32`), and `x` is stored in 16.16 pixel columns (`× 256`)
+rather than 16.16 sub-columns (`× 1024`). -/
+def mkEdgeCrisp (nScan nSuper : Nat) (ax ay bx by_ : Int) :
+    Option (Int × Int × Nat × Nat × Int) :=
+  let (x0, y0, x1, y1, wd) :=
+    if ay > by_ then (bx, by_, ax, ay, (-1 : Int)) else (ax, ay, bx, by_, (1 : Int))
+  let top := Int.ediv (y0 + 128) 256
+  let bot := Int.ediv (y1 + 128) 256
+  if top == bot then none
+  else if bot ≤ 0 || top ≥ (nScan : Int) then none
+  else
+    let firstY := if top < 0 then (0 : Int) else top
+    let lastY := if bot - 1 < (nScan : Int) - 1 then bot - 1 else (nScan : Int) - 1
+    let slope := Int.tdiv ((x1 - x0) * 65536) (y1 - y0)
+    let dy := top * 256 + 128 - y0
+    let x0f := (x0 + Int.ediv (slope * dy) 65536) * 256
+    let xa := x0f + slope * (firstY - top)
+    let xb := x0f + slope * (lastY - top)
+    let loPin : Int := 32768
+    let hiPin : Int := (nSuper : Int) * 65536 - 32768
+    if xa < loPin && xb < loPin then some (0, 0, firstY.toNat, lastY.toNat, wd)
+    else if xa ≥ hiPin && xb ≥ hiPin then
+      some ((nSuper : Int) * 65536, 0, firstY.toNat, lastY.toNat, wd)
+    else some (xa, slope, firstY.toNat, lastY.toNat, wd)
+
+/-- Rasterize closed polygons with binary coverage (`0` or `65536`, no
+partial pixels) for `shape-rendering: crispEdges`/`optimizeSpeed`.  One
+scanline per destination row, at the row's own resolution rather than 4×
+supersampled — see the module note above.  Always the binned-winding walk
+(`rasterize`'s sorted alternative exists only to keep the AA path fast on
+paths with hundreds of thousands of edges; this mode is for small, deliberately
+blocky shapes, so the simpler single algorithm is enough). -/
+def rasterizeCrisp (W H : Nat) (polys : Array (Array Pt)) (evenOdd : Bool) : Option Mask := Id.run do
+  let mut any := false
+  let mut minx : Int := 0
+  let mut miny : Int := 0
+  let mut maxx : Int := 0
+  let mut maxy : Int := 0
+  for poly in polys do
+    if poly.size < 3 then continue
+    for p in poly do
+      if !any then
+        any := true
+        minx := p.x
+        maxx := p.x
+        miny := p.y
+        maxy := p.y
+      else
+        minx := Fx.min minx p.x
+        maxx := Fx.max maxx p.x
+        miny := Fx.min miny p.y
+        maxy := Fx.max maxy p.y
+  if !any then return none
+  let x0i := Int.toNat (Fx.floor minx)
+  let y0i := Int.toNat (Fx.floor miny)
+  let x1i := Nat.min W (Int.toNat (Fx.ceil maxx))
+  let y1i := Nat.min H (Int.toNat (Fx.ceil maxy))
+  if x1i ≤ x0i || y1i ≤ y0i then return none
+  let bw := x1i - x0i
+  let bh := y1i - y0i
+  let nScan := bh
+  let nSuper := bw
+  let ox : Int := x0i * 256
+  let oy : Int := y0i * 256
+  let mut ex : Array Int := #[]
+  let mut edx : Array Int := #[]
+  let mut efy : Array Nat := #[]
+  let mut ely : Array Nat := #[]
+  let mut ewd : Array Int := #[]
+  for poly in polys do
+    let n := poly.size
+    if n < 3 then continue
+    for i in [0:n] do
+      let p := poly.getD i default
+      let q := poly.getD ((i + 1) % n) default
+      match mkEdgeCrisp nScan nSuper (p.x - ox) (p.y - oy) (q.x - ox) (q.y - oy) with
+      | none => pure ()
+      | some (x, dx, fy, ly, wd) =>
+        ex := ex.push x
+        edx := edx.push dx
+        efy := efy.push fy
+        ely := ely.push ly
+        ewd := ewd.push wd
+  let m := ex.size
+  if m == 0 then return none
+  let mut bstart : Array Nat := Array.replicate (nScan + 2) 0
+  for i in [0:m] do
+    let y := efy.getD i 0 + 1
+    bstart := bstart.setIfInBounds y (bstart.getD y 0 + 1)
+  for y in [1:nScan + 2] do
+    bstart := bstart.setIfInBounds y (bstart.getD y 0 + bstart.getD (y - 1) 0)
+  let mut fill := bstart
+  let mut order : Array Nat := Array.replicate m 0
+  for i in [0:m] do
+    let y := efy.getD i 0
+    let k := fill.getD y 0
+    order := order.setIfInBounds k i
+    fill := fill.setIfInBounds y (k + 1)
+  let mut act : Array Nat := Array.emptyWithCapacity 64
+  let mut wacc : Array Int := Array.replicate (nSuper + 1) 0
+  let mut cov : Array Nat := Array.replicate (bw * bh) 0
+  for y in [0:nScan] do
+    for k in [bstart.getD y 0 : bstart.getD (y + 1) 0] do
+      act := act.push (order.getD k 0)
+    let mut lo : Nat := nSuper
+    let mut hi : Nat := 0
+    let mut live : Nat := 0
+    for i in [0:act.size] do
+      let ei := act.getD i 0
+      let xf := ex.getD ei 0
+      let xr := Int.ediv (xf + 32768) 65536
+      let c : Nat := if xr ≤ 0 then 0 else if xr ≥ (nSuper : Int) then nSuper else xr.toNat
+      wacc := wacc.setIfInBounds c (wacc.getD c 0 + ewd.getD ei 0)
+      if c < lo then lo := c
+      if c > hi then hi := c
+      if ely.getD ei 0 > y then
+        ex := ex.setIfInBounds ei (xf + edx.getD ei 0)
+        act := act.setIfInBounds live ei
+        live := live + 1
+    act := act.shrink live
+    if lo ≤ hi then
+      let row := y * bw
+      let mut w : Int := 0
+      for c in [lo:hi + 1] do
+        w := w + wacc.getD c 0
+        wacc := wacc.setIfInBounds c 0
+        if c < nSuper && insideW evenOdd w then
+          cov := cov.setIfInBounds (row + c) 65536
+  return some ⟨x0i, y0i, bw, bh, cov⟩
+
 /-! ## Hairline strokes
 
 `painter.rs::treat_as_hairline` keeps every stroke whose device-space width is

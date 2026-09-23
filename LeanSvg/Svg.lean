@@ -84,6 +84,13 @@ structure Style where
   /-- `isolation: isolate`; not inherited, CSS only, like `blend`. -/
   isolate : Bool := false
   visible : Bool := true
+  /-- `shape-rendering: crispEdges`/`optimizeSpeed` (`usvg`'s
+  `ShapeRendering::use_shape_antialiasing() == false`): the shape is filled and
+  stroked with `Raster.rasterizeCrisp` instead of the antialiased default, and
+  a thin stroke skips the hairline shortcut (`painter.rs`'s
+  `treat_as_hairline` also refuses when `!paint.anti_alias`). Inherited;
+  `auto`/`geometricPrecision` (the default) turn antialiasing back on. -/
+  crisp : Bool := false
   /-- The CSS `color` property: inherited, defaults to black, and is what
   `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
   applies `color` before any other property so the resolution sees the
@@ -1505,6 +1512,31 @@ def parseTextLenList (fontSize refLen : Fx) (bs : ByteArray) : Array Fx := Id.ru
     | none => break
   return out
 
+/-- `stroke-dasharray`: a whitespace/comma separated list of lengths, resolved
+like `parseTextLen` (`em`/`ex` against `fontSize`, `%` against `refLen`), but
+all-or-nothing like `parseAbsLengthList` — one bad item drops the whole list,
+matching `Geom.dashPattern`'s downstream fallback to an undashed stroke. -/
+def parseDashLengthList (fontSize refLen : Fx) (bs : ByteArray) : Option (Array Fx) := Id.run do
+  let t := trim bs
+  let mut out : Array Fx := #[]
+  let mut i := 0
+  for _ in [0:t.size + 1] do
+    i := skipWsComma t i
+    if i ≥ t.size then break
+    match parseTextLen fontSize refLen t i with
+    | some (v, j) =>
+      out := out.push v
+      i := j
+    | none => return none
+  return some out
+
+/-- `stroke-dashoffset`: a single length, resolved the same way. -/
+def parseDashLengthAll (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen t 0 with
+  | some (v, j) => if j == t.size then some v else none
+  | none => none
+
 /-- `rotate` is a *number* list, and usvg's `Vec<f32>` reader propagates a
 parse error out of the whole attribute (`n.ok()?`), so one bad item — a unit
 suffix, say — makes the element carry no rotation at all rather than a
@@ -1705,13 +1737,22 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "round" then { st with join := .round }
     else if eqAscii t "bevel" then { st with join := .bevel }
-    else if eqAscii t "miter" then { st with join := .miter } else st
+    else if eqAscii t "miter" then { st with join := .miter }
+    -- SVG 2's `miter-clip` is a real usvg `LineJoin` variant (`arcs` is not:
+    -- unrecognised, so it falls through to `else st`, keeping whatever was
+    -- inherited — usvg's own fallback, since `LineJoin::default()` is `Miter`
+    -- and `find_attribute` skips a value that fails to parse).
+    else if eqAscii t "miter-clip" then { st with join := .miterClip } else st
   | "stroke-miterlimit" => match parseNumberAll v with | some m => { st with miterLimit := Fx.max 256 m } | none => st
-  -- `none`, a percentage, an `em` and plain junk all mean "not dashed" rather
-  -- than "inherit": usvg resolves the dash properties on the nearest ancestor
-  -- that *has* the attribute and drops them when that one does not parse.
-  | "stroke-dasharray" => { st with dashes := (parseAbsLengthList v).getD #[] }
-  | "stroke-dashoffset" => { st with dashOffset := (parseAbsLengthAll v).getD 0 }
+  -- `none` and plain junk mean "not dashed" rather than "inherit": usvg
+  -- resolves the dash properties on the nearest ancestor that *has* the
+  -- attribute and drops them when that one does not parse.  `em`/`ex` resolve
+  -- against the current font size and `%` against the viewport diagonal,
+  -- exactly as `letter-spacing` does (`units.rs`'s `convert_length` catch-all).
+  | "stroke-dasharray" =>
+    { st with dashes := (parseDashLengthList st.fontSize (viewportDiag st.pctRefW st.pctRefH) v).getD #[] }
+  | "stroke-dashoffset" =>
+    { st with dashOffset := (parseDashLengthAll st.fontSize (viewportDiag st.pctRefW st.pctRefH) v).getD 0 }
   | "transform" =>
     -- `translate(originDx, originDy) · transform · translate(-originDx, -originDy)`
     -- (`applyEffective` sets `originDx`/`originDy` from this element's own
@@ -1728,6 +1769,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  | "shape-rendering" =>
+    let t := trim v
+    if eqAscii t "crispEdges" || eqAscii t "optimizeSpeed" then { st with crisp := true }
+    else if eqAscii t "geometricPrecision" || eqAscii t "auto" then { st with crisp := false }
+    else st
   -- T36: text properties.  Inherited like every other property here; only
   -- `Svg.textShapes` ever reads them.
   | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
@@ -2423,7 +2469,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
+      -- `text-rendering`, not `shape-rendering`, decides glyph antialiasing
+      -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
+      -- that property, so glyphs stay antialiased regardless of an ambient
+      -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }⟩
   return (out, used)
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
