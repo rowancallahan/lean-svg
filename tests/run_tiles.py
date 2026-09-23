@@ -53,7 +53,14 @@ class RenderError(Exception):
 
 
 def render(binary, svg, out, extra):
-    """Render one file. Returns the elapsed wall-clock time in ms."""
+    """Render one file. Returns the elapsed wall-clock time in ms.
+
+    Deletes `out` first: lean-svg refuses to overwrite an existing output
+    file, and every caller here reuses a fixed path across multiple renders
+    on purpose (quadrant tiles, timing repeats).
+    """
+    out = Path(out)
+    out.unlink(missing_ok=True)
     cmd = [str(binary), str(svg), str(out)] + [str(a) for a in extra]
     start = time.perf_counter()
     try:
