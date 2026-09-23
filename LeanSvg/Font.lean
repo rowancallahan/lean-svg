@@ -913,5 +913,68 @@ def hexDecodeChunks (chunks : Array String) : ByteArray := Id.run do
     out := out.append (hexDecode c)
   return out
 
+/-- Value of a base64 digit (RFC 4648 standard alphabet), or `none`. -/
+def b64Digit (c : UInt8) : Option Nat :=
+  if 65 ≤ c && c ≤ 90 then some (c.toNat - 65)
+  else if 97 ≤ c && c ≤ 122 then some (c.toNat - 97 + 26)
+  else if 48 ≤ c && c ≤ 57 then some (c.toNat - 48 + 52)
+  else if c == 43 then some 62
+  else if c == 47 then some 63
+  else none
+
+/-- Decode padded base64 into bytes, four characters (three bytes) at a time.
+Total: a quad with an invalid character stops decoding, and `=` padding in the
+third/fourth place emits only the bytes that precede it (T91: the embedded
+fonts are base64, 4/3 of the binary size instead of hex's 2×). -/
+def base64Decode (s : String) : ByteArray := Id.run do
+  let sb := s.toUTF8
+  let mut out := ByteArray.emptyWithCapacity (sb.size / 4 * 3)
+  for q in [0:sb.size / 4] do
+    let i := 4 * q
+    match b64Digit (at' sb i), b64Digit (at' sb (i + 1)) with
+    | some a, some b =>
+      out := out.push (UInt8.ofNat (a * 4 + b / 16))
+      match b64Digit (at' sb (i + 2)) with
+      | some c =>
+        out := out.push (UInt8.ofNat ((b % 16) * 16 + c / 4))
+        match b64Digit (at' sb (i + 3)) with
+        | some d => out := out.push (UInt8.ofNat ((c % 4) * 64 + d))
+        | none => break
+      | none => break
+    | _, _ => break
+  return out
+
+/-- `base64Decode` over chunks, each a whole number of quads. -/
+def base64DecodeChunks (chunks : Array String) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity 0
+  for c in chunks do
+    out := out.append (base64Decode c)
+  return out
+
+/-- A font's codepoint coverage as sorted, disjoint, inclusive ranges, decoded
+from the generator's packed form: 6 bytes per range (24-bit big-endian first,
+then last codepoint), base64. -/
+def decodeRanges (s : String) : Array (Nat × Nat) := Id.run do
+  let bs := base64Decode s
+  let mut out : Array (Nat × Nat) := Array.emptyWithCapacity (bs.size / 6)
+  for k in [0:bs.size / 6] do
+    let i := 6 * k
+    out := out.push (u16 bs i * 256 + u8 bs (i + 2), u16 bs (i + 3) * 256 + u8 bs (i + 5))
+  return out
+
+/-- Whether `cp` lies in one of the sorted ranges: binary search, 32 halvings
+cover any array a `ByteArray` can produce. -/
+def inRanges (rs : Array (Nat × Nat)) (cp : Nat) : Bool := Id.run do
+  let mut lo := 0
+  let mut hi := rs.size
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let (a, b) := rs.getD mid (0, 0)
+    if cp < a then hi := mid
+    else if cp > b then lo := mid + 1
+    else return true
+  return false
+
 end Font
 end LeanSvg
