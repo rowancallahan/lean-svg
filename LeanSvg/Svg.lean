@@ -2106,6 +2106,64 @@ def elemPosOf (st : Style) (attrs : Array Xml.Attr) : Text.ElemPos :=
     rots := rots.getD #[],
     hasRot := rots.isSome }
 
+/-- Every element name usvg's `svgtree` recognises while building its DOM
+(`svgtree/mod.rs`'s tag-name table): an element with any other name is
+dropped, together with its children, before anything downstream — `<switch>`
+child selection and `tref` target resolution both need this, since either can
+land on an arbitrary node the rest of the renderer never otherwise looks at
+(`switch/non-SVG-child.svg`, `tref/link-to-a-non-SVG-element.svg`). -/
+def svgTagNames : List String :=
+  ["a", "circle", "clipPath", "defs", "ellipse", "feBlend", "feColorMatrix",
+   "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting",
+   "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
+   "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge",
+   "feMergeNode", "feMorphology", "feOffset", "fePointLight", "feSpecularLighting",
+   "feSpotLight", "feTile", "feTurbulence", "filter", "g", "image", "line",
+   "linearGradient", "marker", "mask", "path", "pattern", "polygon", "polyline",
+   "radialGradient", "rect", "stop", "svg", "switch", "symbol", "text", "textPath",
+   "tref", "tspan", "use"]
+
+/-- `tref`'s `xlink:href`/`href`, a local IRI only (`#id`): the bare id, or
+`none` for anything else (a fragment-less or external reference, which usvg's
+own `svgtypes::IRI` parser also cannot resolve). -/
+def stripFragmentId (bs : ByteArray) : Option ByteArray :=
+  if bs.size ≥ 2 && bs.size ≤ maxIdBytes + 1 && at' bs 0 == 35 then some (bs.extract 1 bs.size)
+  else none
+
+/-- The event index of the first `.open_` anywhere in the document, of a tag
+name `svgtree` would keep (`tref`'s target can be any element, before or
+after it, but usvg's tree only holds recognised tag names to begin with —
+`resolve_tref_text` runs `parse_tag_name(node)?` before collecting anything),
+whose own `id` attribute is exactly `target`; `none` otherwise. usvg looks
+this up in the *original* XML tree, so a target inside `defs`, or one a
+`<switch>`/`display:none` ancestor would otherwise hide from rendering, still
+resolves — matching that means searching the raw event stream here rather
+than any id table `interpret`'s main walk builds while it decides what is
+actually drawn. -/
+def findById (events : Array Xml.Event) (target : ByteArray) : Option Nat := Id.run do
+  for j in [0:events.size] do
+    match events.getD j default with
+    | .open_ nm attrs => if svgTagNames.contains nm && attr attrs "id" == some target then return some j
+    | _ => pure ()
+  return none
+
+/-- Every character-data byte under the element opened at `events[openIdx]`,
+concatenated across all descendants regardless of nesting (`tref`'s "all
+character data within the referenced element, including character data
+enclosed within additional markup, will be rendered" — usvg just filters the
+subtree for text nodes, so a `<tspan>` or any other child contributes its text
+but not itself). -/
+def collectText (events : Array Xml.Event) (openIdx : Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.empty
+  let mut depth : Nat := 1
+  for j in [openIdx + 1 : events.size] do
+    if depth == 0 then break
+    match events.getD j default with
+    | .open_ _ _ => depth := depth + 1
+    | .close => depth := depth - 1
+    | .text bs => out := out.append bs
+  return out
+
 /-- Turn the `<text>` element opened at `events[idx]` into shapes.
 
 The subtree is walked here rather than by `interpret`'s main loop because text
@@ -2116,9 +2174,14 @@ single branch.
 
 `applyEff` is `interpret`'s own four-layer cascade, passed in so `tspan`
 styling goes through exactly the same CSS resolution as everything else.
-Elements other than `tspan` (and `a`, which SVG says to treat as a `tspan`
-here) are dropped together with their character data, as usvg's tree builder
-does — that covers `textPath` and `tref`, which this task does not support.
+`tref` is converted to a `tspan` the same way, plus one synthetic text node
+resolved from its `href` (`stripFragmentId`/`findById`/`collectText` above);
+its own children, if any, are dropped unread, exactly as usvg drops them once
+it has taken the tref's own attributes (`with-a-title-child.svg`,
+`with-text.svg`).  Elements other than `tspan`, `a` (which SVG says to treat
+as a `tspan` here) and `tref` are dropped together with their character data,
+as usvg's tree builder does — that covers `textPath`, which this task does
+not support.
 
 Only `Text.SpanProps` and an index into a local table of resolved styles cross
 into `LeanSvg/Text.lean`; the styles come back attached to whole runs of
@@ -2144,6 +2207,39 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   let mut chStack : Array (Array Css.ElemInfo) := #[chain]
   let mut ccStack : Array Nat := #[0]
   let mut rendStack : Array Bool := #[true]
+  -- `resolve_decoration`: *whether* a kind is drawn at all is `.any` over
+  -- every ancestor's own value, all the way to the document root
+  -- (`text-decoration/all-types-nested.svg` sets it on two `<g>`s, neither of
+  -- them `<text>` or a `tspan`). *Which* style colours it is a separate,
+  -- shorter search: nearest declaring element from this run up, but never
+  -- past `<text>` itself — usvg's loop condition is "declares it, OR is the
+  -- `<text>` element", so an outer `<g>` that made the kind active is never
+  -- consulted for colour if `<text>` (or a tspan below it) does not also
+  -- redeclare it (`text-decoration/style-resolving-2.svg`: `<g>` sets
+  -- line-through and fill=stroke=red, but the line comes out in `<text>`'s
+  -- own yellow/green, not red).  Shared by every run, whether its text comes
+  -- from a `.text` node or a `tref`'s resolved target.
+  let resolveDecor := fun (styles : Array Style) (stk : Array Style) => Id.run do
+    let mut styles := styles
+    let underlineActive := stk.any (·.ownUnderline)
+    let overlineActive := stk.any (·.ownOverline)
+    let throughActive := stk.any (·.ownLineThrough)
+    let mut underlineIdx : Option Nat := none
+    let mut overlineIdx : Option Nat := none
+    let mut throughIdx : Option Nat := none
+    if underlineActive || overlineActive || throughActive then
+      for k in [0:stk.size] do
+        let j := stk.size - 1 - k
+        if j ≥ ancestors.size then
+          let s := stk.getD j default
+          let atText := j == ancestors.size
+          if underlineActive && underlineIdx.isNone && (s.ownUnderline || atText) then
+            styles := styles.push s; underlineIdx := some (styles.size - 1)
+          if overlineActive && overlineIdx.isNone && (s.ownOverline || atText) then
+            styles := styles.push s; overlineIdx := some (styles.size - 1)
+          if throughActive && throughIdx.isNone && (s.ownLineThrough || atText) then
+            styles := styles.push s; throughIdx := some (styles.size - 1)
+    return (styles, underlineIdx, overlineIdx, throughIdx)
   let mut skip : Nat := 0
   let mut depth : Nat := 1
   for j in [idx + 1 : events.size] do
@@ -2176,42 +2272,49 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         -- while its characters keep their slots in the position lists.
         rendStack := rendStack.push ((rendStack.back?.getD true) && !isDisplayNone attrs)
         evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
+      else if nm == "tref" then
+        -- `resolve_tref_text`: `href` (falling back to `xlink:href`) must be
+        -- a bare local IRI; the target is looked up by id anywhere in the
+        -- document and every character-data byte under it concatenated.
+        -- Converted to a `tspan` carrying the tref's own attributes plus one
+        -- synthetic text node — its own children are never visited at all
+        -- (`with-a-title-child.svg`, `with-text.svg`), which is why this
+        -- branch ends by skipping them exactly like an unrecognised element.
+        let href := match attr attrs "href" with
+          | some v => some v
+          | none => attr attrs "xlink:href"
+        let targetText : ByteArray :=
+          match href.bind stripFragmentId with
+          | some tid => match findById events tid with
+            | some tIdx => collectText events tIdx
+            | none => ByteArray.empty
+          | none => ByteArray.empty
+        let isFirst := ccStack.back?.getD 0 == 0
+        ccStack := match ccStack.back? with
+          | some c => ccStack.pop.push (c + 1)
+          | none => ccStack
+        let info := Css.buildElemInfo "tspan" (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let ch := (chStack.back?.getD #[]).push info
+        let st := applyEff (stStack.back?.getD default) attrs ch
+        evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
+        if targetText.size > 0 then
+          let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles (stStack.push st)
+          styles := styles'.push st
+          let selfIdx := styles.size - 1
+          evs := evs.push
+            (Text.Ev.text targetText st.spacePreserve selfIdx
+              { spanPropsOf st with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
+                                     throughIdx := throughIdx }
+              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && st.fontAvailable))
+        evs := evs.push .close
+        skip := skip + 1
       else skip := skip + 1
     | .text bs =>
       if skip == 0 then
         let st := stStack.back?.getD default
-        styles := styles.push st
+        let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles stStack
+        styles := styles'.push st
         let selfIdx := styles.size - 1
-        -- `resolve_decoration`: *whether* a kind is drawn at all is `.any`
-        -- over every ancestor's own value, all the way to the document root
-        -- (`text-decoration/all-types-nested.svg` sets it on two `<g>`s,
-        -- neither of them `<text>` or a `tspan`). *Which* style colours it is
-        -- a separate, shorter search: nearest declaring element from this
-        -- run up, but never past `<text>` itself — usvg's loop condition is
-        -- "declares it, OR is the `<text>` element", so an outer `<g>` that
-        -- made the kind active is never consulted for colour if `<text>` (or
-        -- a tspan below it) does not also redeclare it
-        -- (`text-decoration/style-resolving-2.svg`: `<g>` sets line-through
-        -- and fill=stroke=red, but the line comes out in `<text>`'s own
-        -- yellow/green, not red).
-        let underlineActive := stStack.any (·.ownUnderline)
-        let overlineActive := stStack.any (·.ownOverline)
-        let throughActive := stStack.any (·.ownLineThrough)
-        let mut underlineIdx : Option Nat := none
-        let mut overlineIdx : Option Nat := none
-        let mut throughIdx : Option Nat := none
-        if underlineActive || overlineActive || throughActive then
-          for k in [0:stStack.size] do
-            let j := stStack.size - 1 - k
-            if j ≥ ancestors.size then
-              let s := stStack.getD j default
-              let atText := j == ancestors.size
-              if underlineActive && underlineIdx.isNone && (s.ownUnderline || atText) then
-                styles := styles.push s; underlineIdx := some (styles.size - 1)
-              if overlineActive && overlineIdx.isNone && (s.ownOverline || atText) then
-                styles := styles.push s; overlineIdx := some (styles.size - 1)
-              if throughActive && throughIdx.isNone && (s.ownLineThrough || atText) then
-                styles := styles.push s; throughIdx := some (styles.size - 1)
         evs := evs.push
           (Text.Ev.text bs st.spacePreserve selfIdx
             { spanPropsOf st with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
@@ -2565,16 +2668,6 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               -- child.svg`: `switch` skips straight past `<random/>` to the
               -- next real child) — every other SVG 1.1 element name usvg
               -- knows still is, whether or not *we* render it.
-              let svgTagNames : List String :=
-                ["a", "circle", "clipPath", "defs", "ellipse", "feBlend", "feColorMatrix",
-                 "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting",
-                 "feDisplacementMap", "feDistantLight", "feDropShadow", "feFlood", "feFuncA",
-                 "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge",
-                 "feMergeNode", "feMorphology", "feOffset", "fePointLight", "feSpecularLighting",
-                 "feSpotLight", "feTile", "feTurbulence", "filter", "g", "image", "line",
-                 "linearGradient", "marker", "mask", "path", "pattern", "polygon", "polyline",
-                 "radialGradient", "rect", "stop", "svg", "switch", "symbol", "text", "textPath",
-                 "tref", "tspan", "use"]
               let target : Option Nat := Id.run do
                 let mut depth : Nat := 0
                 for j in [idx + 1 : events.size] do
