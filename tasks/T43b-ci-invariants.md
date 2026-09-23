@@ -261,16 +261,28 @@ GitHub before finishing:
    the split `actions/cache/restore@v4` + `actions/cache/save@v4`, with the
    save step given `if: always() && cache-hit != 'true'` — recommended
    explicitly by that action.yml's own deprecation note on `save-always`.
-   Re-validated with `actionlint` (clean). **Not yet re-run on GitHub** as of
-   writing this line — the fix is in the pushed commit; a third push will
-   show whether the resvg cache actually saves this time (expect it to, but
-   a job ending in the same `run_tests.py` failure is exactly the condition
-   that broke it originally, so this is the case that most needs checking).
+   **Verified on run 3**
+   (https://github.com/rowancallahan/lean-svg/actions/runs/35806244198):
+   `run_tests.py` failed with the same 23/27 table as before (`tests` job
+   conclusion: failure, exactly as expected), and this time `Save
+   resvg/usvg cache` ran to completion (`conclusion: success`, not
+   `skipped`) immediately after — the fix holds under the exact condition
+   that broke it. The `elan`/`.lake` `Save` steps correctly show `skipped`
+   in both jobs here, because their restores were already exact hits
+   (`cache-hit == 'true'`, so nothing new to save) — that's the
+   `cache-hit != 'true'` guard doing its job, not a regression. A fourth
+   push would show the resvg install itself dropping from ~75-85s to a
+   cache-restore download, but that's now a restore-path question, not a
+   save-path one, and the save path is what was broken and is now
+   confirmed fixed.
 
 ### Not done / deferred
 
 - Did not open a pull request, per the T43b amendment overriding T43's
   original instruction.
-- Have not yet confirmed the resvg/usvg cache actually populates and is
-  reused across runs now that it uses restore/save instead of the combined
-  action (see above) — that requires a further push past this fix.
+- Have not seen a run where the resvg/usvg *restore* actually hits (every
+  run so far has been a genuine miss, by construction — run 1 cold, run 2
+  because run 1 never saved, run 3 because run 2 never saved either). The
+  save path is now confirmed working (above), so the next push onto this
+  branch should show a real restore hit and the `cargo install` step
+  dropping close to 0s; worth a glance if this branch gets touched again.
