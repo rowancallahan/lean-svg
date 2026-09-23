@@ -1,6 +1,7 @@
 import LeanSvg.Mask
 import LeanSvg.Clip
 import LeanSvg.FilterApply
+import LeanSvg.FilterFrame
 import LeanSvg.Marker
 import LeanSvg.Filter.ImageRender
 import LeanSvg.PatternRender
@@ -497,6 +498,9 @@ structure Layer where
   cache : Clip.Cache := {}
   lx : Int := 0
   ly : Int := 0
+  /-- T90: set for a filter layer in a local (rotated/skewed) frame, which is
+  resampled back into the enclosing frame instead of cropped. -/
+  back : Option FilterFrame.Back := none
 deriving Inhabited
 
 /-- Largest filter layer, in pixels.  resvg lets the region reach 2× the canvas
@@ -667,6 +671,44 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
           -- size past every edge) — and, past `maxFilterPixels`, to the canvas
           -- being painted, which bounds it by what already exists.
           let dev := curRoot.mul g.filterCtm
+          -- T90: only where the axis-aligned layer would differ: a filter that
+          -- is `sensitive`, or a region that cuts the content (its local box,
+          -- found with a margin `m` around the region, reaches past it).
+          let cuts := fun (p : FilterFrame.Plan) =>
+            let m := p.w + p.h
+            match nodeBox ((Mat.translate (m * 256) (m * 256)).mul p.root) nodes i
+                { x0 := 0, y0 := 0, x1 := p.w + 3 * m, y1 := p.h + 3 * m } with
+            | none => false
+            | some c => c.x0 + 2 < m || c.y0 + 2 < m || c.x1 > m + p.w + 2 || c.y1 > m + p.h + 2
+          match (FilterFrame.plan curClip.vx curClip.vy dev g.filterCtm g.filters maxFilterPixels).filter
+              (fun p => FilterFrame.sensitive g.filters || cuts p) with
+          | some p =>
+            -- T90: rotated or skewed, the layer is the filter's user space.
+            let nprims := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
+            filterWork := filterWork + nprims * p.w * p.h
+            if nprims * p.w * p.h > maxFilterWork || filterWork > maxFilterTotal then
+              err := some "filter budget"
+              break
+            if livePixels + p.w * p.h > maxLayerPixels then
+              err := some "layer budget"
+              break
+            livePixels := livePixels + p.w * p.h
+            stack := stack.push
+              { cv := cur, ox := curOx, oy := curOy, clip := curClip,
+                opacity := opacityF32 g.opacity, opacityQ := opacityQ g.opacity,
+                blend := g.blend, clips := chain, masks := steps, maskMat,
+                filters := g.filters, fts := p.fts, root := curRoot,
+                fw := curW, fh := curH, cache, back := some p.back }
+            passStack := passStack.push false
+            cur := Canvas.new p.w p.h none
+            curRoot := p.root
+            curW := p.w
+            curH := p.h
+            curClip := { curClip with x0 := 0, y0 := 0, x1 := p.w, y1 := p.h, vx := 0, vy := 0 }
+            curOx := 0
+            curOy := 0
+            cache := {}
+          | none =>
           match filterBox dev g.filters with
           | none => skipDepth := 1
           | some (fx0, fy0, fx1, fy1) =>
@@ -820,11 +862,16 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
             if parent.filters.isEmpty then some (cur, curOx, curOy, curClip)
             else
               let out := fs.foldl (fun c f => FilterApply.run f parent.fts c) cur
+              let put := fun (c : Canvas) (ax ay : Nat) =>
+                (c, ax, ay, { parent.clip with x0 := ax, y0 := ay, x1 := ax + c.w, y1 := ay + c.h })
+              match parent.back with
+              | some b =>
+                (FilterFrame.resample b out parent.ox parent.oy parent.cv.w parent.cv.h).map
+                  fun (c, ax, ay) => put c ax ay
+              | none =>
               (cropTo out (parent.lx - parent.ox) (parent.ly - parent.oy)
                   parent.cv.w parent.cv.h).map fun (c, nx, ny) =>
-                let ax := nx + parent.ox
-                let ay := ny + parent.oy
-                (c, ax, ay, { parent.clip with x0 := ax, y0 := ay, x1 := ax + c.w, y1 := ay + c.h })
+                put c (nx + parent.ox) (ny + parent.oy)
           if !parent.filters.isEmpty then
             curRoot := parent.root
             curW := parent.fw
