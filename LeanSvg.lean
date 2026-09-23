@@ -8,6 +8,7 @@ import LeanSvg.Canvas
 import LeanSvg.Png
 import LeanSvg.Xml
 import LeanSvg.Css
+import LeanSvg.TextPath
 import LeanSvg.Text
 import LeanSvg.Svg
 import LeanSvg.Clip
