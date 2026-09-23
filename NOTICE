@@ -12,7 +12,7 @@ Embedded fonts — all SIL Open Font License 1.1, subsetted (and variable fonts
   pinned to one static instance), which the OFL permits. Embedded in the
   binary as LeanSvg/Fonts/*.lean; names, versions, sizes and sources are in
   LeanSvg/Fonts/README.md, licence texts next to them.
-  Noto Sans Regular/Bold/Italic 2.000 —
+  Noto Sans Regular/Bold/Italic/Thin/Light/Black 2.000 —
     https://github.com/notofonts/latin-greek-cyrillic
     Copyright 2015 Google Inc. All Rights Reserved. Noto is a trademark of
     Google Inc.; trademarks are not licensed under the OFL. Noto declares no
