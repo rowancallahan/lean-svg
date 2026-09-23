@@ -1066,98 +1066,111 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       -- while chunk starts and `x`/`y` use the position among *all*
       -- characters.  `rotate-and-display-none.svg` pins this down.
       let p := pos.getD (a + c.off) {}
-      let mut cmds : Array PathCmd := #[]
-      -- T55: where a decoration run anchors (the pen before this advance)
-      let mut ox : Int := chunkX + x
-      let mut oy : Int := chunkY + y
-      if flow.isSome then
-        -- off the path: hidden, and its `dy` is not accumulated either
-        match nrm.getD q none with
-        | none => pure ()
-        | some n =>
-          -- `y` accumulates `dy`, applied across the tangent
-          y := y + p.dy * 256
-          pathEnd := (n.x + c.adv, n.y)
-          if !c.dropped then
-            match fonts.getD c.font none, fonts.getD c.base none with
-            | some f, some fb =>
-              -- T(n) · R(tangent) · T(-width/2, dy + baseline-shift) · R(rotate)
-              --
-              -- T54's `resolveBaseline16` gives the same pen offset the
-              -- horizontal branch adds straight into `gy` (unrotated by the
-              -- character's own `rotate`); here the perpendicular-to-path
-              -- axis plays that role, so it folds into `y` exactly like `dy`
-              -- does, before the tangent rotation -- not into the
-              -- accumulator itself (`y` stays a pure `dy` running sum for
-              -- the next character), just this glyph's own translation.
-              let pr := c.props
-              let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
-                pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
-              let yEff := y + bshift
-              let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
-                else sinCos16 (degToRad16 p.rot)
-              let hw := Int.ediv c.width 2
-              let la := Int.ediv (n.cos * cr - n.sin * sr) 65536
-              let lb := Int.ediv (n.sin * cr + n.cos * sr) 65536
-              let lc := Int.ediv (-(n.cos * sr) - n.sin * cr) 65536
-              let tox := n.x + Int.ediv (-(n.cos * hw) - n.sin * yEff) 65536
-              let toy := n.y + Int.ediv (n.cos * yEff - n.sin * hw) 65536
-              let lsa := Int.ediv (la * c.sx) 65536
-              let lsb := Int.ediv (lb * c.sx) 65536
-              cmds := clusterCmds fonts f c lsa lsb lc la tox toy
-              let adv16 := if c.adv ≤ 0 then 65536 else c.adv
-              let (top16, bot16) := metricTopBot f c.props.size
-              for pt in metricCorners lsa lsb lc la tox toy adv16 top16 bot16 do
-                mbox := Box.cover mbox pt
-                sbox := coverAt sbox c.styleIdx pt
-            | _, _ => pure ()
-      else
-        if vertical then
-          y := y - p.dx * 256
-          x := x + p.dy * 256
-          adv := adv + p.dy * 256
-        else
-          x := x + p.dx * 256
-          y := y + p.dy * 256
-          adv := adv + p.dx * 256
-        ox := chunkX + x
-        oy := chunkY + y
-        if !c.dropped then
-          match fonts.getD c.font none, fonts.getD c.base none with
-          | some f, some fb =>
-            let (rot, gx, gy) :=
-              if vertical then
-                let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
-                -- centers the (rotated-sideways) glyph on the column, usvg's
-                -- `apply_writing_mode` shift, before the 90° chunk rotation
-                let half : Int := Int.ediv ((f.ascent + f.descent) * (c.props.size * 256))
-                  (2 * upem)
-                (p.rot + Fx.ofNat 90, chunkX - (y + half), chunkY + Int.ediv (x * c.sx) 65536)
-              else
-                -- T54 `resolve_baseline`: a per-span vertical offset
-                -- (`dominant-baseline`/`alignment-baseline`/`baseline-shift`),
-                -- added to the pen position only, never to `x`/`y`/`lastX`/`lastY`.
+      -- T98: this cluster's placement runs in its own `Id.run` so the
+      -- closures it compiles to never capture the run buffers below
+      -- (`curCmds`, ...): a captured buffer is shared, and every cluster's
+      -- `curCmds ++ cmds` then copied the whole run (quadratic per chunk).
+      let (cmds, ox, oy, x', y', adv', pathEnd', mbox', sbox') := Id.run do
+        let mut x := x
+        let mut y := y
+        let mut adv := adv
+        let mut pathEnd := pathEnd
+        let mut mbox := mbox
+        let mut sbox := sbox
+        let mut cmds : Array PathCmd := #[]
+        -- T55: where a decoration run anchors (the pen before this advance)
+        let mut ox : Int := chunkX + x
+        let mut oy : Int := chunkY + y
+        if flow.isSome then
+          -- off the path: hidden, and its `dy` is not accumulated either
+          match nrm.getD q none with
+          | none => pure ()
+          | some n =>
+            -- `y` accumulates `dy`, applied across the tangent
+            y := y + p.dy * 256
+            pathEnd := (n.x + c.adv, n.y)
+            if !c.dropped then
+              match fonts.getD c.font none, fonts.getD c.base none with
+              | some f, some fb =>
+                -- T(n) · R(tangent) · T(-width/2, dy + baseline-shift) · R(rotate)
+                --
+                -- T54's `resolveBaseline16` gives the same pen offset the
+                -- horizontal branch adds straight into `gy` (unrotated by the
+                -- character's own `rotate`); here the perpendicular-to-path
+                -- axis plays that role, so it folds into `y` exactly like `dy`
+                -- does, before the tangent rotation -- not into the
+                -- accumulator itself (`y` stays a pure `dy` running sum for
+                -- the next character), just this glyph's own translation.
                 let pr := c.props
                 let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
                   pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
-                (p.rot, chunkX + Int.ediv (x * c.sx) 65536, chunkY + y + bshift)
-            -- `spacingAndGlyphs` (T93): the chunk-local scale `S` sits outside the
-            -- glyph's own rotation, `S · R(rotate)` (then the 90° column turn)
-            let (la, lb, lc, ld) :=
-              if c.sx == 65536 then rotMat16 rot
-              else
-                let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int)) else sinCos16 (degToRad16 p.rot)
-                if vertical then (-sn, Int.ediv (cs * c.sx) 65536, -cs, -(Int.ediv (sn * c.sx) 65536))
-                else (Int.ediv (cs * c.sx) 65536, sn, -(Int.ediv (sn * c.sx) 65536), cs)
-            cmds := clusterCmds fonts f c la lb lc ld gx gy
-            let adv16 := if c.adv ≤ 0 then 65536 else c.adv
-            let (top16, bot16) := metricTopBot f c.props.size
-            for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
-              mbox := Box.cover mbox pt
-              sbox := coverAt sbox c.styleIdx pt
-          | _, _ => pure ()
-        x := x + c.adv
-        adv := adv + c.adv
+                let yEff := y + bshift
+                let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
+                  else sinCos16 (degToRad16 p.rot)
+                let hw := Int.ediv c.width 2
+                let la := Int.ediv (n.cos * cr - n.sin * sr) 65536
+                let lb := Int.ediv (n.sin * cr + n.cos * sr) 65536
+                let lc := Int.ediv (-(n.cos * sr) - n.sin * cr) 65536
+                let tox := n.x + Int.ediv (-(n.cos * hw) - n.sin * yEff) 65536
+                let toy := n.y + Int.ediv (n.cos * yEff - n.sin * hw) 65536
+                let lsa := Int.ediv (la * c.sx) 65536
+                let lsb := Int.ediv (lb * c.sx) 65536
+                cmds := clusterCmds fonts f c lsa lsb lc la tox toy
+                let adv16 := if c.adv ≤ 0 then 65536 else c.adv
+                let (top16, bot16) := metricTopBot f c.props.size
+                for pt in metricCorners lsa lsb lc la tox toy adv16 top16 bot16 do
+                  mbox := Box.cover mbox pt
+                  sbox := coverAt sbox c.styleIdx pt
+              | _, _ => pure ()
+        else
+          if vertical then
+            y := y - p.dx * 256
+            x := x + p.dy * 256
+            adv := adv + p.dy * 256
+          else
+            x := x + p.dx * 256
+            y := y + p.dy * 256
+            adv := adv + p.dx * 256
+          ox := chunkX + x
+          oy := chunkY + y
+          if !c.dropped then
+            match fonts.getD c.font none, fonts.getD c.base none with
+            | some f, some fb =>
+              let (rot, gx, gy) :=
+                if vertical then
+                  let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+                  -- centers the (rotated-sideways) glyph on the column, usvg's
+                  -- `apply_writing_mode` shift, before the 90° chunk rotation
+                  let half : Int := Int.ediv ((f.ascent + f.descent) * (c.props.size * 256))
+                    (2 * upem)
+                  (p.rot + Fx.ofNat 90, chunkX - (y + half), chunkY + Int.ediv (x * c.sx) 65536)
+                else
+                  -- T54 `resolve_baseline`: a per-span vertical offset
+                  -- (`dominant-baseline`/`alignment-baseline`/`baseline-shift`),
+                  -- added to the pen position only, never to `x`/`y`/`lastX`/`lastY`.
+                  let pr := c.props
+                  let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
+                    pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
+                  (p.rot, chunkX + Int.ediv (x * c.sx) 65536, chunkY + y + bshift)
+              -- `spacingAndGlyphs` (T93): the chunk-local scale `S` sits outside the
+              -- glyph's own rotation, `S · R(rotate)` (then the 90° column turn)
+              let (la, lb, lc, ld) :=
+                if c.sx == 65536 then rotMat16 rot
+                else
+                  let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int)) else sinCos16 (degToRad16 p.rot)
+                  if vertical then (-sn, Int.ediv (cs * c.sx) 65536, -cs, -(Int.ediv (sn * c.sx) 65536))
+                  else (Int.ediv (cs * c.sx) 65536, sn, -(Int.ediv (sn * c.sx) 65536), cs)
+              cmds := clusterCmds fonts f c la lb lc ld gx gy
+              let adv16 := if c.adv ≤ 0 then 65536 else c.adv
+              let (top16, bot16) := metricTopBot f c.props.size
+              for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
+                mbox := Box.cover mbox pt
+                sbox := coverAt sbox c.styleIdx pt
+            | _, _ => pure ()
+          x := x + c.adv
+          adv := adv + c.adv
+        return (cmds, ox, oy, x, y, adv, pathEnd, mbox, sbox)
+      x := x'; y := y'; adv := adv'; pathEnd := pathEnd'; mbox := mbox'; sbox := sbox'
       let styleChanged := curStyle != some c.styleIdx
       let shiftBreak := p.dx != 0 || p.dy != 0 || p.rot != 0
       if styleChanged then
