@@ -119,3 +119,14 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## Addendum (integrator, after merging T98)
+
+- Generic `sans-serif` (and `system-ui`) is a real match for Noto Sans, not
+  a fallback: resolve it without a warning. `serif`, `monospace`, `cursive`,
+  `fantasy` and unknown names keep T98's fallback + warning (no such faces
+  are embedded).
+- T98 made 10 resvg-rated-correct files go pass→fail because the harness's
+  resvg run finds no font for generic families and draws nothing; see
+  T98's report. Score those under T100's criteria (`tests/score_criteria.py`)
+  and report both numbers.
