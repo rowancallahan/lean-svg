@@ -644,12 +644,9 @@ rotation angle and a single pen position:
   `(ascent + descent) / 2` along local `y` before the rotation
   (`apply_writing_mode`'s "could not find a spec that explains this" shift,
   applied to every "Rotated" — i.e. not `Vertical_Orientation=Upright` —
-  character); Noto Sans is Latin-only and every codepoint outside the ranges
-  `unicode-vo` lists as `Upright` defaults to `Rotated` (all of Basic Latin
-  is: the table's lowest entry is U+00A7), so every glyph this renderer can
-  ever place in vertical text takes this branch and the `Upright` branch
-  (which counter-rotates a CJK-style glyph back to standing upright) is not
-  implemented — it would be dead code with no character able to reach it;
+  character); an `Upright` one (T96, `LeanSvg/VertOrient.lean`: CJK, kana,
+  hangul, ...) instead counter-rotates back to standing upright, centred on
+  the column (see the `upright` branch below);
 * the local-space point `(x, y)` a glyph would sit at in the horizontal
   layout maps to final position `(chunkX - y, chunkY + x)`, i.e. `(x, y)`
   rotated 90° about the origin (usvg: `rotate(90)` is `x' = -y, y' = x`)
