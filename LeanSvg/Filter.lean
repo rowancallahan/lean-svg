@@ -3,6 +3,7 @@ import LeanSvg.Xml
 import LeanSvg.Fixed
 import LeanSvg.Geom
 import Std.Data.HashMap
+import LeanSvg.Filter.Lighting
 
 /-!
 # Filters (T51): the model, the `<filter>` pre-pass and usvg's resolution
@@ -183,6 +184,7 @@ inductive Kind where
   | composite (i1 i2 : Input) (op : CompOp)
   | colorMatrix (i : Input) (k : CMKind)
   | transfer (i : Input) (fr fg fb fa : TF)
+  | lighting (i : Input) (p : Lighting.Params)
 deriving Inhabited
 
 /-- A rectangle in user space, `Fx`; `w` and `h` positive (`NonZeroRect`). -/
@@ -477,13 +479,13 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
   name == "feTile" || name == "feImage" || name == "feConvolveMatrix" ||
-  name == "feMorphology" || name == "feDisplacementMap" || name == "feTurbulence" ||
-  name == "feDiffuseLighting" || name == "feSpecularLighting"
+  name == "feMorphology" || name == "feDisplacementMap" || name == "feTurbulence"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
-  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix"
+  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
+  name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -677,6 +679,9 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
         | none => pure ()
     return some (.transfer inp (fs.getD 0 .identity) (fs.getD 1 .identity)
       (fs.getD 2 .identity) (fs.getD 3 .identity))
+  | "feDiffuseLighting" | "feSpecularLighting" =>
+    some <| (Lighting.convert (p.name == "feSpecularLighting") (fun as n => (attr as n).bind f32All) a
+      (prop a "lighting-color") p.children p.color P.color).elim (.flood 0 0 0 0) (.lighting inp)
   | _ => none
 
 /-- `resolve_primitive_region`.  Coordinates are `try_convert_length`s in

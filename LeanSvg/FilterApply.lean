@@ -526,6 +526,9 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
     | _ => Img.of (pdComposite op (drawOver (Canvas.new rw rh none) b 0 0) a) lin
   | .colorMatrix i m => Img.of (colorMatrix m ((inp i).into lin).cv) lin
   | .transfer i fr fg fb fa => Img.of (transfer fr fg fb fa ((inp i).into lin).cv) lin
+  -- `inp .source` carries the filter region's origin in `rx`/`ry`.
+  | .lighting i lp =>
+    Img.of (Lighting.apply lp sinCosF32 ts (inp .source).rx (inp .source).ry rw rh (inp i).cv) lin
 
 /-- `filter::apply`: run `f` on the layer `src`, whose user space maps to the
 layer's pixels by `ts`.  An invalid region clears the layer, as resvg does. -/
