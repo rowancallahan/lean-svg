@@ -106,3 +106,68 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+Matches usvg 0.48.1 `converter.rs::convert_path` and `style.rs::convert_paint`.
+
+- **`paint-order` with markers.** `Svg.paintOrderOf` now returns svgtypes'
+  resolved three-kind order (the old `strokeBeforeFill` body, unchanged in
+  behaviour, is now a wrapper). A new inherited `Style.markersPos` records
+  where `markers` sits. `Marker.expandContentList` collects a shape's marker
+  instances first, then emits: markers → shape (pos 0); fill-only copy →
+  markers → stroke-only copy, order from `strokeFirst` (pos 1, a copy whose
+  paint is `none` is omitted, like `append_single_paint_path`); shape →
+  markers (pos 2, the old behaviour).
+- **`context-fill`/`context-stroke` in marker content.** Opening `<marker>`
+  resets the `use` context and sets `Style.markerCtx`; a `use` clears it.
+  Under `markerCtx`, a `context-*` fill/stroke is recorded as
+  `fillCtxKind`/`strokeCtxKind`. `expandContentList` carries a `MarkerCtx`
+  (referencing shape's fill/stroke, colour alpha dropped as usvg does) and
+  substitutes it into each content shape. A gradient/pattern gets a
+  `Doc.ctxUses` slot with the referencing shape's CTM and non-zero box
+  (`ContextElement::PathNode`), so T85's render path resolves it in that
+  space; a paint that is already context-bound keeps its outer slot (nested
+  markers / marker in `use`).
+
+No proof changes: `proofs/SizeBound.lean` only uses `Marker.expand` opaquely.
+Node budget still bounds output (a split shape costs one extra node).
+
+## Skipped
+
+- `fill="context-fill"` inherited from *outside* a `<marker>` (usvg inherits
+  the raw value and resolves it in marker context); we inherit the resolved
+  `none`. Not in the corpus.
+- A `<use>` inside marker content whose own fill is `context-*`: its children
+  see `none` instead of the marker path's paint. Not in the corpus.
+
+## Report
+
+Target files (resvg corpus, within-8): all 7 fail → pass at both widths
+(`paint-order/markers`, `markers-stroke`, `fill-markers-stroke`;
+`context/in-marker`, `in-nested-marker`, `in-nested-use-and-marker`,
+`with-gradient-on-marker`). Also improved (pass → pass, now 100%):
+`paint-order/stroke-markers`, `stroke-markers-fill`,
+`context/with-pattern-on-marker`, `context/on-shape-with-zero-size-bbox`.
+
+| dir (200 px) | before | after |
+|---|---|---|
+| painting/paint-order | 11/14 | 14/14 |
+| painting/context | 9/15 | 13/15 |
+| painting/marker | 62/63 | 62/63 |
+
+Remaining failures there are pre-existing and unchanged:
+`context/with-pattern-and-transform-in-use`,
+`context/with-pattern-objectBoundingBox-in-use`, `marker/marker-on-circle`.
+
+| whole suite | before | after |
+|---|---|---|
+| resvg, 100 px (`--fast`) | 1543 pass | 1550 pass (+7, 0 pass→fail) |
+| resvg, 200 px | 1567 pass | 1574 pass (+7, 0 pass→fail) |
+
+Only 11 files moved by >0.1 points, all upward. `lake build` clean, no new
+warnings; `check-theorems.sh`: `theorems ok`; `run_tests.py`: 58/67 (was
+57/66; new `95_marker_paint_order` passes, no score dropped);
+`run_adversarial.py` 143/143 clean; `run_tiles.py` 67/67 byte-identical.
