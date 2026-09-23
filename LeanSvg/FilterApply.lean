@@ -428,12 +428,12 @@ def iirBlur (sx sy : Nat) (cv : Canvas) : Canvas := Id.run do
     Canvas.pack (rs.getD i 0) (gs.getD i 0) (bs.getD i 0) (al.getD i 0)
   return { cv with px }
 
-/-- `resolve_std_dev`: device σ in 16.16 from user σ (`Fx`) and the transform's
-scale (16.16); `none` when both are zero (the input passes through), tiny σ
-dropped, and whether the box blur is used. -/
-def stdDev (sx sy : Fx) (scx scy : Nat) : Option (Nat × Nat × Bool) :=
-  let dx := (sx.toNat * scx) / 256
-  let dy := (sy.toNat * scy) / 256
+/-- `resolve_std_dev`: device σ in 16.16 from user σ (16.16) and the
+transform's scale (16.16); `none` when both are zero (the input passes
+through), tiny σ dropped, and whether the box blur is used. -/
+def stdDev (sx sy : Int) (scx scy : Nat) : Option (Nat × Nat × Bool) :=
+  let dx := (sx.toNat * scx) / 65536
+  let dy := (sy.toNat * scy) / 65536
   if dx == 0 && dy == 0 then none
   else
     -- 0.05 in 16.16 is 3276.8
@@ -462,8 +462,9 @@ def devRect (ts : Mat) (r : URect) : Option (Int × Int × Int × Int) :=
 def scaleOf (ts : Mat) : Nat × Nat :=
   (Nat.sqrt ((ts.a * ts.a + ts.c * ts.c).toNat), Nat.sqrt ((ts.b * ts.b + ts.d * ts.d).toNat))
 
-/-- `dx as i32` of a device length. -/
-def truncPx (v : Fx) : Int := Int.tdiv v 256
+/-- `(x * scale) as i32`: a 16.16 user length through a 16.16 scale, to whole
+device pixels, truncating toward zero. -/
+def truncPx (v : Int) (sc : Nat) : Int := Int.tdiv (v * sc) 4294967296
 
 /-! ## Running a filter -/
 
@@ -481,10 +482,10 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
   | .flood r g b a => Img.of (Canvas.new rw rh (some ⟨r, g, b, a⟩)) false
   | .offset i dx dy =>
     let im := inp i
-    let ddx := truncPx (Int.ediv (dx * scx) 65536)
-    let ddy := truncPx (Int.ediv (dy * scy) 65536)
+    let ddx := truncPx dx scx
+    let ddy := truncPx dy scy
     -- `approx_zero_ulps` on the f32 product: only a true zero passes through.
-    if Int.ediv (dx * scx) 65536 == 0 && Int.ediv (dy * scy) 65536 == 0 && dx == 0 && dy == 0 then im
+    if dx * scx == 0 && dy * scy == 0 then im
     else Img.of (drawOver (Canvas.new im.cv.w im.cv.h none) im.cv ddx ddy) im.lin
   | .blur i sx sy =>
     let im := inp i
@@ -493,8 +494,8 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
     | some (dx, dy, box) => Img.of (blur dx dy box (im.into lin).cv) lin
   | .dropShadow i dx dy sx sy r g b a =>
     let im := (inp i).into lin
-    let ddx := truncPx (Int.ediv (dx * scx) 65536)
-    let ddy := truncPx (Int.ediv (dy * scy) 65536)
+    let ddx := truncPx dx scx
+    let ddy := truncPx dy scy
     let sh0 := match stdDev sx sy scx scy with
       | none => im.cv
       | some (bx, by_, box) => blur bx by_ box im.cv

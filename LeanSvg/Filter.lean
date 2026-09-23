@@ -170,12 +170,14 @@ inductive CompOp where
 deriving Inhabited, Repr
 
 /-- A primitive's operation.  Lengths (`dx`, `stdDeviation`) are in the
-element's user space, already scaled by `primitiveUnits`, as usvg stores them. -/
+element's user space, already scaled by `primitiveUnits`, as usvg stores them,
+on the 16.16 grid: a bounding-box fraction like `0.01` times the box would
+lose a fifth of a percent on `Fx`'s. -/
 inductive Kind where
   | flood (r g b a : Nat)
-  | offset (i : Input) (dx dy : Fx)
-  | blur (i : Input) (sx sy : Fx)
-  | dropShadow (i : Input) (dx dy sx sy : Fx) (r g b a : Nat)
+  | offset (i : Input) (dx dy : Int)
+  | blur (i : Input) (sx sy : Int)
+  | dropShadow (i : Input) (dx dy sx sy : Int) (r g b a : Nat)
   | merge (ins : Array Input)
   | blend (i1 i2 : Input) (mode : BlendMode)
   | composite (i1 i2 : Input) (op : CompOp)
@@ -536,31 +538,54 @@ def floodOf (P : Parsers) (p : RawPrim) : Nat × Nat × Nat × Nat :=
   let op := Nat.min op P.opOne
   (c.r, c.g, c.b, (2 * c.a * op + P.opOne) / (2 * P.opOne))
 
-/-- `convert_std_dev_attr`: one or two non-negative numbers, anything else is
-`0 0`; scaled by the `primitiveUnits` box. -/
-def stdDevOf (v : Option ByteArray) (dflt : Fx × Fx) (scx scy : Fx) : Fx × Fx :=
-  let (a, b) := match v with
-    | none => (dflt.1 * 256, dflt.2 * 256)
-    | some raw =>
-      match parseNumberList16 (trim raw) with
-      | #[n] => (n, n)
-      | #[n, m] => (n, m)
-      | _ => (0, 0)
-  let a := if a < 0 then 0 else a
-  let b := if b < 0 then 0 else b
-  (Int.ediv (a * scx) 65536, Int.ediv (b * scy) 65536)
+/-- `round(±mant · 10^e · sc)` on the 16.16 grid, `sc` an `Fx` scale: a
+decimal literal times a `primitiveUnits` scale, rounded once. -/
+def decTimes (neg : Bool) (mant : Nat) (e : Int) (sc : Fx) : Int :=
+  let e := if e > 60 then 60 else if e < -60 then -60 else e
+  let num : Int := (mant : Int) * sc * 256
+  let v : Int := if e ≥ 0 then num * (10 ^ e.toNat : Nat)
+    else Int.ediv (2 * num + (10 ^ (-e).toNat : Nat)) (2 * (10 ^ (-e).toNat : Nat))
+  let lim := Fx.maxVal * 256
+  let v := if v > lim then lim else if v < -lim then -lim else v
+  if neg then -v else v
 
-/-- A plain-number attribute times a `primitiveUnits` scale (`Fx`), parsed on
-the 16.16 grid so that a bounding-box fraction like `0.01` keeps its digits. -/
-def numAttrScaled (attrs : Array Xml.Attr) (name : String) (dflt : Fx) (sc : Fx) : Fx :=
-  let v : Int := match attr attrs name with
-    | some raw =>
-      let t := trim raw
-      match parseNumber16 t 0 with
-      | some (v, j) => if j == t.size then v else dflt * 256
-      | none => dflt * 256
-    | none => dflt * 256
-  Int.ediv (v * sc) 65536
+/-- `convert_std_dev_attr`: one or two non-negative numbers (svgtypes'
+`NumberListParser`, which stops at the first unreadable item), anything else
+is `0 0`; scaled by the `primitiveUnits` box.  16.16 user units. -/
+def stdDevOf (v : Option ByteArray) (dflt : Fx × Fx) (scx scy : Fx) : Int × Int := Id.run do
+  match v with
+  | none => return (Int.ediv (dflt.1 * scx) 256 * 256, Int.ediv (dflt.2 * scy) 256 * 256)
+  | some raw =>
+    let t := trim raw
+    let mut ds : Array (Bool × Nat × Int) := #[]
+    let mut i := 0
+    for _ in [0:4] do
+      i := skipWsComma t i
+      if i ≥ t.size then break
+      match parseDecimal t i with
+      | some (neg, m, e, j) =>
+        ds := ds.push (neg, m, e)
+        i := j
+      | none => break
+    let pos := fun (d : Bool × Nat × Int) (sc : Fx) =>
+      let v := decTimes d.1 d.2.1 d.2.2 sc
+      if v < 0 then 0 else v
+    match ds with
+    | #[n] => return (pos n scx, pos n scy)
+    | #[n, m] => return (pos n scx, pos m scy)
+    | _ => return (0, 0)
+
+/-- A plain-number attribute times a `primitiveUnits` scale (`Fx`), exactly
+(`decTimes`); 16.16 user units. -/
+def numAttrScaled (attrs : Array Xml.Attr) (name : String) (dflt : Fx) (sc : Fx) : Int :=
+  let d : Int := Int.ediv (dflt * sc) 256 * 256
+  match attr attrs name with
+  | some raw =>
+    let t := trim raw
+    match parseDecimal t 0 with
+    | some (neg, m, e, j) => if j == t.size then decTimes neg m e sc else d
+    | none => d
+  | none => d
 
 def f32Attr (attrs : Array Xml.Attr) (name : String) (dflt : F32) : F32 :=
   ((attr attrs name).bind f32All).getD dflt
@@ -799,10 +824,10 @@ def colorAt (P : Parsers) (bs : ByteArray) (i : Nat) : Option (Rgba × Nat) :=
     else (P.color (bs.extract i j)).map (·, j)
   else none
 
-/-- A filter-function length (percentages rejected), as `Fx`. -/
-def fnLen (bs : ByteArray) (i : Nat) (fontSize : Fx) (nonNeg : Bool) : Option (Fx × Nat) :=
+/-- A filter-function length (percentages rejected), 16.16 user units. -/
+def fnLen (bs : ByteArray) (i : Nat) (fontSize : Fx) (nonNeg : Bool) : Option (Int × Nat) :=
   match lenAt bs i fontSize with
-  | some (.num v, j) => if nonNeg && v < 0 then none else some (Int.ediv v 256, j)
+  | some (.num v, j) => if nonNeg && v < 0 then none else some (v, j)
   | _ => none
 
 /-- `parse_generic_color_func`: `()` is 1, a number or percentage, never
@@ -886,7 +911,7 @@ def parseFn (P : Parsers) (bs : ByteArray) (i : Nat) (cx : ElemCtx) :
     k := skipWs bs e1
     let some (dy, e2) := fnLen bs k cx.fontSize false | return none
     k := skipWs bs e2
-    let mut sd : Fx := 0
+    let mut sd : Int := 0
     match fnLen bs k cx.fontSize true with
     | some (v, e) => sd := v; k := skipWs bs e
     | none => pure ()
