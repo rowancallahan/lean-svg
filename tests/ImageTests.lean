@@ -153,7 +153,7 @@ def jpegMagic : ByteArray := ⟨#[0xFF, 0xD8, 0xFF, 0xE0]⟩
 #guard fmtOf "image/jpg" pngMagic == .jpeg
 #guard fmtOf "text/plain" pngMagic == .png
 #guard fmtOf "text/plain" jpegMagic == .jpeg
-#guard fmtOf "image/gif" pngMagic == .other
+#guard fmtOf "image/gif" pngMagic == .gif
 #guard fmtOf "image/svg+xml" pngMagic == .other
 
 /-! ## end to end: `Png.encode` → `data:` → pixels → canvas -/
@@ -161,17 +161,17 @@ def jpegMagic : ByteArray := ⟨#[0xFF, 0xD8, 0xFF, 0xE0]⟩
 /-- 2×2 RGBA: red, half-transparent green / blue, transparent. -/
 def rgba2 : ByteArray := ⟨#[255, 0, 0, 255,  0, 255, 0, 128,  0, 0, 255, 255,  9, 9, 9, 0]⟩
 def uri2 : ByteArray := bytesOf ("data:image/png;base64," ++ b64 (Png.encode 2 2 rgba2))
-def pix2 : Option Pix := loadWith StoredPng.decode (fun _ => none) uri2
+def pix2 : Option Pix := loadWith StoredPng.decode (fun _ => none) (fun _ => none) uri2
 
 #guard (pix2.map (fun p => (p.w, p.h, p.px))) ==
   some (2, 2, #[Canvas.pack 255 0 0 255, Canvas.pack 0 128 0 128,
                 Canvas.pack 0 0 255 255, 0])
 -- The same bytes under a JPEG MIME type go to the JPEG decoder (here: none).
-#guard (loadWith StoredPng.decode (fun _ => none)
+#guard (loadWith StoredPng.decode (fun _ => none) (fun _ => none)
   (bytesOf ("data:image/jpeg;base64," ++ b64 (Png.encode 2 2 rgba2)))).isNone
 -- A decoder that breaks the size contract is caught, not trusted.
-#guard (loadWith (fun _ => some ⟨2, 2, ByteArray.empty⟩) (fun _ => none) uri2).isNone
-#guard (loadWith (fun _ => some ⟨0, 0, ByteArray.empty⟩) (fun _ => none) uri2).isNone
+#guard (loadWith (fun _ => some ⟨2, 2, ByteArray.empty⟩) (fun _ => none) (fun _ => none) uri2).isNone
+#guard (loadWith (fun _ => some ⟨0, 0, ByteArray.empty⟩) (fun _ => none) (fun _ => none) uri2).isNone
 
 /-- Draw the 2×2 image at natural size, translated by one pixel, onto a
 transparent 4×4 canvas through a full-coverage 2×2 mask at `(1, 1)`. -/
