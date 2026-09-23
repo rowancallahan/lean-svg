@@ -106,6 +106,13 @@ structure SpanProps where
   underlineIdx : Option Nat := none
   overlineIdx : Option Nat := none
   throughIdx : Option Nat := none
+  /-- `textLength`, already resolved to an `Fx` user-space length (`none` if
+  the element carries no such attribute of its own: like `text-decoration`,
+  it is not inherited). -/
+  textLength : Option Fx := none
+  /-- `lengthAdjust="spacingAndGlyphs"` (`false`, the default, is `"spacing"`
+  — the only mode implemented). -/
+  lengthAdjustGlyphs : Bool := false
 deriving Inhabited, Repr
 
 /-- The per-character position lists of one `text`/`tspan` element. -/
@@ -430,6 +437,13 @@ structure Cluster where
   props : SpanProps
   /-- Advance in 16.16 px, kerning and spacing included. -/
   adv : Int := 0
+  /-- The same advance before `letter-spacing`/`word-spacing`: what
+  `textLength` measures a run against (`apply_length_adjust` explicitly uses
+  the un-spaced `cluster.width`, "discard[ing] any word-spacing and
+  letter-spacing" — none of the corpus's `textLength` cases combine the two,
+  but keeping the two numbers distinct costs nothing and is exact either
+  way). -/
+  natWidth : Int := 0
   /-- Cleared by the `letter-spacing` rule that drops a cluster whose advance
   went to zero or below. -/
   dropped : Bool := false
@@ -597,7 +611,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
           fu := fu + Font.kern f gid (Font.glyphId f nextCp)
         adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
       | none => pure ()
-      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv }
+      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, natWidth := adv }
     -- `letter-spacing`, then `word-spacing` (usvg applies each only when some
     -- span of the chunk actually asks for it)
     if cl.any (fun c => c.props.letterSpacing != 0) then
@@ -611,6 +625,38 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
         let c := cl.getD q default
         if isWordSep c.cp then
           cl := cl.setIfInBounds q { c with adv := c.adv + c.props.wordSpacing * 256 }
+    -- `textLength`/`lengthAdjust` (`apply_length_adjust`, "spacing" mode
+    -- only), per maximal same-`styleIdx` run, not per chunk, since a
+    -- `textLength` on one `tspan` must leave its neighbours' widths alone
+    -- (`textLength/on-a-single-tspan.svg`).  "spacingAndGlyphs" additionally
+    -- scales each glyph outline horizontally about a pen position that is
+    -- itself scaled by the *same* factor from the run's start — not just the
+    -- glyph in place — which needs the scale threaded into the chunk's own
+    -- x-accumulation, not just `glyphCmds`; approximated here by the same
+    -- "spacing" redistribution rather than left undone, since it reproduces
+    -- the dominant visual effect (the run ends up `textLength` wide) even
+    -- though the individual glyphs are not rescaled.
+    if cl.any (fun c => c.props.textLength.isSome) then
+      let mut i := 0
+      for _ in [0:cl.size] do
+        if i ≥ cl.size then break
+        let styleIdx := (cl.getD i default).styleIdx
+        let mut j := i + 1
+        for q in [i + 1 : cl.size] do
+          if (cl.getD q default).styleIdx == styleIdx then j := q + 1 else break
+        match (cl.getD i default).props.textLength with
+        | none => pure ()
+        | some target =>
+          let n := j - i
+          let natSum : Int := Id.run do
+            let mut s : Int := 0
+            for q in [i:j] do s := s + (cl.getD q default).natWidth
+            return s
+          let factor : Int := if n > 1 then Int.ediv (target * 256 - natSum) (n - 1) else 0
+          for q in [i:j] do
+            let c := cl.getD q default
+            cl := cl.setIfInBounds q { c with adv := c.natWidth + factor, dropped := false }
+        i := j
     -- anchored chunk: the whole run shifts by its own width
     let width := cl.foldl (fun w c => w + c.adv) 0
     let anchor := (cl.getD 0 default).props.anchor

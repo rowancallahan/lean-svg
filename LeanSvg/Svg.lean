@@ -141,6 +141,13 @@ structure Style where
   ownUnderline : Bool := false
   ownOverline : Bool := false
   ownLineThrough : Bool := false
+  /-- `textLength`/`lengthAdjust`, *not* inherited for the same reason: a
+  `tspan`'s own `textLength` stretches only its own characters
+  (`textLength/on-a-single-tspan.svg`), so a plain reset-per-element `Style`
+  field is exactly what `Text.spanPropsOf` needs to hand `Text.layout` one
+  value per run. -/
+  ownTextLength : Option Fx := none
+  ownLengthAdjustGlyphs : Bool := false
   /-- `xml:space="preserve"`. -/
   spacePreserve : Bool := false
   /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
@@ -1445,6 +1452,15 @@ def parseTextLen (fontSize refLen : Fx) (bs : ByteArray) (i : Nat) : Option (Fx 
     else if at' bs j == 37 then some (Int.ediv (Fx.mul v refLen) 100, j + 1)
     else some (v, j)
 
+/-- `textLength`: one length, the whole (trimmed) attribute value, negative
+rejected (`n < 0` in usvg's parser turns `text_length` back into `None`
+rather than clamping it). -/
+def parseTextLength (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen t 0 with
+  | some (v, j) => if j == t.size && v ≥ 0 then some v else none
+  | none => none
+
 /-- A whitespace/comma separated list of such lengths.  Stops at the first
 item it cannot read, like `parseNumberList`. -/
 def parseTextLenList (fontSize refLen : Fx) (bs : ByteArray) : Array Fx := Id.run do
@@ -1691,6 +1707,10 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let has := fun (name : String) => (Bytes.splitTrim v 32).any (fun t => eqAscii t name)
     { st with ownUnderline := has "underline", ownOverline := has "overline",
               ownLineThrough := has "line-through" }
+  -- Negative values are ignored (`text_length = None`); `%` is a fraction of
+  -- the viewport width, the axis a left-to-right run measures along.
+  | "textLength" => { st with ownTextLength := parseTextLength st.fontSize st.pctRefW v }
+  | "lengthAdjust" => { st with ownLengthAdjustGlyphs := eqAscii (trim v) "spacingAndGlyphs" }
   | "font-style" =>
     let t := trim v
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
@@ -2091,7 +2111,9 @@ def spanPropsOf (st : Style) : Text.SpanProps :=
     letterSpacing := st.letterSpacing,
     wordSpacing := st.wordSpacing,
     kerning := st.textKerning,
-    anchor := st.textAnchor }
+    anchor := st.textAnchor,
+    textLength := st.ownTextLength,
+    lengthAdjustGlyphs := st.ownLengthAdjustGlyphs }
 
 /-- The per-character position lists of one `text`/`tspan` element, resolved
 against that element's own font size and the viewport. -/
@@ -2484,9 +2506,10 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     -- `clip-path` and the element's own transform are per-element too, and for
     -- the same reason (T20).
     let base := { base with clipRef := none, ownMat := Mat.identity }
-    -- `text-decoration` is per-element for the same reason (T55): see the
-    -- field doc on `Style`.
-    let base := { base with ownUnderline := false, ownOverline := false, ownLineThrough := false }
+    -- `text-decoration` and `textLength`/`lengthAdjust` are per-element for
+    -- the same reason (T55): see the field docs on `Style`.
+    let base := { base with ownUnderline := false, ownOverline := false, ownLineThrough := false,
+                            ownTextLength := none, ownLengthAdjustGlyphs := false }
     let early (n : String) := n == "color" || n == "transform-origin"
     -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
     -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and
