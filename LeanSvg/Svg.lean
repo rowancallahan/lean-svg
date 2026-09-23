@@ -9,6 +9,7 @@ import LeanSvg.Use
 import LeanSvg.Filter
 import LeanSvg.Image
 import LeanSvg.SvgImage
+import LeanSvg.Units
 import Std.Data.HashMap
 
 /-!
@@ -151,8 +152,9 @@ structure Style where
   `rem` resolves against (SVG2/CSS Values, always the root regardless of any
   element's local `font-size`), set once in `interpret`'s `applyEffective`
   when it processes the root element itself and inherited unchanged by every
-  descendant after that, unlike `fontSize`. -/
-  rootFontSize : Fx := Fx.ofNat 12
+  descendant after that, unlike `fontSize`.  T92: it also carries the output
+  canvas size the viewport units (`vw`, ...) resolve against (`Units`). -/
+  rootFontSize : Units.RootLen := {}
   /-- Numeric CSS `font-weight` after `bolder`/`lighter` stepping. -/
   fontWeight : Nat := 400
   /-- `font-style: italic` or `oblique`. -/
@@ -1780,12 +1782,12 @@ resolves `em`/`ex` against the element's own font size, `rem` against the
 root element's (`Style.rootFontSize`), a percentage against the viewport axis
 the attribute belongs to (`x`/`dx` → width, `y`/`dy` → height), and `Q`
 (quarter-millimetres, SVG 2) as a fixed ratio like `mm`/`cm`. -/
-def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
+def parseTextLen (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
   match parseNumber bs i with
   | none => none
   | some (v, j) =>
     if startsWith bs j "px" then some (v, j + 2)
-    else if startsWith bs j "rem" then some (Fx.mul v rootFontSize, j + 3)
+    else if startsWith bs j "rem" then some (Fx.mul v rootFontSize.size, j + 3)
     else if startsWith bs j "em" then some (Fx.mul v fontSize, j + 2)
     else if startsWith bs j "ex" then some (Int.ediv (Fx.mul v fontSize) 2, j + 2)
     else if startsWith bs j "pt" then some (Int.ediv (v * 4) 3, j + 2)
@@ -1796,7 +1798,10 @@ def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) 
     -- 1Q = 1/40 cm = 96 / (2.54 * 40) px = 120/127 px, exactly (SVG 2).
     else if startsWith bs j "Q" then some (Int.ediv (v * 120) 127, j + 1)
     else if at' bs j == 37 then some (Int.ediv (Fx.mul v refLen) 100, j + 1)
-    else some (v, j)
+    -- T92: the CSS Values 4 units usvg lacks (`vw`, `ch`, `rlh`, ...).
+    else match Units.parseAt bs j v fontSize rootFontSize with
+      | some r => some r
+      | none => some (v, j)
 
 /-- Parse a whole attribute value as a single `parseTextLen` length: usvg's
 `convert_user_length`, which every non-text geometry attribute
@@ -1804,7 +1809,7 @@ def parseTextLen (fontSize refLen rootFontSize : Fx) (bs : ByteArray) (i : Nat) 
 through as well as text's own `x`/`y`/`dx`/`dy` -- the same em/ex-against-
 font-size and percentage-against-viewport-axis resolution, just for a single
 value instead of a list. -/
-def parseTextLenAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+def parseTextLenAll (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option Fx :=
   let t := trim bs
   match parseTextLen fontSize refLen rootFontSize t 0 with
   | some (v, j) => if j == t.size then some v else none
@@ -1813,7 +1818,7 @@ def parseTextLenAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Optio
 /-- `textLength`: one length, the whole (trimmed) attribute value, negative
 rejected (`n < 0` in usvg's parser turns `text_length` back into `None`
 rather than clamping it). -/
-def parseTextLength (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+def parseTextLength (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option Fx :=
   let t := trim bs
   match parseTextLen fontSize refLen rootFontSize t 0 with
   | some (v, j) => if j == t.size && v ≥ 0 then some v else none
@@ -1821,7 +1826,7 @@ def parseTextLength (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Optio
 
 /-- A whitespace/comma separated list of such lengths.  Stops at the first
 item it cannot read, like `parseNumberList`. -/
-def parseTextLenList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Array Fx := Id.run do
+def parseTextLenList (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Array Fx := Id.run do
   let mut out : Array Fx := #[]
   let mut i := 0
   for _ in [0:bs.size + 1] do
@@ -1838,7 +1843,7 @@ def parseTextLenList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Arra
 like `parseTextLen` (`em`/`ex` against `fontSize`, `%` against `refLen`), but
 all-or-nothing like `parseAbsLengthList` — one bad item drops the whole list,
 matching `Geom.dashPattern`'s downstream fallback to an undashed stroke. -/
-def parseDashLengthList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option (Array Fx) := Id.run do
+def parseDashLengthList (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option (Array Fx) := Id.run do
   let t := trim bs
   let mut out : Array Fx := #[]
   let mut i := 0
@@ -1853,7 +1858,7 @@ def parseDashLengthList (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : O
   return some out
 
 /-- `stroke-dashoffset`: a single length, resolved the same way. -/
-def parseDashLengthAll (fontSize refLen rootFontSize : Fx) (bs : ByteArray) : Option Fx :=
+def parseDashLengthAll (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option Fx :=
   let t := trim bs
   match parseTextLen fontSize refLen rootFontSize t 0 with
   | some (v, j) => if j == t.size then some v else none
@@ -2233,7 +2238,7 @@ every unit this parses since none of their factors are negative; if exactly
 one of the two is present, its value is mirrored onto the other axis; if
 neither is, both are 0 (a later `≤ 0` check then drops the shape, same as an
 explicit 0). -/
-def resolveRxRy (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH rootFontSize : Fx) : Fx × Fx :=
+def resolveRxRy (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH : Fx) (rootFontSize : Units.RootLen) : Fx × Fx :=
   let rxo := ((attr attrs "rx").bind (parseTextLenAll fontSize pctRefW rootFontSize)).filter (· ≥ 0)
   let ryo := ((attr attrs "ry").bind (parseTextLenAll fontSize pctRefH rootFontSize)).filter (· ≥ 0)
   match rxo, ryo with
@@ -2248,7 +2253,7 @@ against the viewport axis the attribute names (`x`-like → `pctRefW`, `y`-like
 → `pctRefH`), same as text's `x`/`y`/`dx`/`dy`.  `r` (`circle`'s only length
 that names neither axis) instead falls to `convert_length`'s catch-all,
 `viewportDiag`, exactly like `letter-spacing`. -/
-def shapeCmds (name : String) (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH rootFontSize : Fx) :
+def shapeCmds (name : String) (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH : Fx) (rootFontSize : Units.RootLen) :
     Option (Array PathCmd) :=
   let lx := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefW rootFontSize)).getD dflt
   let ly := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefH rootFontSize)).getD dflt
@@ -2817,7 +2822,7 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
           let m := match attr attrs "transform" with
             | some t => parseTransform t
             | none => Mat.identity
-          match (shapeCmds nm attrs 0 0 0 0).bind (fun cmds => TextPath.build cmds m) with
+          match (shapeCmds nm attrs 0 0 0 { size := 0 }).bind (fun cmds => TextPath.build cmds m) with
           | some tbl => out := out.insert id tbl
           | none => pure ()
       | none => pure ()
@@ -3422,6 +3427,10 @@ never nest). -/
 structure SubCfg where
   layerDepth : Nat := 0
   nested : Bool := false
+  /-- T92: the output canvas size in px (after `--width`/`--zoom`), what the
+  viewport units resolve against (Chromium's `<img>` viewport); `none` means
+  the root's natural size. -/
+  outSize : Option (Nat × Nat) := none
 
 /-- Walk the event stream with a style stack.
 
@@ -3511,7 +3520,13 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         let (rw, rh) := match r.viewBox with
           | some (_, _, vw, vh) => (vw, vh)
           | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
-        { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh }
+        -- T92: the canvas the viewport units resolve against: the output
+        -- size when the caller knows it, else the root's natural size.
+        let (vw, vh) := match cfg.outSize with
+          | some (w, h) => (Fx.ofNat w, Fx.ofNat h)
+          | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
+        { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh,
+                      rootFontSize := { parent.rootFontSize with vpW := vw, vpH := vh } }
     let styleDecls := match attr attrs "style" with
       | some v => parseStyleDecls v
       | none => #[]
@@ -3579,7 +3594,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     let afterNormalCss := normalCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterAttrs
     let afterStyle := styleDecls.foldl (fun st (n, val) => if early n then st else applyProp st n val) afterNormalCss
     let final := importantCss.foldl (fun st (n, v) => if early n then st else applyProp st n v) afterStyle
-    if isRoot then { final with rootFontSize := final.fontSize } else final
+    if isRoot then { final with rootFontSize := { final.rootFontSize with size := final.fontSize } } else final
   let mut stack : Array Style := #[]
   let mut elemStack : Array Css.ElemInfo := #[]
   let mut childCounts : Array Nat := #[]
