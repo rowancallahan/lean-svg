@@ -85,6 +85,12 @@ def f32TruncU8 (v : F32) : Nat :=
   else if !(F32.lt v F32.one) then 255
   else Nat.min 255 (f32Floor (F32.mul v F32.c255))
 
+/-- `v as i32`, truncating toward zero: Rust's float-to-int cast on a value
+small enough not to saturate (every caller's `v` is a parsed attribute or an
+`order`/2, never near `i32::MAX`). -/
+def f32TruncInt (v : F32) : Int :=
+  if F32.isNeg v then -(f32Floor (F32.neg v) : Int) else (f32Floor v : Int)
+
 /-- The binary32 nearest `±mant · 10^e`, exponent clamped to ±60 (the same
 clamp `Fixed.scaleDecimal`'s callers rely on). -/
 def f32OfDec (neg : Bool) (mant : Nat) (e : Int) : F32 :=
@@ -107,6 +113,16 @@ def f32Rat (v : F32) : Bool × Nat × Nat :=
   if v == 0 then (false, 0, 1)
   else if eb ≥ F32.bias then (F32.isNeg v, m * 2 ^ (Nat.min 200 (eb - F32.bias)), 1)
   else (F32.isNeg v, m, 2 ^ (Nat.min 200 (F32.bias - eb)))
+
+/-- `f32::round()`: nearest integer, ties away from zero, computed exactly on
+`v`'s own rational value (`f32Rat`) rather than by re-rounding through more
+`f32` arithmetic, so it matches the hardware intrinsic bit for bit. -/
+def f32RoundTiesAway (v : F32) : F32 :=
+  if v == 0 then 0
+  else
+    let (neg, num, den) := f32Rat v
+    let n := (2 * num + den) / (2 * den)
+    if n == 0 then 0 else if neg then F32.neg (F32.ofNat n) else F32.ofNat n
 
 /-- `(sin x, cos x)` of a binary32 `x`, each rounded to the nearest binary32:
 what `f32::sin_cos` returns (libm's are correctly rounded on these inputs).
@@ -183,7 +199,21 @@ inductive Kind where
   | composite (i1 i2 : Input) (op : CompOp)
   | colorMatrix (i : Input) (k : CMKind)
   | transfer (i : Input) (fr fg fb fa : TF)
+  /-- `feConvolveMatrix`: `kernel` is `order.1 * order.2` binary32 weights,
+  row-major; `edge` is `0` duplicate, `1` wrap, `2` none (usvg's `EdgeMode`). -/
+  | convolveMatrix (i : Input) (order : Nat × Nat) (kernel : Array F32)
+      (divisor bias : F32) (target : Nat × Nat) (edge : Nat) (preserveAlpha : Bool)
 deriving Inhabited
+
+/-- A primitive's per-pixel cost, in the same units `Render.lean`'s
+`nprims * area ≤ maxFilterWork` budget counts every other primitive as `1`
+of: every primitive here is `O(area)` total *except* `feConvolveMatrix`,
+which is `O(area · cells)` (an arbitrary weighted kernel cannot be reduced to
+a sliding window the way box blur's uniform one can), so it must count as
+that many "primitives" for the shared budget to still bound it. -/
+def primWork : Kind → Nat
+  | .convolveMatrix _ (ox, oy) .. => ox * oy
+  | _ => 1
 
 /-- A rectangle in user space, `Fx`; `w` and `h` positive (`NonZeroRect`). -/
 structure URect where
@@ -216,6 +246,14 @@ def maxPrims : Nat := 256
 def maxFilters : Nat := 4096
 /-- At most this many filters in one `filter` value list. -/
 def maxListLen : Nat := 32
+/-- `feConvolveMatrix`'s `order.1 * order.2` cell count: usvg does not cap
+`order` itself (an oversized `kernelMatrix` just fails length validation), but
+its cost is `O(cells)` *per pixel*, unlike every other primitive here, so a
+kernel this large over a `maxFilterPixels`-sized region would blow the
+existing area budget by orders of magnitude.  Past this, the primitive
+degrades the same way any other invalid one does (a transparent black flood):
+the corpus never asks for more than 20. -/
+def maxConvolveCells : Nat := 1024
 
 /-! ## The pre-pass -/
 
@@ -476,14 +514,15 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 /-- The tags usvg converts but this renderer does not implement yet: a
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
-  name == "feTile" || name == "feImage" || name == "feConvolveMatrix" ||
+  name == "feTile" || name == "feImage" ||
   name == "feMorphology" || name == "feDisplacementMap" || name == "feTurbulence" ||
   name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
-  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix"
+  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
+  name == "feConvolveMatrix"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -632,6 +671,64 @@ def transferOf (attrs : Array Xml.Attr) : Option (Option TF) :=
     else if eqAscii t "gamma" then some none
     else none
 
+/-- `parse_target`: an explicit number truncated toward zero, or `⌊order/2⌋`;
+`none` outside `[0, order)` (usvg's `ConvolveMatrix` target bound). -/
+def parseTarget (order : Nat) (v : Option F32) : Option Nat :=
+  let t : Int := match v with
+    | some f => f32TruncInt f
+    | none => (order / 2 : Nat)
+  if t < 0 || t ≥ (order : Int) then none else some t.toNat
+
+/-- `convert_convolve_matrix`: `order`, `kernelMatrix`, `divisor` (absent →
+the kernel sum, rounded to the nearest 1e-6 "to prevent float precision
+issues" and forced to `1` if that is ~zero; `0` invalid), `bias`, `targetX/Y`,
+`edgeMode`, `preserveAlpha`.  Every invalid combination — a divisor of zero, a
+`kernelMatrix` that doesn't match `order`, an out-of-range target, or a kernel
+past `maxConvolveCells` — becomes usvg's `create_dummy_primitive`: a
+transparent black flood, which the caller (`convertUrl`) keeps as one ordinary
+primitive rather than dropping the whole filter. -/
+def convertConvolveMatrix (inp : Input) (a : Array Xml.Attr) : Kind :=
+  let dummy : Kind := .flood 0 0 0 0
+  -- svgtypes' `NumberListParser`: an unreadable first number defaults both to
+  -- 3; a readable first with an unreadable/absent second defaults the second
+  -- to the first; either non-positive keeps 3×3.
+  let (ox, oy) : Nat × Nat := match attr a "order" with
+    | none => (3, 3)
+    | some raw =>
+      let t := trim raw
+      match f32At t (skipWsComma t 0) with
+      | none => (3, 3)
+      | some (v1, j1) =>
+        let x : Int := f32TruncInt v1
+        let y : Int := match f32At t (skipWsComma t j1) with
+          | some (v2, _) => f32TruncInt v2
+          | none => x
+        if x > 0 && y > 0 then (x.toNat, y.toNat) else (3, 3)
+  if ox * oy > maxConvolveCells then dummy else
+  let kernel : Array F32 := match (attr a "kernelMatrix").bind f32List with
+    | some l => if l.size == ox * oy then l else #[]
+    | none => #[]
+  if kernel.size != ox * oy then dummy else
+  -- `matrix.iter().sum()`: a left-to-right `f32` fold from zero.
+  let sum0 : F32 := kernel.foldl F32.add 0
+  let sumR : F32 :=
+    F32.div (f32RoundTiesAway (F32.mul sum0 (F32.ofNat 1000000))) (F32.ofNat 1000000)
+  let kernelSum : F32 := if sumR == 0 then F32.one else sumR
+  let divisor : F32 := ((attr a "divisor").bind f32All).getD kernelSum
+  if divisor == 0 then dummy else
+  let bias : F32 := ((attr a "bias").bind f32All).getD 0
+  match parseTarget ox ((attr a "targetX").bind f32All),
+        parseTarget oy ((attr a "targetY").bind f32All) with
+  | some tx, some ty =>
+    let edge : Nat := match (attr a "edgeMode").map trim with
+      | some t => if eqAscii t "none" then 2 else if eqAscii t "wrap" then 1 else 0
+      | none => 0
+    let preserveAlpha : Bool := match (attr a "preserveAlpha").map trim with
+      | some t => eqAscii t "true"
+      | none => false
+    .convolveMatrix inp (ox, oy) kernel divisor bias (tx, ty) edge preserveAlpha
+  | _, _ => dummy
+
 /-- One primitive element to a `Kind`, given the names of the results before
 it and the `primitiveUnits` scale.  `none` = unsupported. -/
 def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx) :
@@ -665,6 +762,7 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
       | none => .over
     some (.composite inp inp2 op)
   | "feColorMatrix" => some (.colorMatrix inp (colorMatrixOf a))
+  | "feConvolveMatrix" => some (convertConvolveMatrix inp a)
   | "feComponentTransfer" => Id.run do
     let mut fs : Array TF := #[.identity, .identity, .identity, .identity]
     for (cn, ca) in p.children do
