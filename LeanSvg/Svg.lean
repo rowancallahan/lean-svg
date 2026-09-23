@@ -2788,7 +2788,26 @@ def textPathHref (attrs : Array Xml.Attr) : Option String :=
     | some v => v
     | none => (attr attrs "xlink:href").getD ByteArray.empty
   let t := trim href
-  if at' t 0 == 35 && t.size ≤ maxIdBytes + 1 then some (toStr (t.extract 1 t.size)) else none
+  if at' t 0 == 35 && t.size ≤ maxIdBytes + 1 then some (toStr (t.extract 1 t.size))
+  -- T90: a bare name is taken as an id too (the suite's `with-invalid-path-
+  -- and-xlink-href.svg` falls back to `xlink:href="path1"`); usvg rejects it.
+  else if t.size > 0 && t.size ≤ maxIdBytes
+      && !Image.hasByte t (fun b => b == 35 || b == 47 || b == 58 || b == 46 || b ≤ 32) then
+    some (toStr t)
+  else none
+
+/-- T90: the table key of a `textPath`'s own SVG 2 `path` attribute: a string
+no `id` can equal (it starts with a NUL). -/
+def inlinePathKey (v : ByteArray) : String := "\x00" ++ toStr v
+
+/-- T90: the arc-length table a `textPath` follows: its `path` attribute when
+that parses to something drawable (SVG 2: `path` wins over `href`), else the
+element its `href` links to. -/
+def textPathTable (paths : Std.HashMap String TextPath.Table) (attrs : Array Xml.Attr) :
+    Option TextPath.Table :=
+  match (attr attrs "path").bind (fun v => paths.get? (inlinePathKey v)) with
+  | some t => some t
+  | none => (textPathHref attrs).bind paths.get?
 
 /-- T50: the arc-length tables of every element some `textPath` links to,
 keyed by id, built once per document.  The first element carrying an id wins,
@@ -2805,6 +2824,17 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
       | none => pure ()
     | _ => pure ()
   let mut out : Std.HashMap String TextPath.Table := {}
+  -- T90: inline `path` attributes, in the `<text>`'s own user space.
+  for ev in events do
+    match ev with
+    | .open_ "textPath" attrs =>
+      match attr attrs "path" with
+      | some v =>
+        match (shapeCmds "path" #[⟨"d", v⟩] 0 0 0 0).bind (fun cmds => TextPath.build cmds Mat.identity) with
+        | some tbl => out := out.insert (inlinePathKey v) tbl
+        | none => pure ()
+      | none => pure ()
+    | _ => pure ()
   if wanted.isEmpty then return out
   for ev in events do
     match ev with
@@ -3069,7 +3099,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
           let ep := elemPosOf st attrs
           let ep : Text.ElemPos := { rots := ep.rots, hasRot := ep.hasRot }
-          match (textPathHref attrs).bind paths.get? with
+          let side := (attr attrs "side").map (fun v => eqAscii (trim v) "right")
+          match (textPathTable paths attrs).map (fun t => if side == some true then t.reverse else t) with
           | some tbl =>
             rendStack := rendStack.push rend
             let m := textStyle.ctm

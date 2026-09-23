@@ -168,6 +168,18 @@ def build (cmds : Array PathCmd) (m : Mat) : Option Table := Id.run do
     s := s + sg.len
   return some { segs := segs, total := s }
 
+/-- T90: the same path traversed backwards, for SVG 2's `side="right"`, which
+puts the text on the other side of the path by reversing its direction. -/
+def Table.reverse (t : Table) : Table := Id.run do
+  let mut segs : Array Seg := Array.emptyWithCapacity t.segs.size
+  let mut s : Int := 0
+  for k in [0:t.segs.size] do
+    let c := (t.segs.getD (t.segs.size - 1 - k) default).c
+    let sg := Seg.mk' ⟨c.p3, c.p2, c.p1, c.p0⟩ s
+    segs := segs.push sg
+    s := s + sg.len
+  return { segs := segs, total := s }
+
 /-- kurbo's `inv_arclen` (`ParamCurveArclen`, driving `common::solve_itp` with
 `n0 = 1`, `k1 = 0.2`, `k2 = 2`): the parameter, in units of `1 / tOne`, at
 which the segment has length `target`, found to within `accuracy` (16.16
