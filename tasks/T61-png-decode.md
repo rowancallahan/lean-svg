@@ -181,9 +181,9 @@ proof is that check read back. Axioms: `propext`, `Quot.sound`.
 `<path> none` and optionally writes raw RGBA.
 
 **Tests.** `tests/check_png_decode.py`:
-* PngSuite (all 176 files, fetched into `tests/corpora/pngsuite` from
+* PngSuite (all 175 PNGs, fetched into `tests/corpora/pngsuite` from
   image-rs/image-png, the `png` crate's own copy; the schaik.com tarball is
-  blocked here) + 124 generated PNGs (every colour type × depth × interlace,
+  blocked here) + 122 generated PNGs (every colour type × depth × interlace,
   random per-row filters, split `IDAT`s, tRNS, zlib level 0/1/6/9 and
   fixed/Huffman-only/RLE/filtered strategies, two larger ones) + two PNGs
   written by `lean-svg` (stored blocks > 64 KiB, round trip through our
