@@ -84,3 +84,18 @@ After items 1–3 above, in this order:
     totality, bounds, no external resources, no FFI) does it. Start from
     DESIGN.md §2's threat model and ROADMAP's CVE mentions
     (librsvg CVE-2023-38633, CVE-2019-20446, Inkscape CVE-2026-4980).
+
+## Rotated filters: resvg is wrong, local tests follow Chromium (2026-09-23)
+
+T90 renders filters in the element's local (rotated) frame. Three local tests
+now differ from resvg but match Chromium better (within-8 vs Chromium, 400 px):
+
+| file | resvg | before T90 | now |
+|---|---|---|---|
+| 40_feimage | 0.966 | 0.958 | 0.969 |
+| 44_turbulence | 0.356 | 0.350 | 0.475 (noise; visually the same field as Chrome) |
+| 90_filter_rotate | 0.902 | n/a | 0.975 |
+
+resvg rasterises the filter region axis-aligned and does not rotate
+turbulence or blur with the element. `tests/run_tests.py` still scores these
+three against resvg, so they show as failing there; this is expected.
