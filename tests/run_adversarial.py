@@ -464,6 +464,56 @@ def generate_cases():
         'marker-start="url(#ma)" marker-mid="url(#ma)" marker-end="url(#ma)"/>\n</svg>\n',
     )
 
+    # ---- T84: <image> of an SVG document -------------------------------
+    # An SVG image that embeds itself as far as a data: URI can: eight levels,
+    # each one the previous wrapped in another <image>.  Only the outermost
+    # renders; the ones inside a sub-document load nothing.
+    doll = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+            '<rect width="10" height="10" fill="red"/></svg>')
+    for _ in range(8):
+        doll = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+                '<rect width="10" height="10" fill="green"/>'
+                '<image width="10" height="10" href="data:image/svg+xml;base64,'
+                + base64.b64encode(doll.encode()).decode() + '"/></svg>')
+    write_text(
+        "svg_image_self_nest.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+        ' width="100" height="100">\n<defs><image id="i" width="100" height="100" '
+        'href="data:image/svg+xml;base64,' + base64.b64encode(doll.encode()).decode()
+        + '"/></defs>\n' + '<use xlink:href="#i"/>' * 50 + "\n</svg>\n",
+    )
+
+    # A huge embedded document (400k elements, ~16 MB of source) used 20
+    # times: the element and source-byte budgets (shared with the parent)
+    # admit two copies and skip the rest.
+    huge = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            + '<rect x="1" y="1" width="1" height="1"/>' * 400_000 + "</svg>")
+    write_text(
+        "svg_image_huge_doc.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+        ' width="100" height="100">\n<defs><image id="h" width="100" height="100" '
+        'href="data:image/svg+xml,' + huge.replace("<", "%3C").replace(">", "%3E").replace('"', "%22")
+        + '"/></defs>\n' + '<use xlink:href="#h"/>' * 20 + "\n</svg>\n",
+    )
+
+    # An svgz zip bomb: 512 MiB of whitespace inside an <svg>, gzipped to
+    # about 500 KB and used 100 times.  Inflating stops past the 64 MiB
+    # budget and the failure spends it, so it is inflated once.
+    comp = zlib.compressobj(9, zlib.DEFLATED, 31)
+    body = comp.compress(b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">')
+    pad = b" " * (1 << 20)
+    for _ in range(512):
+        body += comp.compress(pad)
+    body += comp.compress(b"</svg>") + comp.flush()
+    write_text(
+        "svg_image_svgz_bomb.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+        ' width="100" height="100">\n<defs><image id="z" width="100" height="100" '
+        'href="data:image/svg+xml;base64,' + base64.b64encode(body).decode()
+        + '"/></defs>\n' + '<use xlink:href="#z"/>' * 100
+        + '\n<rect x="10" y="10" width="20" height="20"/>\n</svg>\n',
+    )
+
     return sorted(GEN_DIR.iterdir())
 
 
