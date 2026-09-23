@@ -142,6 +142,11 @@ structure Style where
   inherited: what `ctm` gained on this element.  `Box.transformed` by it takes
   a child's object bounding box into the parent's user space (T20). -/
   ownMat : Mat := Mat.identity
+  /-- This element's own `mask` reference (T49), not inherited, like `clipRef`. -/
+  maskRef : Option String := none
+  /-- `mask-type: alpha` on this element (T49), not inherited; only a `mask`
+  element reads it. -/
+  maskAlpha : Bool := false
 deriving Repr, Inhabited
 
 structure Shape where
@@ -263,11 +268,9 @@ deriving Inhabited
 carries: its children render into a fresh transparent canvas which is then
 composited onto the parent with these (resvg `render.rs::render_group`).
 
-`clip`/`mask`/`filter` are the hooks T20/T21 will need: usvg's
-`Group::should_isolate` also creates a layer for those, and they apply to the
-finished layer (a post-multiply mask) *before* this composite.  Neither is
-implemented here, so neither has a field yet; adding one is additive and
-`Render.renderRgba`'s `groupEnd` is the single place that would consume it. -/
+`clips` (T20) and `mask` (T49) are `Group::should_isolate`'s other reasons for a
+layer; both multiply the finished layer *before* this composite, in
+`Render.renderNodes`' `groupEnd`.  `filter` is not implemented. -/
 structure GroupInfo where
   /-- Group opacity on the `opacityOne` grid. -/
   opacity : Nat := opacityOne
@@ -280,6 +283,9 @@ structure GroupInfo where
   use is *not* also on `Style.clips`, so the clip is applied once to the
   composite instead of once per descendant shape. -/
   clips : Array Nat := #[]
+  /-- T49: this group's `mask` use (an index into `Doc.maskUses`), applied to the
+  finished layer after the clip and before the composite (`render_group`). -/
+  mask : Option Nat := none
 deriving Repr, Inhabited
 
 /-- The document as a flat, ordered instruction stream.
@@ -296,12 +302,45 @@ inductive Node where
   | groupEnd
 deriving Inhabited
 
+/-- One `mask` element (T49): its attributes, and its children as their own
+node stream, in the user space of the element that references it (the `mask`
+element's own `transform` has no effect, and its ancestors' are dropped).
+`x`/`y`/`w`/`h` are raw (`parseCoord16`), resolved per use in `Mask.region`. -/
+structure MaskEntry where
+  id : String
+  userUnits : Bool := false
+  contentBBox : Bool := false
+  alpha : Bool := false
+  x : Option Grad.LenPct := none
+  y : Option Grad.LenPct := none
+  w : Option Grad.LenPct := none
+  h : Option Grad.LenPct := none
+  /-- The viewport a `userSpaceOnUse` percentage resolves against, in `Fx`. -/
+  pctW : Fx := 0
+  pctH : Fx := 0
+  selfMaskId : Option String := none
+  selfMask : Option Nat := none
+  nodes : Array Node := #[]
+  filled : Bool := false
+deriving Inhabited
+
+/-- One `mask="url(#id)"` on a rendered element; shaped like `ClipUse`. -/
+structure MaskUse where
+  id : String
+  entry : Option Nat
+  ctm : Mat
+  bbox : Option Box
+deriving Inhabited
+
 structure Doc where
   root : RootInfo
   nodes : Array Node
   /-- The `clipPath` table and the `clip-path` uses (T20). -/
   clips : Array ClipEntry := #[]
   uses : Array ClipUse := #[]
+  /-- The `mask` table and the `mask` uses (T49). -/
+  masks : Array MaskEntry := #[]
+  maskUses : Array MaskUse := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -1557,6 +1596,8 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
   | "clip-path" => { st with clipRef := parseClipRef v }
+  | "mask" => { st with maskRef := parseClipRef v }
+  | "mask-type" => { st with maskAlpha := eqAscii (trim v) "alpha" }
   | "clip-rule" =>
     let t := trim v
     if eqAscii t "evenodd" then { st with clipEvenOdd := true }
@@ -1962,6 +2003,8 @@ structure DefsScan where
   same rect `applyEffective` uses for `transform-origin`. -/
   pctRef : Grad.PctRef := {}
   clips : Array (String × Nat) := #[]
+  /-- T49: the same slots for `mask` elements. -/
+  masks : Array (String × Nat) := #[]
 deriving Inhabited
 
 /-- The one pre-pass.  Collects every gradient element with its direct
@@ -1973,6 +2016,7 @@ document.  At most `Grad.maxDefs` gradients, `Grad.maxStops` stops each and
 def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
   let mut out : Array Grad.RawDef := #[]
   let mut clips : Array (String × Nat) := #[]
+  let mut masks : Array (String × Nat) := #[]
   let mut pctRef : Grad.PctRef := {}
   let mut seenRoot := false
   let mut depth : Nat := 0
@@ -2009,6 +2053,10 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
         | some cid => if clips.size < maxClipPaths then clips := clips.push (toStr cid, idx)
         | none => pure ()
+      if name == "mask" then
+        match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
+        | some cid => if masks.size < maxClipPaths then masks := masks.push (toStr cid, idx)
+        | none => pure ()
       if name == "linearGradient" || name == "radialGradient" then
         if out.size < Grad.maxDefs then
           out := out.push (parseGradDef name attrs)
@@ -2027,7 +2075,7 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         | none => pure ()
       colors := colors.push (((attrOrStyle attrs "color").bind parseColor).getD inhColor)
       depth := depth + 1
-  return { grads := out, pctRef := pctRef, clips := clips }
+  return { grads := out, pctRef := pctRef, clips := clips, masks := masks }
 
 /-! ## `text` (T36) -/
 
@@ -2170,7 +2218,65 @@ structure Frame where
   /-- Whether a box is wanted at all: this element or an ancestor has a
   `clip-path`.  Everything else skips the flattening the box costs. -/
   want : Bool := false
+  /-- T49: this element's `mask` use; the box goes there on close, as above. -/
+  maskUse : Option Nat := none
+  /-- T49: this element *is* the `mask` with this table index; its close ends
+  the content node stream. -/
+  maskSlot : Option Nat := none
+  /-- T49: inside a `maskContentUnits="objectBoundingBox"` mask, where
+  coordinates are fractions of a box and a fill-only shape is lexed on the
+  16.16 grid, as a `clipPath` child is (`ClipChild.fine`). -/
+  fine : Bool := false
 deriving Inhabited
+
+/-- A `mask` link that `fixRecursiveMaskLinks` may cut: a `mask` element's own
+`mask` attribute, or a use. -/
+inductive MaskLink where
+  | self_ (k : Nat)
+  | use (u : Nat)
+deriving Inhabited
+
+/-- Record a rendered element's `mask` as a use (like `addClipUse`) and list it
+as a link held inside every `mask` element it sits in (`openMasks`). -/
+def addMaskUse (ref : Option String) (ctm : Mat) (uses : Array MaskUse)
+    (holders : Array (Array MaskLink)) (openMasks : Array Nat) :
+    Array MaskUse × Array (Array MaskLink) × Option Nat :=
+  match ref with
+  | none => (uses, holders, none)
+  | some id =>
+    let u := uses.size
+    (uses.push ⟨id, none, ctm, none⟩,
+     openMasks.foldl (fun hs k => hs.modify k (·.push (.use u))) holders, some u)
+
+/-- usvg's `fix_recursive_links(EId::Mask, AId::Mask)`: while some `mask`
+element `M` has, among its descendants (itself included, in document order), a
+link to `M`, or a link to a mask `L` one of whose descendants links to `M`, set
+the first such link to `none`.  `holders[m]` lists the links under mask `m` in
+document order.  Each round removes a link, so `total + 1` rounds suffice. -/
+def fixRecursiveMaskLinks (masks : Array MaskEntry) (uses : Array MaskUse)
+    (holders : Array (Array MaskLink)) : Array MaskEntry × Array MaskUse := Id.run do
+  let target := fun (ms : Array MaskEntry) (us : Array MaskUse) (l : MaskLink) => match l with
+    | .self_ k => (ms.getD k default).selfMask
+    | .use u => (us.getD u default).entry
+  let total := holders.foldl (fun n h => n + h.size) 0
+  let mut ms := masks
+  let mut us := uses
+  for _ in [0:total + 1] do
+    let found : Option MaskLink := Id.run do
+      for m in [0:ms.size] do
+        for l in holders.getD m #[] do
+          match target ms us l with
+          | none => pure ()
+          | some t =>
+            if t == m then return some l
+            for l2 in holders.getD t #[] do
+              if target ms us l2 == some m then return some l2
+      return none
+    match found with
+    | none => break
+    | some (.self_ k) => ms := ms.modify k fun e => { e with selfMask := none }
+    | some (.use u) => us := us.modify u fun x => { x with entry := none }
+  return (ms, us)
 
 /-- Walk the event stream with a style stack.
 
@@ -2285,7 +2391,8 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     let base := { base with ownOpacity := opacityOne, blend := .normal, isolate := false }
     -- `clip-path` and the element's own transform are per-element too, and for
     -- the same reason (T20).
-    let base := { base with clipRef := none, ownMat := Mat.identity }
+    let base := { base with clipRef := none, ownMat := Mat.identity, maskRef := none,
+                            maskAlpha := false }
     let early (n : String) := n == "color" || n == "transform-origin"
     -- `font-kerning` (like `mix-blend-mode` and `isolation`) is deliberately
     -- *not* a presentation attribute in usvg: `parse_svg_element` drops it and
@@ -2318,6 +2425,15 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       selfClipId := none, selfClip := none, children := #[], filled := false }
   let mut clipCursor : Nat := 0
   let mut uses : Array ClipUse := #[]
+  -- T49: the same for `mask`, plus the content streams being collected: while
+  -- inside a `mask` element, `nodes` is that mask's content and the enclosing
+  -- stream (with its `layerDepth`) waits on `maskSaved`.
+  let mut maskTable : Array MaskEntry := scan.masks.map fun (mid, _) => { id := mid }
+  let mut maskHolders : Array (Array MaskLink) := scan.masks.map fun _ => #[]
+  let mut maskCursor : Nat := 0
+  let mut maskUses : Array MaskUse := #[]
+  let mut openMasks : Array Nat := #[]
+  let mut maskSaved : Array (Array Node × Nat) := #[]
   let mut skip : Nat := 0
   let mut nodes : Array Node := #[]
   let mut root : Option RootInfo := none
@@ -2349,6 +2465,18 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         -- group in usvg's tree and does not count towards its box.
         match fr.useSlot with
         | some k => uses := uses.modify k (fun u => { u with bbox := fr.bbox })
+        | none => pure ()
+        match fr.maskUse with
+        | some k => maskUses := maskUses.modify k (fun u => { u with bbox := fr.bbox })
+        | none => pure ()
+        match fr.maskSlot with
+        | some k =>
+          maskTable := maskTable.modify k fun e => { e with nodes := nodes }
+          let (sv, ld) := maskSaved.back?.getD (#[], 0)
+          nodes := sv
+          layerDepth := ld
+          maskSaved := maskSaved.pop
+          openMasks := openMasks.pop
         | none => pure ()
         match fr.mode, frames.back? with
         | .render, some pf =>
@@ -2386,6 +2514,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let mut frame : Frame := {}
         let mut renders : Bool := false
         let mut container : Bool := false
+        let mut fineShape : Bool := false
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
@@ -2399,8 +2528,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             let (st, uses', slot) :=
               addClipUse (applyEffective { (default : Style) with defs := gradTable } attrs chain) uses
             uses := uses'
+            let (mu, mh, mslot) := addMaskUse st.maskRef st.ctm maskUses maskHolders openMasks
+            maskUses := mu
+            maskHolders := mh
             enter := some st
-            frame := { mode := .render, useSlot := slot, want := slot.isSome }
+            frame := { mode := .render, useSlot := slot, maskUse := mslot,
+                       want := slot.isSome || mslot.isSome }
             renders := true
             container := true
         | some _ =>
@@ -2436,6 +2569,47 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               enter := some { stC with ctm := Mat.identity, ownMat := Mat.identity, clipRef := none }
               frame := { mode := .clip k }
             | none => skip := 1
+          else if name == "mask" then
+            -- T49: like `clipPath`, collected wherever it appears, in the user
+            -- space of the referencing element (its own `transform` has no
+            -- effect).  Its children are rendered content, but into the mask's
+            -- own node stream (see `maskSaved`).
+            while maskCursor < scan.masks.size && (scan.masks.getD maskCursor ("", 0)).2 < idx do
+              maskCursor := maskCursor + 1
+            let slotK :=
+              if maskCursor < scan.masks.size && (scan.masks.getD maskCursor ("", 0)).2 == idx
+              then some maskCursor else none
+            match slotK with
+            | some k =>
+              let stM := applyEffective
+                { parent with ctm := Mat.identity, clips := #[], opacity := opacityOne } attrs chain
+              let isUser := fun (n : String) (dflt : Bool) => match attr attrs n with
+                | some v =>
+                  let t := trim v
+                  if eqAscii t "userSpaceOnUse" then true
+                  else if eqAscii t "objectBoundingBox" then false else dflt
+                | none => dflt
+              maskTable := maskTable.modify k fun e =>
+                { e with userUnits := isUser "maskUnits" false,
+                         contentBBox := !(isUser "maskContentUnits" true),
+                         alpha := stM.maskAlpha,
+                         x := (attr attrs "x").bind parseCoord16,
+                         y := (attr attrs "y").bind parseCoord16,
+                         w := (attr attrs "width").bind parseCoord16,
+                         h := (attr attrs "height").bind parseCoord16,
+                         pctW := stM.pctRefW, pctH := stM.pctRefH,
+                         selfMaskId := stM.maskRef, filled := true }
+              openMasks := openMasks.push k
+              if stM.maskRef.isSome then
+                maskHolders := openMasks.foldl (fun hs j => hs.modify j (·.push (.self_ k))) maskHolders
+              maskSaved := maskSaved.push (nodes, layerDepth)
+              nodes := #[]
+              layerDepth := 0
+              enter := some { stM with ctm := Mat.identity, ownMat := Mat.identity,
+                                       clipRef := none, maskRef := none }
+              frame := { mode := .render, maskSlot := some k,
+                         fine := (maskTable.getD k default).contentBBox }
+            | none => skip := 1
           else if name == "defs" then
             -- T20: descended, not rendered, so the `clipPath`s inside are
             -- collected.
@@ -2446,8 +2620,13 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
               enter := some st
-              frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
+              frame := { mode := pf.mode.inner, useSlot := slot, maskUse := mslot,
+                         want := slot.isSome || mslot.isSome || pf.want, fine := pf.fine }
               renders := pf.mode.isRender
               container := true
           else if name == "switch" then
@@ -2491,9 +2670,14 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                 return none
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
               enter := some st
               sel := some target
-              frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
+              frame := { mode := pf.mode.inner, useSlot := slot, maskUse := mslot,
+                         want := slot.isSome || mslot.isSome || pf.want, fine := pf.fine }
               renders := pf.mode.isRender
               container := true
           else if name == "text" then
@@ -2509,8 +2693,13 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
               let needs := pf.mode.isRender &&
-                (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || slot.isSome)
+                (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || slot.isSome
+                 || mslot.isSome)
               let layered := needs && layerDepth < maxLayerDepth
               let st := if needs && !layered then
                   { st with opacity := mulOpacity st.opacity st.ownOpacity } else st
@@ -2520,17 +2709,21 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
               if layered then
-                nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
+                nodes := nodes.push
+                  (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips, mslot⟩)
               let (shs, used) := textShapes applyEffective events idx st chain textBudget
               textBudget := textBudget - used
               -- The laid-out glyph outlines are in this `<text>`'s own user
               -- space (`textShapes` gives every run the element's `ctm`), so
               -- their union is its object bounding box.
-              let want := slot.isSome || pf.want
+              let want := slot.isSome || mslot.isSome || pf.want
               let tbox :=
                 if want then shs.foldl (fun b sh => Box.union b (cmdsBox sh.cmds)) none else none
               match slot with
               | some k => uses := uses.modify k (fun u => { u with bbox := tbox })
+              | none => pure ()
+              match mslot with
+              | some k => maskUses := maskUses.modify k (fun u => { u with bbox := tbox })
               | none => pure ()
               match pf.mode with
               | .render =>
@@ -2560,10 +2753,22 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
+              let (mu, mh, mslot) := addMaskUse (if pf.mode.isRender then st.maskRef else none)
+                st.ctm maskUses maskHolders openMasks
+              maskUses := mu
+              maskHolders := mh
               let cmds := shapeCmds name attrs
               match pf.mode with
               | .render =>
-                match cmds with
+                -- T49: in `objectBoundingBox` mask content a fill-only shape
+                -- whose paint does not live in user units takes the 16.16
+                -- coordinates; `fineCtm` divides the 256 back out.
+                let fine := pf.fine && st.stroke matches .none &&
+                  (match st.fill with
+                   | .gradient i => (st.defs.defs.getD i default).oBB
+                   | _ => true) && (shapeCmds16 name attrs).isSome
+                fineShape := fine
+                match (if fine then shapeCmds16 name attrs else cmds) with
                 | some cmds => if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st⟩
                 | none => pure ()
               | .defs => pure ()
@@ -2584,9 +2789,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                     let child : ClipChild := ⟨cmds, st.clipEvenOdd, st.ctm, st.visible, st.clips, fine⟩
                     clipTable := clipTable.modify k fun e => { e with children := e.children.push child }
                 | none => pure ()
-              let want := slot.isSome || pf.want
+              let want := slot.isSome || mslot.isSome || pf.want
               enter := some st
-              frame := { mode := pf.mode, useSlot := slot, want,
+              frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
                          bbox := if want then cmds.bind cmdsBox else none }
               renders := pf.mode.isRender
           else
@@ -2610,7 +2815,8 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           -- a layer anyway, in which case the clip rides it.
           let clipLayer := container && st.clipRef.isSome
           let needs := renders &&
-            (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer)
+            (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer
+             || frame.maskUse.isSome)
           -- Past `maxLayerDepth` the layer is dropped: the opacity is folded
           -- into the subtree's paint the way it was before T22 (wrong where
           -- children overlap, but bounded and never an error) and the blend
@@ -2625,10 +2831,13 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             if layered then (match frame.useSlot with | some k => #[k] | none => #[]) else #[]
           let st := if layered && frame.useSlot.isSome then { st with clips := st.clips.pop } else st
           if layered then
-            nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
+            nodes := nodes.push (.groupBegin
+              ⟨st.ownOpacity, st.blend, st.isolate, layerClips, if layered then frame.maskUse else none⟩)
             layerDepth := layerDepth + 1
           match shapeNode with
-          | some s => nodes := nodes.push (.shape { s with style := st })
+          | some s =>
+            let st := if fineShape then { st with ctm := st.ctm.mul (Mat.mk' 256 0 0 256 0 0) } else st
+            nodes := nodes.push (.shape { s with style := st })
           | none => pure ()
           stack := stack.push st
           elemStack := chain
@@ -2646,9 +2855,19 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     return m
   let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
   let usesResolved := uses.map fun u => { u with entry := idMap.get? u.id }
+  -- T49: the same for masks, then usvg's cycle cutting.
+  let maskIdMap : Std.HashMap String Nat := Id.run do
+    let mut m : Std.HashMap String Nat := {}
+    for i in [0:maskTable.size] do
+      let e := maskTable.getD i default
+      if e.filled then m := m.insert e.id i
+    return m
+  let (masksFixed, maskUsesFixed) := fixRecursiveMaskLinks
+    (maskTable.map fun e => { e with selfMask := e.selfMaskId.bind maskIdMap.get? })
+    (maskUses.map fun u => { u with entry := maskIdMap.get? u.id }) maskHolders
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, nodes, clipsResolved, usesResolved⟩
+  | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed⟩
 
 end Svg
 end LeanSvg

@@ -11,4 +11,5 @@ import LeanSvg.Css
 import LeanSvg.Text
 import LeanSvg.Svg
 import LeanSvg.Clip
+import LeanSvg.Mask
 import LeanSvg.Render

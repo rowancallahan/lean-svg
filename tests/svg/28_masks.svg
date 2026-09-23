@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <linearGradient id="fade">
+      <stop offset="0" stop-color="white"/>
+      <stop offset="1" stop-color="black"/>
+    </linearGradient>
+    <linearGradient id="fadeA">
+      <stop offset="0" stop-color="red" stop-opacity="0"/>
+      <stop offset="1" stop-color="blue"/>
+    </linearGradient>
+    <!-- luminance (the default), default -10%/120% objectBoundingBox region -->
+    <mask id="lum">
+      <rect x="10" y="10" width="120" height="120" fill="url(#fade)"/>
+      <circle cx="70" cy="70" r="25" fill="black"/>
+    </mask>
+    <!-- mask-type alpha: the colour is ignored -->
+    <mask id="alpha" mask-type="alpha">
+      <rect x="160" y="10" width="120" height="120" fill="url(#fadeA)"/>
+    </mask>
+    <!-- userSpaceOnUse region cutting the content, objectBoundingBox content -->
+    <mask id="region" maskUnits="userSpaceOnUse" x="30" y="170" width="70" height="90"
+          maskContentUnits="objectBoundingBox">
+      <circle cx="0.5" cy="0.5" r="0.45" fill="white"/>
+      <rect x="0.4" y="0" width="0.2" height="1" fill="gray" opacity="0.5"/>
+    </mask>
+    <!-- a mask on the mask element, and a mask on mask content -->
+    <mask id="inner">
+      <rect x="160" y="160" width="60" height="120" fill="white"/>
+    </mask>
+    <mask id="outer" mask="url(#inner)">
+      <rect x="160" y="160" width="120" height="120" fill="white"/>
+      <rect x="160" y="230" width="120" height="20" fill="white" mask="url(#lum)"/>
+    </mask>
+    <clipPath id="clipC"><circle cx="220" cy="220" r="55"/></clipPath>
+  </defs>
+  <rect x="10" y="10" width="120" height="120" fill="green" mask="url(#lum)"/>
+  <rect x="160" y="10" width="120" height="120" fill="purple" mask="url(#alpha)"/>
+  <g mask="url(#region)" opacity="0.8">
+    <rect x="10" y="160" width="120" height="120" fill="teal"/>
+    <rect x="60" y="200" width="60" height="60" fill="orange"/>
+  </g>
+  <g mask="url(#outer)" clip-path="url(#clipC)">
+    <rect x="160" y="160" width="120" height="120" fill="navy"/>
+  </g>
+</svg>
