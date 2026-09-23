@@ -86,3 +86,141 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## Report
+
+No code changed. This is a diagnosis-only push: the fix is real but not
+small, for reasons below, so per the task's own rules ("if it is not [small
+and safe], do not force it") I'm leaving the implementation to a follow-up
+task rather than risking the shared traversal/paint-server code on a rushed
+patch.
+
+### Root cause (one bug, all five files)
+
+All five files follow the same shape: a `<g id="g1">` in `<defs>` holding
+several children with `fill="context-fill" stroke="context-stroke"`, each
+with its *own* extra `transform` (`rotate(90)`, `scale(0.8 0.8)`, etc.), used
+once via `<use href="#g1" fill="url(#grad-or-pattern)" .../>`.
+
+Side-by-side renders at 200px (`/tmp/ctxpaint/*_side.png` during this
+session; not committed) show the bug directly: resvg paints one gradient/
+pattern, positioned and scaled once for the whole `<use>` instance, so it
+looks continuous across the rect and both rotated/scaled stars. lean-svg
+paints a *different* gradient angle / pattern phase on each child, because
+each child's own extra `transform` reorients the paint independently.
+
+**Our code.** `ctxFill`/`ctxStroke` (`LeanSvg/Svg.lean:216-217`) are set once,
+on entering a `use` (`LeanSvg/Svg.lean:3713-3734`), to the `noAlpha` of the
+use element's own resolved `st.fill`/`st.stroke` — i.e. whatever
+`Paint` `resolvePaint` built for `fill="url(#lg)"` on the `<use>` itself,
+`.gradient i fallback` / `.pattern i`, carrying only the defs-table index
+`i`. A descendant's `fill="context-fill"` (`PaintSpec.context`) resolves via
+`resolvePaint` (`LeanSvg/Svg.lean:1572`) to that *same* `Paint` value,
+unchanged. So far this matches usvg (solid colours already worked via this
+path, per T47).
+
+The bug is downstream, in `Render.drawShape`
+(`LeanSvg/Render.lean:283-293`): for `.gradient i _`/`.pattern i` it always
+calls `Grad.build st.defs i s.cmds gctm …` / `Pat.build doc … i s.cmds gctm
+…` using **the currently-painted descendant's own** `s.cmds` (for
+`objectBoundingBox` units, via `Grad.build`'s `tightBox cmds`,
+`LeanSvg/Shader.lean:990-999`) and **its own** accumulated `gctm`
+(`LeanSvg/Render.lean:238,269-270`, built from `st.ctm`, which already
+includes the descendant's private `rotate(90)`/`scale(0.8 0.8)`). Nothing
+about the fact that this paint arrived via `context-fill`/`context-stroke`
+survives past `resolvePaint`, so the gradient/pattern gets re-anchored and
+re-oriented per descendant instead of once for the `<use>`.
+
+**usvg 0.48.1.** `crates/usvg/src/parser/use_node.rs:32-41` marks the fill/
+stroke resolved on the `use` node itself with `context_element =
+Some(ContextElement::UseNode)`, and `use_node.rs:98,123` marks the `use`'s
+*own* synthesized group `g.is_context_element = true`. After the whole tree
+is parsed, `crates/usvg/src/parser/paint_server.rs::update_paint_servers`
+(555-573) walks it again: descending into a group with
+`is_context_element`, the `context_transform`/`context_bbox` handed to its
+children becomes that group's own `abs_transform`/`bounding_box` (i.e. the
+`<use>`'s own absolute transform and the bbox of its *whole* expanded
+content, computed once). `process_paint`/`process_context_paint`
+(paint_server.rs:888-925, 815-886) then, for any fill/stroke whose
+`context_element == UseNode`: (a) if the paint server uses
+`objectBoundingBox`, resolves it against that `context_bbox` instead of the
+individual path's own bbox; (b) folds in a `rev_transform` derived from
+`context_transform` and the individual path's own `abs_transform`
+(`path_transform⁻¹ ∘ context_transform`) so that once resvg later composes
+the stored paint transform with the *path's* own `abs_transform` at render
+time, the net effect is exactly `context_transform ∘ (bboxTransform(
+context_bbox) ∘ gradientTransform ∘ frame)` — i.e. the paint server is
+positioned and unit-scaled once, by the `<use>`'s own transform and its own
+content's bbox, and every descendant that paints with `context-fill`/
+`context-stroke` shares that same absolute gradient/pattern regardless of
+its own extra `transform`.
+
+So: **usvg resolves an `objectBoundingBox` paint server reached via
+context-fill/-stroke against the `<use>` element's own bbox and transform,
+not the bbox/transform of whichever descendant is actually being painted**
+— confirming the question the task poses. Concretely for these five files:
+because the shapes inside `#g1` are exactly `rect`/rotated-star/scaled-star,
+each descendant's own bbox and ctm differ, and it is that per-descendant
+divergence that our current code (wrongly) feeds into `Grad.build`/
+`Pat.build`.
+
+### Why this isn't a small fix
+
+Reproducing usvg's behaviour needs the bbox of the **whole `<use>`
+subtree**, in the `use`'s own local space, computed once — not any single
+shape's bbox. The codebase already has exactly one mechanism for "the union
+bbox of a subtree, in its own user space, computed once while walking it":
+`Frame.bbox`/`Frame.want` in `LeanSvg/Svg.lean` (3163-3194), the machinery
+`clip-path`/`mask` `objectBoundingBox` resolution already uses (`uses`/
+`maskUses` arrays, `Box.union`, bbox written back into a table slot when the
+frame closes: `LeanSvg/Svg.lean:3519,3522,3877,3880,3889` etc.). Reusing it
+for `use` means:
+
+1. On entering a `use` (`Svg.lean:3713-3734`), check whether the use's own
+   resolved `fill`/`stroke` references an `objectBoundingBox` gradient or
+   pattern, and if so set `frame.want := true` so a bbox gets accumulated
+   for its whole expanded content, and allocate a slot (ctm + bbox-on-close)
+   in a new small table, the same shape as `MaskUse`/`ClipUse`.
+2. Give `Style` two more fields alongside `ctxFill`/`ctxStroke` (e.g.
+   `ctxFillSlot`/`ctxStrokeSlot : Option Nat`) pointing at that slot, set at
+   the same point and inherited the same way (record-update propagation
+   already does this for `ctxFill`/`ctxStroke`, so this part is cheap).
+3. Thread the new table through `interpret`'s traversal state into
+   `Svg.Doc`, the way `doc.masks`/`doc.clips` already are.
+4. Give `Paint.gradient`/`Paint.pattern` an optional slot reference and
+   update every match on those constructors: construction sites
+   `Svg.lean:1583,1586,3927,3945`, and consumption sites
+   `Render.lean:283,289` *and* `PatternRender.lean:285,298` — pattern tiles
+   recursively render their own content, which can itself paint with a
+   gradient or pattern, so the same plumbing has to reach that recursive
+   path too.
+5. At each `Grad.build`/`Pat.build` call site, substitute the slot's stored
+   ctm/bbox for the shape's own `gctm`/`s.cmds` when a slot is present
+   (e.g. hand `Grad.build` a synthetic one-rect path spanning the stored box
+   instead of `s.cmds`), leaving the ordinary (non-context) path byte-
+   identical.
+
+None of this is individually hard, but it touches the single ~4000-line
+`interpret` walk in `Svg.lean`, reuses (and risks regressing) the
+`Frame.bbox`/`want` machinery that today's passing `clipPath`/`mask`
+`objectBoundingBox` tests depend on, and widens an enum matched in four
+files including the pattern-tile recursion. Rough size: ~150-250 changed/
+added lines across `Svg.lean`, `Render.lean`, `PatternRender.lean` (plus
+maybe a small new module for the slot-table type), and a full corpus +
+adversarial + tiles re-verification given the shared machinery touched.
+That's more than a same-session, low-risk patch, so it's left as a
+follow-up rather than forced here.
+
+### Before / after
+
+No code changed, so before == after. For the record, current state on this
+branch (untouched):
+
+- `painting/context/*` targets: unchanged at the scores given above (0.710,
+  0.707, 0.741, 0.837, 0.721 within-8 at 200px).
+- `python3 tests/run_corpora.py --fast --corpus resvg --route direct --out
+  /tmp/base --no-worst`: 1521/1679 pass (90.6%), unchanged from repo head.
+- `python3 tests/run_tests.py`: 46/50 suites pass; the 4 pre-existing
+  failures (`12_badge`, `14_flower_transforms`, `15_spiral_stroke`,
+  `16_stress_2000`) are unrelated to context-fill/-stroke and predate this
+  task.
