@@ -1,4 +1,5 @@
 import LeanSvg.Filter
+import LeanSvg.Filter.ConvolveMatrix
 
 /-!
 # Filters (T51): running a filter on a layer's pixels
@@ -534,6 +535,9 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
     match morphDev rx ry scx scy with
     | none => Img.of (Canvas.new im.cv.w im.cv.h none) lin
     | some (dx, dy) => Img.of (morphologyApply op dx dy im.cv) lin
+  | .convolveMatrix i order kernel divisor bias target edge preserveAlpha =>
+    Img.of (ConvolveMatrix.run order kernel divisor bias target edge preserveAlpha
+      ((inp i).into lin).cv) lin
 
 /-- `filter::apply`: run `f` on the layer `src`, whose user space maps to the
 layer's pixels by `ts`.  An invalid region clears the layer, as resvg does. -/

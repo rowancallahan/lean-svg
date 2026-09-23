@@ -80,3 +80,122 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## What was implemented
+
+Files: `LeanSvg/Filter/ConvolveMatrix.lean` (new — the per-pixel algorithm),
+`LeanSvg/Filter.lean` (`Kind.convolveMatrix`, `Filter.primWork`,
+`convertConvolveMatrix`/`parseTarget`, two small `F32` helpers, one
+`convertPrim` clause, one name removed from `isKnownUnsupported`),
+`LeanSvg/FilterApply.lean` (one import, one `runPrim` case),
+`LeanSvg/Render.lean` (the filter-work budget now weighs a primitive by
+`Filter.primWork` instead of counting it as `1` — see Bounds below).
+
+* **Parsing and validation (usvg `parser/filter.rs::convert_convolve_matrix`).**
+  `order` (svgtypes' `NumberListParser` two-call semantics: an unreadable
+  first number defaults both to `3×3`; a readable first with an
+  unreadable/absent second defaults the second to the first; either
+  non-positive keeps `3×3`), `kernelMatrix` (`Filter.f32List`'s existing
+  all-or-nothing `Vec<f32>` parse, kept only if its length matches
+  `order.1 * order.2`), `divisor` (defaults to the kernel sum — a left-to-right
+  `f32` fold, rounded to the nearest 1e-6 exactly on the binary32's own
+  rational value via `f32Rat` rather than by re-rounding through more `f32`
+  arithmetic, and forced to `1.0` if that is zero — `0` itself invalid),
+  `bias`, `targetX`/`targetY` (`parse_target`: an explicit number truncated
+  toward zero, or `⌊order/2⌋`, `none` outside `[0, order)`), `edgeMode`
+  (`duplicate`/`wrap`/`none`), `preserveAlpha`. Every invalid combination —
+  zero divisor, a `kernelMatrix` that doesn't match `order`, an out-of-range
+  target, or a kernel past `Filter.maxConvolveCells` (see Bounds) — becomes
+  usvg's `create_dummy_primitive`: a transparent black `feFlood`, which
+  `convertUrl` keeps as one ordinary primitive rather than dropping the whole
+  filter (confirmed against 10 of the corpus's own invalid-parameter cases,
+  which pattern-match usvg's dummy exactly — see Report).
+* **The algorithm (resvg `filter/convolve_matrix.rs::apply`).** Ported
+  formula-for-formula in `LeanSvg/Filter/ConvolveMatrix.lean`: the three edge
+  modes, the flipped kernel index (`matrix.get(columns - ox - 1, rows - oy -
+  1)`), the `preserveAlpha` demultiply-before/no-multiply-after asymmetry (the
+  output is already correctly scaled by the output alpha in both cases, which
+  is why resvg never re-premultiplies and neither does this file), and the
+  `(x * 255.0 + 0.5) as u8` *rounding* cast that this primitive alone uses
+  (every other filter primitive here truncates, `Filter.f32TruncU8`) — a new
+  `f32Round255` reproduces the extra `+ 0.5` addition as its own `f32` step,
+  not folded into the multiply. Colour space and `preserveAlpha`'s demultiply
+  match `apply_convolve_matrix`'s wrapping exactly (`.into lin` in
+  `FilterApply.runPrim`, then `ConvolveMatrix.demultiply` only when
+  `preserveAlpha`).
+* **Bounds.** Every other primitive here costs `O(area)` total, so the
+  existing `nprims * area ≤ maxFilterWork` budget (T51) bounded all of them by
+  bounding `nprims`. `feConvolveMatrix` costs `O(area · cells)` per primitive —
+  an arbitrary weighted kernel can't be reduced to a sliding window the way
+  box blur's uniform one can — so a single primitive with a kernel anywhere
+  near resvg's own limit (`kernelMatrix` parses up to `Filter.f32List`'s 4096
+  entries) over a `maxFilterPixels`-sized region is `~4096 × 16777216 ≈ 6.9e10`
+  cell evaluations: confirmed by timing that this hangs (>150 s) before the
+  fix below. Two independent caps: `Filter.maxConvolveCells = 1024` rejects
+  (to the dummy primitive) any `order` product past 32×32 — the corpus's
+  largest is 20 — and `Filter.primWork` now weighs a `feConvolveMatrix`
+  primitive by its cell count in `Render.lean`'s existing budget check, so
+  `cells * area ≤ maxFilterWork` (2^25) holds for *any* accepted kernel,
+  giving a hard bound on total per-pixel-times-cell work regardless of region
+  size — the one line in `Render.lean` this task's own instructions allow for
+  ("bounded by the layer area times a constant **or a bounded kernel
+  size**"). `tests/adversarial/filter_convolve_huge_kernel.svg` exercises
+  both: an order past `maxConvolveCells` (fast dummy) and an at-cap
+  32×32 kernel over a large region (fast `filter budget` rejection instead of
+  the multi-minute hang); both complete in ~1 s total.
+
+## Skipped, and why
+
+* **Fidelity on the pattern-filled corpus files.** 21 of the corpus's 25
+  files fill the convolved rect with `url(#patt1)` (a `<pattern>`); `<pattern>`
+  paint servers are T53's and are not yet rendered, so `SourceGraphic` is
+  transparent for those files regardless of how correct the convolution is.
+  The one plain-fill file among the 15 the task named as failing
+  (`edgeMode=wrap-with-matrix-larger-than-target.svg`, `fill="green"`) now
+  passes, as does `bias=9999.svg` (its `bias` saturates the output
+  independently of the — currently blank — input, so it passes despite the
+  missing pattern). The other 13 pattern-dependent cases in that list stay
+  failing for that reason, not for anything this task owns; they should start
+  passing once T53 lands, since the convolution itself is verified correct on
+  every input this renderer can actually produce today (the 10 already-passing
+  invalid-parameter cases, the new plain-fill corpus pass, and
+  `tests/svg/48_convolve.svg`'s four filters checked by eye against `resvg`).
+* **`kernelUnitLength`.** usvg parses but does not use it for
+  `feConvolveMatrix` (resvg's `apply` always works in device pixels); nothing
+  to implement.
+
+## Report
+
+Baseline commit `1ba4c27`. `run_corpora.py --fast --corpus resvg --route
+direct` (width 100), whole suite: **1224/1679 → 1226/1679 passing; newly
+passing 2, newly failing 0.**
+
+`filters/feConvolveMatrix` specifically (`run_corpora.py --corpus resvg
+--route direct --dir filters/feConvolveMatrix`, natural size, 25 files):
+10/25 → 12/25 passing (the 13 remaining fails are the pattern-fill cases
+above). At `--fast`/width 100 (the delta table `run_corpora.py` prints):
+
+| file | within-8 before | after |
+|---|---|---|
+| `edgeMode=wrap-with-matrix-larger-than-target.svg` | 96.800% | 100.000% (fail→pass) |
+| `bias=9999.svg` | 7.840% | 100.000% (fail→pass) |
+| `bias=0.5.svg` | 7.840% | 59.800% (fail→fail, still pattern-blocked) |
+
+Other checks, all on the final commit:
+
+* `lake build`: no errors, no new warnings.
+* `scripts/check-theorems.sh`: `theorems ok` (`proofs/SizeBound.lean`
+  unaffected by the `Render.lean` budget-weighting change).
+* `tests/run_tests.py`: 32/36 passing, same 4 pre-existing unrelated fails as
+  baseline, no file's score dropped; new `48_convolve` 99.998% within 8
+  (sharpen, `edgeMode=wrap` with a non-square kernel and an off-centre
+  `targetX`, `preserveAlpha`, and a `divisor=0` dummy, all checked against
+  `resvg`).
+* `tests/run_adversarial.py`: 84/84 clean, including the new
+  `filter_convolve_huge_kernel.svg` (an over-cap 33×32 order → dummy, ~0.01 s;
+  an at-cap 32×32 kernel over a 2000×2000 canvas's filter region → `filter
+  budget` rejection; ~1.2 s combined, versus >150 s unbounded before the
+  `Render.lean` weighting).
+* `tests/run_tiles.py`: 36/36 byte-identical, including `48_convolve`.
