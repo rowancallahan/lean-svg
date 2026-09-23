@@ -129,3 +129,116 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+- `LeanSvg/SvgImage.lean` (new). `load`: a `data:` href (`Image.dataUri`) whose
+  MIME type is `image/svg+xml`, or `text/plain` (no MIME type) whose bytes are
+  not PNG/JPEG/GIF/WebP. Bytes starting `1f 8b` go through `Gzip.gunzip`. The
+  result must be valid UTF-8. `place`: usvg `convert` + `convert_inner`
+  (auto-size, `fit_view_box`, `aligned_pos`). The result is
+  `image_ts · rootViewBox` as one matrix.
+- `LeanSvg/Gzip.lean` (new): gzip header + `Inflate`'s `stored`/`codes`/
+  `dynHeader` in a block loop that runs to the final block. Output is capped:
+  decoding stops at `cap + 1` bytes, and anything over `cap` is `none`.
+- `Svg.lean`: `interpretWith (cfg : SubCfg)`. `interpret` is `interpretWith {}`
+  and behaves as before. When an `<image>` is not a raster image, `interpret`
+  parses the sub-document (`Xml.parse`), reads its root size
+  (`parseRoot`/`resolveRootSize`) and stores its events in
+  `Doc.svgImages`. It then emits a `Shape` with `svgImage := some k`: `cmds` is
+  the viewport, and fill and stroke are none. `slice` uses the raster path's
+  synthetic viewport clip.
+- `Render.lean`, `renderNodes`: a `svgImage` shape interprets the stored events
+  with `{ layerDepth, nested := true }`, runs `Marker.expand`, and renders
+  through `renderNodes` on `fuel - 1`. It renders into a layer = the
+  viewport's device box ∩ the current window (`SvgImage.layerBox`). The
+  element's `clip-path` chain is applied, and `SvgImage.draw` (a full-opacity
+  source-over) composites the layer.
+- Shared budgets, not reset:
+  - Elements: the parent's count plus every sub-document's is at most
+    `Xml.maxElements`.
+  - XML depth: the image element's depth plus the sub-document's is at most
+    `Xml.maxDepth`.
+  - Layer depth: the sub-document starts at the image's `layerDepth + 1`.
+  - Layer pixels, filter work and mask/feImage renders: the sub-render runs on
+    the parent's counters. A render costs `FeImage.cost`.
+  - Source bytes: one document-wide 64 MiB budget, which also caps gzip. A
+    failed `svgz` spends the whole budget (like the raster pixel budget), so a
+    bomb is inflated at most once.
+- Failure is never an error. A sub-document that does not parse or interpret,
+  or that goes over a budget, draws nothing. A sub-render that fails on a
+  shared budget sets `svgOff`, which `renderNodes` threads through its
+  recursion, and every later SVG image then draws nothing. That bounds wasted
+  work to one budget.
+- Proofs:
+  - `proofs/Gzip.lean`, `gunzip_size_le`: a `some` holds at most `cap` bytes.
+  - `proofs/SvgImageLocality.lean`, `svgImage_in_box`: `SvgImage.draw` (what
+    the renderer calls) changes no pixel outside the viewport's device box,
+    whatever the layer holds. It builds on `composite_local` and
+    `layerBox_sub`.
+- Nothing in `Effect.lean` was touched. No new axioms. `render` stays pure.
+
+## Deliberate differences / skipped
+
+- **Images inside a sub-document never load.** usvg drops only external ones
+  and would still load `data:` rasters and SVGs. Here nothing loads, which
+  follows the task's "SVG image inside an SVG image renders nothing" rule and
+  keeps nesting at depth 1.
+- **Always clipped to the viewport's device box.** resvg clips only for
+  `slice`, so sub-content outside its own viewBox can bleed past a `meet`
+  image. This rule is hard requirement 4. The clip is a whole-pixel box, not an
+  anti-aliased rect, so edges that touch the viewport are not darkened twice.
+  Under a skew/rotate, the box is the parallelogram's bounding box.
+- An SVG image inside `<pattern>` content draws nothing: `PatternRender` does
+  not recurse into `renderNodes`.
+- The gzip CRC-32/ISIZE trailer is not checked.
+- With `--threads`, each band interprets the sub-document again, as `feImage`
+  already does.
+
+## Report
+
+Target files (within-8, 200 px): all 12 now **pass**.
+
+| file | before | after |
+|---|---|---|
+| structure/image/embedded-svg.svg | 0.361 | 0.9985 |
+| structure/image/embedded-svg-without-mime.svg | 0.361 | 0.9985 |
+| structure/image/embedded-svgz.svg | 0.361 | 0.9985 |
+| structure/image/external-svg-with-transform.svg | 0.804 | 0.9968 |
+| structure/image/preserveAspectRatio=none-on-svg.svg | 0.805 | 0.9972 |
+| structure/image/preserveAspectRatio=xMaxYMax-meet-on-svg.svg | 0.804 | 0.9966 |
+| structure/image/preserveAspectRatio=xMaxYMax-slice-on-svg.svg | 0.610 | 0.9956 |
+| structure/image/preserveAspectRatio=xMidYMid-meet-on-svg.svg | 0.804 | 0.9966 |
+| structure/image/preserveAspectRatio=xMidYMid-slice-on-svg.svg | 0.590 | 0.9989 |
+| structure/image/preserveAspectRatio=xMinYMin-meet-on-svg.svg | 0.804 | 0.9966 |
+| structure/image/preserveAspectRatio=xMinYMin-slice-on-svg.svg | 0.610 | 0.9951 |
+| painting/image-rendering/optimizeSpeed-on-SVG.svg | 0.361 | 0.9985 |
+
+`embedded-svg-with-text.svg` also improves, from 0.956 to 0.967. It still
+fails, on text/font rendering.
+
+Whole resvg suite, direct route (1679 files):
+
+| pass | pass count | mean within-8 | image dirs pass |
+|---|---|---|---|
+| 100 px before | 1521 | 0.98943 | 37/52 |
+| 100 px after | 1529 (+8, 0 pass→fail) | 0.99225 | 45/52 |
+| 200 px before | 1542 | 0.99044 | 37/52 |
+| 200 px after | 1554 (+12, 0 pass→fail) | 0.99325 | 49/52 |
+
+Other checks:
+
+- `lake build`: no errors, no warnings.
+- `scripts/check-theorems.sh`: `theorems ok`.
+- `run_tests.py`: 47/51. The 4 failures are the same as before, with
+  identical scores. The new `84_svg_image` passes at 99.42.
+- `run_adversarial.py`: 120/120 clean. New cases:
+  - `svg_image_self_nest`: 8-level data: nesting × 50 uses. Only the outer
+    level draws.
+  - `svg_image_huge_doc`: 400k elements × 20 uses. The shared element budget
+    admits 2. About 36 s.
+  - `svg_image_svgz_bomb`: 512 MiB gzip × 100 uses. Inflated once, stops at
+    64 MiB, about 4 s.
+- `run_tiles.py`: 51/51 byte-identical.
