@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <linearGradient id="lg" gradientUnits="objectBoundingBox">
+    <stop offset="0" stop-color="#f00"/>
+    <stop offset="1" stop-color="#00f"/>
+  </linearGradient>
+  <!-- a normal shape has a bbox: the gradient paints as usual -->
+  <rect x="20" y="20" width="160" height="40" fill="url(#lg) green"/>
+  <!-- a horizontal line has zero-height bbox: `objectBoundingBox` cannot
+       link to it (SVG 7.11), so the fallback colour paints instead -->
+  <line x1="20" y1="100" x2="180" y2="100" stroke="url(#lg) green" stroke-width="6"/>
+  <!-- likewise a vertical line (zero-width bbox) -->
+  <line x1="100" y1="130" x2="100" y2="190" stroke="url(#lg) green" stroke-width="6"/>
+</svg>

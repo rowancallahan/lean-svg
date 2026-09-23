@@ -29,8 +29,11 @@ inductive Paint where
   | none
   | solid (c : Rgba)
   /-- A `url(#id)` that named a usable gradient: the index of its entry in the
-  style's `Grad.Defs` table (T18). -/
-  | gradient (idx : Nat)
+  style's `Grad.Defs` table (T18), plus the `<fallback>` from `url(#id)
+  <fallback>` (T64): usvg's `has_bbox` check (SVG 7.11) can still reject an
+  `objectBoundingBox` paint server at render time, once the shape's own
+  geometry is known, and falls back to this instead of painting nothing. -/
+  | gradient (idx : Nat) (fallback : Paint)
 deriving Repr, Inhabited
 
 /-- `1.0` on the opacity grid: opacities are `Nat` numerators over 10^18.
@@ -1340,7 +1343,7 @@ def resolvePaint (st : Style) : PaintSpec → Paint
     | some i =>
       match (st.defs.defs.getD i default).shape with
       | .invalid => fallback
-      | _ => .gradient i
+      | _ => .gradient i fallback
     | none => fallback
 
 /-- Parse the `color` property.  It is an ordinary colour, never `none` or
@@ -3094,6 +3097,20 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               maskUses := mu
               maskHolders := mh
               let cmds := shapeCmds name attrs st.fontSize st.pctRefW st.pctRefH
+              -- T64: `has_bbox` (SVG 7.11) — an `objectBoundingBox` paint
+              -- server cannot paint a shape whose own geometry has a
+              -- degenerate (zero-width or zero-height) bounding box, e.g. a
+              -- horizontal/vertical `line`; usvg checks this once, from the
+              -- shape's own untransformed path, when resolving `fill`/
+              -- `stroke`, and uses the `url(#id) <fallback>` colour instead.
+              -- Distinct from `Grad.build`'s `.skip` (a singular transform,
+              -- decided at render time, which paints nothing, never a
+              -- fallback).
+              let hasBbox := (cmds.bind cmdsBox).any Box.nonZero
+              let fixPaint := fun (p : Paint) => match p with
+                | .gradient i fb => if hasBbox || !(st.defs.defs.getD i default).oBB then p else fb
+                | _ => p
+              let st := { st with fill := fixPaint st.fill, stroke := fixPaint st.stroke }
               match pf.mode with
               | .render =>
                 -- T49: in `objectBoundingBox` mask content a fill-only shape
@@ -3101,7 +3118,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                 -- coordinates; `fineCtm` divides the 256 back out.
                 let fine := pf.fine && st.stroke matches .none &&
                   (match st.fill with
-                   | .gradient i => (st.defs.defs.getD i default).oBB
+                   | .gradient i _ => (st.defs.defs.getD i default).oBB
                    | _ => true) && (shapeCmds16 name attrs).isSome
                 fineShape := fine
                 match (if fine then shapeCmds16 name attrs else cmds) with
