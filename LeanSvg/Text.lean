@@ -100,6 +100,9 @@ cascade by `Svg.lean`.  `size`, `letterSpacing` and `wordSpacing` are `Fx`
 structure SpanProps where
   face : Face := .regular
   size : Fx := Fx.ofNat 12
+  /-- T90: `font-size-adjust`'s aspect value (`Fx`): the used size becomes
+  `size · adjust / (xHeight / unitsPerEm)` once the face is known. -/
+  sizeAdjust : Option Fx := none
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
   /-- `font-kerning: none` (or SVG 1.1 `kerning="0"`) turns pair kerning off. -/
@@ -125,6 +128,12 @@ structure SpanProps where
   underlineIdx : Option Nat := none
   overlineIdx : Option Nat := none
   throughIdx : Option Nat := none
+  /-- T90: the font size of the element that declared each decoration, which
+  sizes its offset and thickness (Firefox, Safari, the suite; usvg uses the
+  glyph's own size, resvg#411).  `0` means the glyph's own. -/
+  underlineSize : Fx := 0
+  overlineSize : Fx := 0
+  throughSize : Fx := 0
   /-- `textLength`, already resolved to an `Fx` user-space length (`none` if
   the element carries no such attribute of its own: like `text-decoration`,
   it is not inherited). -/
@@ -718,6 +727,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       | .bold => needB := true
       | .italic => needI := true
   let faces := loadFaces needR needB needI
+  -- T90: `font-size-adjust` rescales the used size by the face's x-height.
+  cProps := cProps.map fun pr => match pr.sizeAdjust, faces.get pr.face with
+    | some adj, some f =>
+      if f.xHeight ≤ 0 || f.unitsPerEm == 0 then pr
+      else { pr with size := Fx.clamp (Int.ediv (pr.size * adj * f.unitsPerEm) (f.xHeight * 256)) }
+    | _, _ => pr
   -- ---- 7. the renderable characters, in order
   let mut rend : Array Nat := Array.emptyWithCapacity total
   for i in [0:total] do
@@ -1005,16 +1020,16 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         ulCmds := closeSub ulCmds ulRun
         thCmds := closeSub thCmds thRun
       if styleChanged || shiftBreak then
-        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) =>
+        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) (dsz : Fx) =>
           match idx?, faces.get c.props.face with
           | some idx, some f =>
             some { styleIdx := idx, ox := ox, oy := oy, rot := p.rot, width := 0,
-                   unitsPerEm := f.unitsPerEm, size := c.props.size,
+                   unitsPerEm := f.unitsPerEm, size := if dsz > 0 then dsz else c.props.size,
                    dyUnits := metric f, thicknessUnits := f.underlineThickness : DecorRun }
           | _, _ => none
-        olRun := mkRun olIdx (·.ascent)
-        ulRun := mkRun ulIdx (·.underlinePosition)
-        thRun := mkRun thIdx (·.strikeoutPosition)
+        olRun := mkRun olIdx (·.ascent) c.props.overlineSize
+        ulRun := mkRun ulIdx (·.underlinePosition) c.props.underlineSize
+        thRun := mkRun thIdx (·.strikeoutPosition) c.props.throughSize
       -- the run's width counts every character's advance, dropped or not,
       -- the same way the pen itself always moves on.
       olRun := olRun.map (fun r => { r with width := r.width + c.adv })

@@ -159,6 +159,12 @@ structure Style where
   fontItalic : Bool := false
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
+  /-- T90: CSS Fonts 4 `font-size-adjust` (number form, `ex-height`), as an
+  `Fx` aspect value; inherited.  usvg parses it and never reads it. -/
+  fontSizeAdjust : Option Fx := none
+  /-- T90: set on a `path` shape only (never inherited through the cascade):
+  indices of its commands that end inside an elliptical arc. -/
+  arcJoins : Array Nat := #[]
   /-- `font-kerning: none`, or SVG 1.1 `kerning="0"`, turns pair kerning off. -/
   textKerning : Bool := true
   textAnchor : Text.Anchor := .start
@@ -1187,8 +1193,11 @@ def arcPath (p1 : Pt) (rxIn ryIn phi : Fx) (fA fS : Bool) (p2 : Pt) : Array Path
 
 /-- Parse `d` path data.  On a syntax error the commands parsed so far are
 returned, as the SVG spec requires ("render up to the error"). -/
-def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
+def parsePathDataJ (bs : ByteArray) : Array PathCmd × Array Nat := Id.run do
   let mut out : Array PathCmd := #[]
+  -- T90: indices in `out` of the cubics that end *inside* an arc (where
+  -- `arcPath` split it), which are not path vertices for `marker-mid`.
+  let mut joins : Array Nat := #[]
   let mut i := 0
   let mut cmd : UInt8 := 0
   let mut cur : Pt := ⟨0, 0⟩
@@ -1308,9 +1317,14 @@ def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
     else if up == 97 then
       -- rx ry φ are never relative; only the endpoint is.
       let q := p 5
-      out := out.append (arcPath cur (g 0) (g 1) (g 2) (g 3 != 0) (g 4 != 0) q)
+      let arc := arcPath cur (g 0) (g 1) (g 2) (g 3 != 0) (g 4 != 0) q
+      for k in [0:arc.size - 1] do
+        joins := joins.push (out.size + k)
+      out := out.append arc
       cur := q
-  return out
+  return (out, joins)
+
+def parsePathData (bs : ByteArray) : Array PathCmd := (parsePathDataJ bs).1
 
 /-! ## Basic shapes as paths -/
 
@@ -2008,6 +2022,47 @@ def addClipUse (st : Style) (uses : Array ClipUse) : Style × Array ClipUse × O
   | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none⟩, some uses.size)
   | none => (st, uses, none)
 
+/-- T90: split the CSS `font` shorthand (`[style] [variant] [weight] [stretch]
+size[/line-height] family`) into `(italic, weight, size, family)`; `none`
+without a size and a family. -/
+def fontShorthand (v : ByteArray) : Option (Bool × Option ByteArray × ByteArray × ByteArray) := Id.run do
+  let t := trim v
+  let isWs := fun (b : UInt8) => b == 32 || b == 9 || b == 10 || b == 13
+  -- token boundaries
+  let mut toks : Array (Nat × Nat) := #[]
+  let mut i := 0
+  for _ in [0:t.size] do
+    if i ≥ t.size then break
+    if isWs (at' t i) then i := i + 1
+    else
+      let a := i
+      for _ in [a:t.size] do
+        if i < t.size && !isWs (at' t i) then i := i + 1
+      toks := toks.push (a, i)
+  let tok := fun (k : Nat) => let (a, b) := toks.getD k (0, 0); t.extract a b
+  let numeric := fun (b : ByteArray) => let c := at' b 0; (c ≥ 48 && c ≤ 57) || c == 46
+  let sizeKw := #["xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large",
+                  "larger", "smaller"]
+  let mut italic := false
+  let mut weight : Option ByteArray := none
+  for k in [0:Nat.min toks.size 5] do
+    let w := tok k
+    let nextNum := numeric (tok (k + 1)) || sizeKw.any (eqAscii (tok (k + 1)) ·)
+    if eqAscii w "italic" || eqAscii w "oblique" then italic := true
+    else if eqAscii w "bold" || eqAscii w "bolder" || eqAscii w "lighter" then weight := some w
+    else if numeric w && nextNum && k + 1 < toks.size then weight := some w
+    else if numeric w || sizeKw.any (eqAscii w ·) then
+      -- the size, an optional `/line-height`, then the family
+      let (a, b) := toks.getD k (0, 0)
+      let slash := findByte (t.extract a b) 0 47
+      let size := t.extract a (a + slash)
+      let mut f := k + 1
+      if slash == b - a && eqAscii (tok f) "/" then f := f + 2
+      else if slash == b - a && at' (tok f) 0 == 47 then f := f + 1
+      if f ≥ toks.size then return none
+      return some (italic, weight, size, t.extract (toks.getD f (0, 0)).1 t.size)
+  return none
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
@@ -2144,6 +2199,24 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
     else if eqAscii t "normal" then { st with fontItalic := false } else st
+  | "font" =>
+    -- T90: the CSS `font` shorthand, in either delivery form (usvg expands
+    -- only the CSS one): reset, then the longhands it names.
+    match fontShorthand v with
+    | none => st
+    | some (italic, weight, size, family) =>
+      let st := { st with fontItalic := italic, fontWeight := 400, textKerning := true,
+                          fontSizeAdjust := none }
+      let st := match weight with
+        | some w => { st with fontWeight := parseFontWeight st.fontWeight w }
+        | none => st
+      { st with fontSize := parseFontSize st.fontSize size, fontAvailable := resolveFontFamily family }
+  | "font-size-adjust" =>
+    let t := trim v
+    if eqAscii t "none" then { st with fontSizeAdjust := none }
+    else match parseNumber t 0 with
+      | some (n, j) => if j == t.size && n > 0 then { st with fontSizeAdjust := some n } else st
+      | none => st
   | "letter-spacing" =>
     match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
     | some s => { st with letterSpacing := s } | none => st
@@ -2759,6 +2832,7 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     size := st.fontSize,
+    sizeAdjust := st.fontSizeAdjust,
     letterSpacing := st.letterSpacing,
     wordSpacing := st.wordSpacing,
     kerning := st.textKerning,
@@ -2947,6 +3021,12 @@ def spanNeedsLayer (st : Style) : Bool :=
     || match st.filterRaw with
       | some v => !(eqAscii (trim v) "none")
       | none => false
+
+/-- T90: each decoration's size from the style that declared it. -/
+def decorSizes (styles : Array Style) (sp : Text.SpanProps) : Text.SpanProps :=
+  let sz := fun (i : Option Nat) => (i.map fun k => (styles.getD k default).fontSize).getD 0
+  { sp with underlineSize := sz sp.underlineIdx, overlineSize := sz sp.overlineIdx,
+            throughSize := sz sp.throughIdx }
 
 /-- Give every style index below `n` a chain, `c` for the new ones. -/
 def padChains (a : Array (Array Nat)) (n : Nat) (c : Array Nat) : Array (Array Nat) := Id.run do
@@ -3148,8 +3228,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           let sp := spanPropsOf st bpx bsub bsup
           evs := evs.push
             (Text.Ev.text targetText st.spacePreserve selfIdx
-              { sp with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
-                        throughIdx := throughIdx }
+              (decorSizes styles
+                { sp with underlineIdx, overlineIdx, throughIdx })
               ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && st.fontAvailable))
         evs := evs.push .close
         skip := skip + 1
@@ -3165,8 +3245,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         let sp := spanPropsOf st bpx bsub bsup
         evs := evs.push
           (Text.Ev.text bs st.spacePreserve selfIdx
-            { sp with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
-                      throughIdx := throughIdx }
+            (decorSizes styles
+                { sp with underlineIdx, overlineIdx, throughIdx })
             -- usvg's zero-`font-size` guard is per text node (the span's own
             -- size), not inherited: `<text font-size="0"><tspan
             -- font-size="40">` still draws the tspan.  A `font-family` that
@@ -4267,6 +4347,11 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 fineShape := fine
                 match (if fine then shapeCmds16 name attrs else cmds) with
                 | some cmds =>
+                  -- T90: an arc is one segment: no `marker-mid` where
+                  -- `arcPath` split it into cubics (the suite, Chromium).
+                  let st := if name == "path" && st.markerMidId.isSome then
+                      { st with arcJoins := ((attr attrs "d").map fun d => (parsePathDataJ d).2).getD #[] }
+                    else st
                   if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none, none⟩
                 | none => pure ()
               | .defs => pure ()
@@ -4494,13 +4579,14 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           match shapeNode with
           | some s =>
             let st := if fineShape then { st with ctm := st.ctm.mul (Mat.mk' 256 0 0 256 0 0) } else st
+            let st := { st with arcJoins := s.style.arcJoins }
             match frame.mode with
             | .markerDef k =>
               markerNodes := markerNodes.setIfInBounds k
                 ((markerNodes.getD k #[]).push (.shape { s with style := st }))
             | _ => nodes := nodes.push (.shape { s with style := st })
           | none => pure ()
-          stack := stack.push st
+          stack := stack.push { st with arcJoins := #[] }
           elemStack := chain
           childCounts := childCounts.push 0
           switchSel := switchSel.push sel
