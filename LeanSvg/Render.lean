@@ -1,4 +1,5 @@
 import LeanSvg.Clip
+import LeanSvg.PatternRender
 import LeanSvg.Png
 
 /-!
@@ -280,6 +281,11 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
       | .skip => cv
       | .solid c a8 => cv.fillMask m c a8
       | .grad sh => cv.fillMaskShader m sh
+    | .pattern i =>
+      match Pat.build doc Pat.patternFuel i s.cmds gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
+              op st.opacity with
+      | .skip => cv
+      | .tile sh => cv.fillMaskPattern m sh
   let drawFill := fun (cv : Canvas) => match st.fill with
     | .none => cv
     | _ =>

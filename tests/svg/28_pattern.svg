@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="360" height="200" viewBox="0 0 360 200">
+  <title>T-pattern: pattern paint servers</title>
+  <defs>
+    <!-- userSpaceOnUse, x/y offset, own content -->
+    <pattern id="checker" patternUnits="userSpaceOnUse" x="4" y="4" width="20" height="20">
+      <rect x="0" y="0" width="10" height="10" fill="#e63946"/>
+      <rect x="10" y="10" width="10" height="10" fill="#1d3557"/>
+    </pattern>
+    <!-- objectBoundingBox, scales with the referencing shape's own box -->
+    <pattern id="dots" patternUnits="objectBoundingBox" x="0.05" y="0.05" width="0.2" height="0.2">
+      <circle cx="5" cy="5" r="4" fill="#2a9d8f"/>
+    </pattern>
+    <!-- href inherits geometry from checker, adds a patternTransform -->
+    <pattern id="rotated" xlink:href="#checker" patternTransform="rotate(20)"/>
+    <!-- viewBox + preserveAspectRatio=none stretches a fixed content box -->
+    <pattern id="stretched" patternUnits="userSpaceOnUse" width="24" height="24"
+             viewBox="0 0 10 10" preserveAspectRatio="none">
+      <rect x="1" y="1" width="8" height="8" fill="none" stroke="#f4a261" stroke-width="1.5"/>
+    </pattern>
+  </defs>
+  <rect x="10" y="10" width="80" height="80" fill="url(#checker)" stroke="black"/>
+  <rect x="100" y="10" width="80" height="80" rx="12" fill="url(#dots)" stroke="black"/>
+  <rect x="190" y="10" width="80" height="80" fill="url(#rotated)" stroke="black"/>
+  <rect x="280" y="10" width="70" height="80" fill="url(#stretched)" stroke="black"/>
+  <!-- a pattern whose own content paints with a second pattern -->
+  <defs>
+    <pattern id="inner" patternUnits="userSpaceOnUse" width="10" height="10">
+      <rect width="10" height="10" fill="#e9c46a"/>
+    </pattern>
+    <pattern id="outer" patternUnits="userSpaceOnUse" width="30" height="30">
+      <rect width="15" height="15" fill="url(#inner)"/>
+      <rect x="15" y="15" width="15" height="15" fill="#264653"/>
+    </pattern>
+  </defs>
+  <rect x="10" y="100" width="160" height="90" fill="url(#outer)" stroke="black"/>
+  <!-- zero-size pattern: falls back to the url() fallback colour -->
+  <rect x="190" y="100" width="70" height="90" fill="url(#missing) #adb5bd" stroke="black"/>
+</svg>

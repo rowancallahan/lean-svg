@@ -1,6 +1,7 @@
 import LeanSvg.Xml
 import LeanSvg.Css
 import LeanSvg.Shader
+import LeanSvg.Pattern
 import LeanSvg.Canvas
 import LeanSvg.Text
 import Std.Data.HashMap
@@ -28,6 +29,14 @@ inductive Paint where
   /-- A `url(#id)` that named a usable gradient: the index of its entry in the
   style's `Grad.Defs` table (T18). -/
   | gradient (idx : Nat)
+  /-- A `url(#id)` that named a usable `<pattern>`: the index of its entry in
+  the style's `Pat.Defs` table.  Unlike a gradient, there is no further
+  invalidity to defer to draw time except a zero-area referencing shape under
+  `objectBoundingBox`, which usvg does not fall back for either — it paints
+  nothing, exactly as `Grad.build`'s `.skip` already does — so this carries no
+  fallback of its own; `resolvePaint` has already chosen between `.pattern`
+  and the `url()` fallback the same way it does for a gradient. -/
+  | pattern (idx : Nat)
 deriving Repr, Inhabited
 
 /-- `1.0` on the opacity grid: opacities are `Nat` numerators over 10^18.
@@ -110,6 +119,12 @@ structure Style where
   `url(#id)` becomes a `Paint.gradient` — without changing `applyProp`'s
   signature.  Every other `Style` inherits the same table by copying. -/
   defs : Grad.Defs := {}
+  /-- The document's `<pattern>` geometry table, built the same way and at the
+  same time as `defs`: fully from the pre-pass's raw attributes and `href`
+  chains, which is why it can be complete before the main walk even starts
+  (unlike its *content*, `Doc.patternContent`, which the walk itself
+  collects). -/
+  patterns : Pat.Defs := {}
   ctm : Mat := Mat.identity
   -- The text properties (T36).  All inherited, all unused by every element
   -- except `text`/`tspan`, so nothing outside `Svg.textShapes` reads them.
@@ -302,6 +317,12 @@ structure Doc where
   /-- The `clipPath` table and the `clip-path` uses (T20). -/
   clips : Array ClipEntry := #[]
   uses : Array ClipUse := #[]
+  /-- The `<pattern>` geometry table (`Style.patterns` is the same value,
+  reachable from every element for `resolvePaint`) and, parallel to its raw
+  index rather than to `patterns.defs`, each pattern's own collected content —
+  `PatternRender.build` reads `patternContent.getD entry.contentSlot`. -/
+  patterns : Pat.Defs := {}
+  patternContent : Array (Array Node) := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -1275,7 +1296,10 @@ def resolvePaint (st : Style) : PaintSpec → Paint
       match (st.defs.defs.getD i default).shape with
       | .invalid => fallback
       | _ => .gradient i
-    | none => fallback
+    | none =>
+      match st.patterns.lookup id with
+      | some i => if (st.patterns.defs.getD i default).valid then .pattern i else fallback
+      | none => fallback
 
 /-- Parse the `color` property.  It is an ordinary colour, never `none` or
 `url(...)`; reusing `parsePaint` and rejecting anything but `.solid` gets that
@@ -1857,6 +1881,23 @@ def parseCoord16 (bs : ByteArray) : Option Grad.LenPct :=
       | some fx => some (fx * 256, false)
       | none => none
 
+/-- `parseCoord16`, at `Pat.coordScale` (2^32) instead of 16.16: a `<pattern>`
+`x`/`y`/`width`/`height` may still be multiplied by a bounding box
+(`objectBoundingBox`) after parsing, and 16.16 is too coarse a grid for that
+fraction — `Pat.coordScale`'s doc comment has the worked example. -/
+def parsePatCoordFine (bs : ByteArray) : Option Grad.LenPct :=
+  let t := trim bs
+  match parseDecimal t 0 with
+  | none => none
+  | some (neg, mant, exp10, j) =>
+    let mag := Int.ofNat (scaleDecimal mant exp10 Pat.coordScale.toNat (Fx.maxVal.toNat * 16777216))
+    let v := if neg then -mag else mag
+    if j == t.size then some (v, false)
+    else if at' t j == 37 && j + 1 == t.size then some (v, true)
+    else match parseLengthAll t with
+      | some fx => some (fx * 16777216, false)
+      | none => none
+
 /-- A `<stop>`'s `offset`: a number or a percentage, clamped to `[0, 1]`
 (usvg's `f32_bound(0.0, offset, 1.0)`), as 16.16.  `offset` is a
 `<number-or-percentage>`, so *any* unit (`5mm`) keeps the previous stop's
@@ -1947,6 +1988,62 @@ def parseGradDef (name : String) (attrs : Array Xml.Attr) : Grad.RawDef :=
     cx := coord "cx", cy := coord "cy", r := coord "r",
     fx := coord "fx", fy := coord "fy", fr := coord "fr" }
 
+/-- `preserveAspectRatio`: an optional leading `defer` (ignored — this
+renderer has no external image to defer to), one of the nine alignment
+keywords or `none`, and an optional trailing `meet`/`slice`.  `none` on a
+malformed value, which callers treat as "attribute absent" and keep
+searching the `href` chain, exactly like a malformed `viewBox`. -/
+def parsePreserveAspectRatio (bs : ByteArray) : Option (Nat × Nat × Bool × Bool) :=
+  let toks := (splitTrim bs 32).filter (·.size > 0)
+  let toks := match toks[0]? with
+    | some t => if eqAscii t "defer" then toks.extract 1 toks.size else toks
+    | none => toks
+  match toks[0]? with
+  | none => none
+  | some align =>
+    if eqAscii align "none" then some (1, 1, (toks[1]?.map fun s => eqAscii s "slice").getD false, true)
+    else
+      -- The nine keywords are `xAlignYAlign` concatenated; matched whole
+      -- (case-insensitively, as usvg's `svgtypes` does) rather than split,
+      -- since the boundary is not at a fixed offset in general.
+      let table : List (String × Nat × Nat) :=
+        [("xminymin", 0, 0), ("xmidymin", 1, 0), ("xmaxymin", 2, 0),
+         ("xminymid", 0, 1), ("xmidymid", 1, 1), ("xmaxymid", 2, 1),
+         ("xminymax", 0, 2), ("xmidymax", 1, 2), ("xmaxymax", 2, 2)]
+      match table.find? (fun (k, _, _) => eqAsciiCI align k) with
+      | none => none
+      | some (_, ax, ay) =>
+        some (ax, ay, (toks[1]?.map fun s => eqAscii s "slice").getD false, false)
+
+/-- One `<pattern>` element's own attributes: everything but its children,
+which the main walk collects (`patternContentShapes`) because they need the
+cascade. -/
+def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Nat) : Pat.RawDef :=
+  let coord := fun (n : String) => (attr attrs n).bind parsePatCoordFine
+  let href := match attr attrs "href" with
+    | some v => v
+    | none => (attr attrs "xlink:href").getD ByteArray.empty
+  let href := let t := trim href; if at' t 0 == 35 then toStr (t.extract 1 t.size) else ""
+  let units := fun (n : String) => (attr attrs n).bind fun v =>
+    let t := trim v
+    if eqAscii t "userSpaceOnUse" then some false
+    else if eqAscii t "objectBoundingBox" then some true else none
+  { id := match attr attrs "id" with | some v => toStr v | none => "",
+    href := if href.length > Pat.maxIdLen then "" else href,
+    oBB := units "patternUnits", contentOBB := units "patternContentUnits",
+    -- Same "invalid transform becomes the identity" rule as `gradientTransform`.
+    transform := match attr attrs "patternTransform" with
+      | none => Mat.identity
+      | some v =>
+        let m := parseTransform v
+        if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m,
+    x := coord "x", y := coord "y", width := coord "width", height := coord "height",
+    viewBox := (attr attrs "viewBox").bind fun v =>
+      let ns := parseNumberList16 v
+      if ns.size == 4 then some (ns.getD 0 0, ns.getD 1 0, ns.getD 2 0, ns.getD 3 0) else none,
+    aspect := (attr attrs "preserveAspectRatio").bind parsePreserveAspectRatio,
+    hadChildren := hadChildren, eventIdx := eventIdx }
+
 /-- What one pass over the events collects for every kind of referenceable
 definition (see "the shape of a defs table" above).
 
@@ -1962,6 +2059,9 @@ structure DefsScan where
   same rect `applyEffective` uses for `transform-origin`. -/
   pctRef : Grad.PctRef := {}
   clips : Array (String × Nat) := #[]
+  /-- Every `<pattern>` element's own attributes, `href` and whether it had
+  any children, wherever it appears (see `Doc.patterns`/`patternContent`). -/
+  patterns : Array Pat.RawDef := #[]
 deriving Inhabited
 
 /-- The one pre-pass.  Collects every gradient element with its direct
@@ -1973,6 +2073,7 @@ document.  At most `Grad.maxDefs` gradients, `Grad.maxStops` stops each and
 def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
   let mut out : Array Grad.RawDef := #[]
   let mut clips : Array (String × Nat) := #[]
+  let mut patterns : Array Pat.RawDef := #[]
   let mut pctRef : Grad.PctRef := {}
   let mut seenRoot := false
   let mut depth : Nat := 0
@@ -2009,6 +2110,19 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
         | some cid => if clips.size < maxClipPaths then clips := clips.push (toStr cid, idx)
         | none => pure ()
+      if name == "pattern" then
+        if patterns.size < Pat.maxDefs then
+          -- usvg's `has_children`: at least one child *element*, checked
+          -- before any validity filtering, so a `display:none` child (or one
+          -- this renderer would otherwise skip) still counts.
+          let hadChildren : Bool := Id.run do
+            for j in [idx + 1 : events.size] do
+              match events.getD j default with
+              | .text _ => pure ()
+              | .open_ _ _ => return true
+              | .close => return false
+            return false
+          patterns := patterns.push (parsePatternDef attrs hadChildren idx)
       if name == "linearGradient" || name == "radialGradient" then
         if out.size < Grad.maxDefs then
           out := out.push (parseGradDef name attrs)
@@ -2027,7 +2141,7 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         | none => pure ()
       colors := colors.push (((attrOrStyle attrs "color").bind parseColor).getD inhColor)
       depth := depth + 1
-  return { grads := out, pctRef := pctRef, clips := clips }
+  return { grads := out, pctRef := pctRef, clips := clips, patterns := patterns }
 
 /-! ## `text` (T36) -/
 
@@ -2135,6 +2249,114 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
   return (out, used)
 
+/-! ## `pattern` content
+
+One `<pattern>` element's own children, collected independently of where (or
+whether) anything ends up using them — `Pat.Defs.build`'s `href` chain
+decides that, by raw index, from `Pat.RawDef.hadChildren` alone.  This
+mirrors `textShapes` just above: a bounded walk over a subrange of `events`,
+reusing `applyEffective` for the cascade, because pattern content needs
+exactly the same style resolution as the main document, just rooted
+differently (a fresh `ctm`, no inherited `clip-path` chain) and written to its
+own array instead of `Doc.nodes`.
+
+Two accepted gaps, both silent: `clip-path` on a content element or group
+(parsed into `Style.clipRef` as usual, but nothing here ever adds it to
+`Doc.uses`, so it is never applied), and `switch`/a nested `<pattern>` as
+content (skipped like any other element this function does not know, which
+for a nested `<pattern>` is correct regardless — it is not a drawable child,
+and it still gets its own top-level slot and content array from the loop
+that calls this function once per raw index). -/
+def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
+    (events : Array Xml.Event) (idx : Nat) (rootStyle : Style) (budget : Nat) :
+    Array Node × Nat := Id.run do
+  let mut nodes : Array Node := #[]
+  let mut stStack : Array Style := #[rootStyle]
+  let mut chStack : Array (Array Css.ElemInfo) := #[#[]]
+  let mut ccStack : Array Nat := #[0]
+  let mut layerOpen : Array Bool := #[]
+  let mut layerDepth : Nat := 0
+  let mut skip : Nat := 0
+  let mut depth : Nat := 1
+  let mut budget := budget
+  -- The "does this element need its own layer" decision, shared by the
+  -- `g`/shape branches below (`interpret`'s own bottom logic, T22).
+  let layerDecision := fun (st : Style) =>
+    let needs := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+    let layered := needs && layerDepth < maxLayerDepth
+    let st' := if needs && !layered then { st with opacity := mulOpacity st.opacity st.ownOpacity }
+               else st
+    (st', layered)
+  for j in [idx + 1 : events.size] do
+    if depth == 0 then break
+    match events.getD j default with
+    | .text _ => pure ()
+    | .close =>
+      depth := depth - 1
+      if skip > 0 then skip := skip - 1
+      else
+        if layerOpen.back?.getD false then
+          nodes := nodes.push .groupEnd
+          layerDepth := layerDepth - 1
+        stStack := stStack.pop
+        chStack := chStack.pop
+        ccStack := ccStack.pop
+        layerOpen := layerOpen.pop
+    | .open_ nm attrs =>
+      depth := depth + 1
+      if skip > 0 then skip := skip + 1
+      else if isDisplayNone attrs || !passesConditions attrs then skip := 1
+      else
+        let isFirst := ccStack.back?.getD 0 == 0
+        ccStack := match ccStack.back? with
+          | some c => ccStack.pop.push (c + 1)
+          | none => ccStack
+        let info := Css.buildElemInfo nm (attrs.map (fun a => (a.name, toStr a.value))) isFirst
+        let chain := (chStack.back?.getD #[]).push info
+        let parent := stStack.back?.getD rootStyle
+        if nm == "text" then
+          -- `<text>` bypasses the layer machinery below exactly as
+          -- `interpret`'s own `<text>` branch does: it opens and closes its
+          -- own layer right here, because `textShapes` needs the style
+          -- *before* the layer decision folds opacity into it.
+          let st := applyEff parent attrs chain
+          let (st', layered) := layerDecision st
+          if layered then
+            nodes := nodes.push (.groupBegin ⟨st'.ownOpacity, st'.blend, st'.isolate, #[]⟩)
+            layerDepth := layerDepth + 1
+          let (shs, used) := textShapes applyEff events j st' chain budget
+          budget := budget - used
+          nodes := nodes ++ shs.map Node.shape
+          if layered then nodes := nodes.push .groupEnd
+          skip := 1
+        else if nm == "g" then
+          let st := applyEff parent attrs chain
+          let (st', layered) := layerDecision st
+          if layered then
+            nodes := nodes.push (.groupBegin ⟨st'.ownOpacity, st'.blend, st'.isolate, #[]⟩)
+            layerDepth := layerDepth + 1
+          stStack := stStack.push st'
+          chStack := chStack.push chain
+          ccStack := ccStack.push 0
+          layerOpen := layerOpen.push layered
+        else if isShape nm then
+          -- A shape has no valid children of its own (SVG 1.1's basic
+          -- shapes are never containers), so its subtree — if it has one at
+          -- all — is dropped the same way an unknown element's is, below.
+          let st := applyEff parent attrs chain
+          let (st', layered) := layerDecision st
+          if layered then
+            nodes := nodes.push (.groupBegin ⟨st'.ownOpacity, st'.blend, st'.isolate, #[]⟩)
+            layerDepth := layerDepth + 1
+          match shapeCmds nm attrs with
+          | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st'⟩)
+          | none => pure ()
+          if layered then nodes := nodes.push .groupEnd
+          skip := 1
+        else
+          skip := 1
+  return (nodes, budget)
+
 /-- What the shapes under an element become (T20): rendered, nothing (under
 `defs`), or children of the `clipPath` with this table index. -/
 inductive ClipMode where
@@ -2225,6 +2447,11 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- because their contents need the cascade.  See "the shape of a defs table".
   let scan := defsScan events
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
+  -- Geometry only, no content yet: `Pat.resolve` needs nothing but the raw
+  -- attributes and `href` chain, so the table can be complete before the
+  -- main walk starts, exactly like `gradTable` (`Doc.patterns`'s doc
+  -- comment).  `resolvePaint` reaches it through every `Style` from here.
+  let patTable := Pat.Defs.build scan.patterns scan.pctRef
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
     -- `transform-origin` percentages resolve against the same rect for every
     -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it,
@@ -2397,7 +2624,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             -- applies (`masking/clipPath/on-the-root-svg-with-size`).  T18's
             -- gradient table reaches every element from here, by inheritance.
             let (st, uses', slot) :=
-              addClipUse (applyEffective { (default : Style) with defs := gradTable } attrs chain) uses
+              addClipUse
+                (applyEffective { (default : Style) with defs := gradTable, patterns := patTable }
+                  attrs chain) uses
             uses := uses'
             enter := some st
             frame := { mode := .render, useSlot := slot, want := slot.isSome }
@@ -2646,9 +2875,28 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     return m
   let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
   let usesResolved := uses.map fun u => { u with entry := idMap.get? u.id }
+  -- One content array per raw `<pattern>` index, collected now that the walk
+  -- above is done — `Doc.patterns`'s doc comment explains why this cannot
+  -- run any earlier than `gradTable`/`patTable` themselves, and does not need
+  -- to: nothing before this point ever reads a pattern's *content*, only its
+  -- geometry and its index (`resolvePaint`'s `.pattern i`). `patRootStyle` is
+  -- the ambient style pattern content inherits from: fresh defaults (colour
+  -- black, fill black, etc.) rather than whatever element the `<pattern>`
+  -- happens to sit under in the markup, which usvg's own cascade would use —
+  -- an accepted gap, since every `<pattern>` in this task's corpus sits
+  -- directly under `<svg>` or `<defs>`, where that is the same thing anyway.
+  let prW := Int.ediv scan.pctRef.w 256
+  let prH := Int.ediv scan.pctRef.h 256
+  let patRootStyle : Style :=
+    { (default : Style) with defs := gradTable, patterns := patTable, pctRefSet := true, pctRefW := prW, pctRefH := prH }
+  let mut patternContent : Array (Array Node) := #[]
+  for raw in scan.patterns do
+    let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget
+    textBudget := used
+    patternContent := patternContent.push shs
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, nodes, clipsResolved, usesResolved⟩
+  | some r => return ⟨r, nodes, clipsResolved, usesResolved, patTable, patternContent⟩
 
 end Svg
 end LeanSvg
