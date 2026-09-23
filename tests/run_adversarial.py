@@ -38,6 +38,9 @@ OUT_DIR = REPO / "tests" / "out"
 GEN_DIR = OUT_DIR / "adversarial_gen"
 DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 
+# T98: lean-svg writes `out.png.warnings.txt` next to the PNG when the render
+# has warnings; that and the PNG are the only files it may create.
+ALLOWED_OUTPUTS = ("out.png", "out.png.warnings.txt")
 RENDER_TIMEOUT = 120  # seconds
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CRASH_MARKERS = ["PANIC", "panic", "Stack overflow", "INTERNAL", "uncaught"]
@@ -639,7 +642,7 @@ def run_case(path, binary, label):
             if rc != 0 and exists:
                 result["violations"].append("exited %d but still wrote out.png" % rc)
 
-        strays = sorted(p.name for p in tmpdir.iterdir() if p.name != "out.png")
+        strays = sorted(p.name for p in tmpdir.iterdir() if p.name not in ALLOWED_OUTPUTS)
         if strays:
             result["violations"].append(
                 "stray files in the output directory: %s" % ", ".join(strays)
@@ -700,7 +703,7 @@ def check_no_clobber(binary):
         after = out_png.read_bytes()
         if after != before:
             result["violations"].append("existing output was modified despite the refusal")
-        strays = sorted(p.name for p in tmpdir.iterdir() if p.name != "out.png")
+        strays = sorted(p.name for p in tmpdir.iterdir() if p.name not in ALLOWED_OUTPUTS)
         if strays:
             result["violations"].append(
                 "stray files in the output directory: %s" % ", ".join(strays)

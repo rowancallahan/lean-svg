@@ -61,6 +61,7 @@ def render(binary, svg, out, extra):
     """
     out = Path(out)
     out.unlink(missing_ok=True)
+    Path(str(out) + ".warnings.txt").unlink(missing_ok=True)  # T98
     cmd = [str(binary), str(svg), str(out)] + [str(a) for a in extra]
     start = time.perf_counter()
     try:

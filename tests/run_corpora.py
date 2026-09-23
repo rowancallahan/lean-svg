@@ -298,7 +298,9 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
     ref_png = tmpdir / ("%06d_ref.png" % slot)
     ours_png = tmpdir / ("%06d_ours.png" % slot)
     mid_svg = tmpdir / ("%06d_usvg.svg" % slot)
-    scratch = [ref_png, ours_png, mid_svg]
+    # T98: lean-svg writes `<out>.warnings.txt` next to its PNG when it has
+    # warnings, and refuses to run if that file already exists.
+    scratch = [ref_png, ours_png, mid_svg, Path(str(ours_png) + ".warnings.txt")]
     for stale in scratch:
         stale.unlink(missing_ok=True)
 

@@ -11,6 +11,7 @@ import LeanSvg.Image
 import LeanSvg.SvgImage
 import LeanSvg.Units
 import LeanSvg.BasicShape
+import LeanSvg.Warn
 import Std.Data.HashMap
 
 /-!
@@ -201,6 +202,10 @@ structure Style where
   /-- Which embedded font `font-family` resolved to, as a `FontSet` index
   (meaningful only when `fontAvailable`; 0 = "Noto Sans"). -/
   fontFamily : Nat := 0
+  /-- T98: the `font-family` value as written (usvg's default family when
+  none is set), for the warning a run reports when it is not `fontAvailable`
+  and falls through to Noto Sans. -/
+  fontFamilyRaw : ByteArray := "Times New Roman".toUTF8
   /-- `text-decoration`, *not* inherited: `applyEffective` resets all three to
   `false` for every element, and only that element's own raw attribute value
   (from any cascade layer) can set them back.  usvg's decoration search
@@ -600,6 +605,8 @@ structure Doc where
   svgImages : Array SvgImage.Entry := #[]
   /-- T85: the `context-fill`/`context-stroke` paint-server slots (`CtxUse`). -/
   ctxUses : Array CtxUse := #[]
+  /-- T98: what the render drew differently from what was asked (`Warn`). -/
+  warnings : Array String := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -2266,8 +2273,8 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
   | "font-family" =>
     match resolveFontFamily v with
-    | some k => { st with fontAvailable := true, fontFamily := k }
-    | none => { st with fontAvailable := false, fontFamily := 0 }
+    | some k => { st with fontAvailable := true, fontFamily := k, fontFamilyRaw := trim v }
+    | none => { st with fontAvailable := false, fontFamily := 0, fontFamilyRaw := trim v }
   -- `find_decoration`: space-separated tokens of this element's own raw
   -- value, freshly parsed (not merged with whatever the parent had).
   | "text-decoration" =>
@@ -2308,8 +2315,8 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
         | none => st
       let st := { st with fontSize := parseFontSize st.fontSize size st.rootFontSize }
       match resolveFontFamily family with
-      | some k => { st with fontAvailable := true, fontFamily := k }
-      | none => { st with fontAvailable := false, fontFamily := 0 }
+      | some k => { st with fontAvailable := true, fontFamily := k, fontFamilyRaw := trim family }
+      | none => { st with fontAvailable := false, fontFamily := 0, fontFamilyRaw := trim family }
   | "font-size-adjust" =>
     let t := trim v
     if eqAscii t "none" then { st with fontSizeAdjust := none }
@@ -3173,7 +3180,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
     (chain : Array Css.ElemInfo) (budget : Nat)
     (paths : Std.HashMap String TextPath.Table) (ancestors : Array Style) :
-    Array Shape × Nat × Option Box × SpanLayers := Id.run do
+    Array Shape × Nat × Option Box × SpanLayers × Array String := Id.run do
   let textAttrs := match events.getD idx default with
     | .open_ _ a => a
     | _ => #[]
@@ -3187,6 +3194,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       eqAscii t "tb" || eqAscii t "tb-rl" || eqAscii t "vertical-rl" || eqAscii t "vertical-lr"
     | none => false
   let mut evs : Array Text.Ev := #[Text.Ev.open_ (elemPosOf textStyle textAttrs)]
+  let mut warns : Array String := #[]
   -- `ancestors` is the outer walk's own style stack at the point `<text>` was
   -- reached, i.e. everything *outside* it (`<g>`, `<svg>`, ...): usvg's
   -- decoration search walks from a tspan up through the document root, not
@@ -3337,7 +3345,9 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             (Text.Ev.text targetText st.spacePreserve selfIdx
               (decorSizes styles
                 { sp with underlineIdx, overlineIdx, throughIdx })
-              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && st.fontAvailable))
+              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0))
+          if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && !st.fontAvailable then
+            warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
         evs := evs.push .close
         skip := skip + 1
       else skip := skip + 1
@@ -3357,9 +3367,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             -- usvg's zero-`font-size` guard is per text node (the span's own
             -- size), not inherited: `<text font-size="0"><tspan
             -- font-size="40">` still draws the tspan.  A `font-family` that
-            -- does not resolve to an installed font draws nothing either
-            -- (`process_chunk`'s `None => continue`), same as `display:none`.
-            ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
+            -- does not resolve to an embedded font draws in Noto Sans and
+            -- reports a warning (T98; usvg's `process_chunk` draws nothing).
+            ((rendStack.back?.getD true) && st.fontSize > 0))
+        if (rendStack.back?.getD true) && st.fontSize > 0 && !st.fontAvailable && (trim bs).size > 0 then
+          warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
   -- T96: under a large scale (`transform="scale(100)"` on tiny text) an
   -- outline rounded to `Fx` user units is visibly jagged, so it is laid out
   -- `outK` times larger and drawn through `ctm · scale(1 / outK)`; only for
@@ -3399,7 +3411,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
   -- `clipPathUnits="objectBoundingBox"` on this `<text>` actually sizes
   -- against.
-  return (out, used, mbox, ⟨owners.zip oboxes, chains⟩)
+  return (out, used, mbox, ⟨owners.zip oboxes, chains⟩, warns)
 
 /-! ## `pattern` content
 
@@ -3476,7 +3488,7 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
-          let (shs, used, _, _) := textShapes applyEff events j st' chain budget {} stStack
+          let (shs, used, _, _, _) := textShapes applyEff events j st' chain budget {} stStack
           budget := budget - used
           nodes := nodes ++ shs.map Node.shape
           if layered then nodes := nodes.push .groupEnd
@@ -3958,6 +3970,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
   -- T84: what SVG images may still add to the document: elements (with the
   -- document's own, at most `Xml.maxElements`) and bytes of source.
   let mut svgImages : Array SvgImage.Entry := #[]
+  let mut warnings : Array String := #[]
   let mut svgElems : Nat := Xml.maxElements - (SvgImage.stats events).1
   let mut svgBytes : Nat := if cfg.nested then 0 else SvgImage.maxTotalBytes
   for idx in [0:events.size] do
@@ -4367,8 +4380,9 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               let layerClips : Array Nat :=
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
-              let (shs, used, mbox, spans) := textShapes applyEffective events idx st chain textBudget textPaths stack
+              let (shs, used, mbox, spans, ws) := textShapes applyEffective events idx st chain textBudget textPaths stack
               textBudget := textBudget - used
+              warnings := Warn.addAll warnings ws
               -- T81: usvg's `objectBoundingBox` for `<text>` is the union of
               -- each glyph's *font-metric* box, not its outline (`Text.
               -- layout`'s doc comment) -- `mbox` is already that, in this
@@ -4833,7 +4847,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,
-      srcEvents, patTable, patternContent, svgImages, ctxUses⟩
+      srcEvents, patTable, patternContent, svgImages, ctxUses, warnings⟩
 
 def interpret (events : Array Xml.Event) : Except String Doc := interpretWith {} events
 
