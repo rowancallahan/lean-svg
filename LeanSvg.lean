@@ -9,6 +9,7 @@ import LeanSvg.Png
 import LeanSvg.Xml
 import LeanSvg.Css
 import LeanSvg.Text
+import LeanSvg.Use
 import LeanSvg.Svg
 import LeanSvg.Clip
 import LeanSvg.Render
