@@ -269,7 +269,9 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
     | error e => simp [hd] at hr
     | ok doc =>
       simp only [hd] at hr
-      cases hs : Render.canvasSetup doc.root opts with
+      -- T52: `render` expands markers (a pure `Doc → Doc` transform that
+      -- leaves `root` untouched) between `Svg.interpret` and `canvasSetup`.
+      cases hs : Render.canvasSetup (Marker.expand doc).root opts with
       | error e => simp [hs] at hr
       | ok setup =>
         rcases setup with ⟨w, h, mat, clip⟩

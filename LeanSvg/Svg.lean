@@ -142,11 +142,24 @@ structure Style where
   inherited: what `ctm` gained on this element.  `Box.transformed` by it takes
   a child's object bounding box into the parent's user space (T20). -/
   ownMat : Mat := Mat.identity
+  /-- `marker-start`/`marker-mid`/`marker-end` (T52): the raw `url(#id)`
+  target, inherited like any other paint property.  Resolved against
+  `Doc.markers` by `Marker.expand`, after `interpret` has finished (markers
+  may be defined anywhere, including after the element that uses them). -/
+  markerStartId : Option String := none
+  markerMidId : Option String := none
+  markerEndId : Option String := none
 deriving Repr, Inhabited
 
 structure Shape where
   cmds : Array PathCmd
   style : Style
+  /-- Whether this shape's element is one usvg instantiates markers on --
+  `path`, `line`, `polyline`, `polygon` -- as opposed to `rect`/`circle`/
+  `ellipse`/text runs, which never draw a marker even when `marker-start`
+  etc. are set (T52 reads this, not the element name, since a `Shape` no
+  longer remembers it). -/
+  markerable : Bool := false
 deriving Inhabited
 
 /-! ## `clipPath` (T20), and the shape of a defs table
@@ -296,12 +309,85 @@ inductive Node where
   | groupEnd
 deriving Inhabited
 
+/-! ## `marker` (T52)
+
+A `<marker>` element is a template, never drawn on its own: `interpret`
+collects one `MarkerEntry` per element with a usable `id`, wherever it
+appears (mirroring `ClipEntry`), and `LeanSvg/Marker.lean`'s `expand` turns
+each `marker-start`/`marker-mid`/`marker-end` reference on a `path`/`line`/
+`polyline`/`polygon` into copies of the marker's `content`, one per vertex,
+after `interpret` has finished. -/
+
+/-- `orient`: `auto`/`auto-start-reverse` compute the angle from the path's
+own geometry at each vertex (`Marker.calcVertexAngle`); anything else is a
+fixed angle in degrees, `0` if the attribute is absent or unparseable
+(usvg's `convert_orientation`). -/
+inductive MarkerOrient where
+  | auto
+  | autoStartReverse
+  | fixed (deg : Fx)
+deriving Inhabited
+
+structure MarkerEntry where
+  id : String
+  refX : Fx := 0
+  refY : Fx := 0
+  /-- `markerWidth`/`markerHeight`; default `3` (usvg `Length::new_number(3.0)`). -/
+  width : Fx := Fx.ofNat 3
+  height : Fx := Fx.ofNat 3
+  viewBox : Option (Fx × Fx × Fx × Fx) := none
+  /-- `preserveAspectRatio`'s `align`, as the three primitives
+  `Marker.viewBoxTransform` takes: `alignNone` for `"none"` (independent axis
+  scaling), else `alignX`/`alignY` ∈ {0,1,2} for min/mid/max.  Default
+  `xMidYMid`. -/
+  alignNone : Bool := false
+  alignX : Nat := 1
+  alignY : Nat := 1
+  slice : Bool := false
+  orient : MarkerOrient := .fixed 0
+  /-- `markerUnits`: `true` for `userSpaceOnUse`, `false` (default) for
+  `strokeWidth` -- any value other than exactly `"userSpaceOnUse"`, including
+  an absent or invalid one, is the default (`with-invalid-markerUnits.svg`). -/
+  unitsUser : Bool := false
+  /-- `overflow`: hidden by default and for `"hidden"`/`"scroll"`; anything
+  else (`"visible"`, `"auto"`, ...) turns clipping off. -/
+  clip : Bool := true
+  /-- The synthetic `clipPath` entry (index into `Doc.clips`) built once, at
+  parse time, for `clip`'s rectangle -- the `viewBox` rect if there is one,
+  else `(0, 0, width, height)` -- so `Marker.expand` only has to add one
+  `ClipUse` per instance, not rebuild the geometry.  `none` when `clip` is
+  false or the marker is `!valid`. -/
+  clipEntryIdx : Option Nat := none
+  /-- `NonZeroRect::from_xywh` on `(refX, refY, width, height)`: `false` (and
+  the whole marker unresolvable-but-referenceable, like an empty one) when
+  `width ≤ 0 ∨ height ≤ 0` (`zero-sized.svg`, `marker-with-a-negative-
+  size.svg`). -/
+  valid : Bool := false
+  /-- This marker's children, in its own local space (root ctm = identity),
+  styled by its own ancestors -- never the referencing element's -- exactly
+  as `interpret`'s ordinary cascade already gives an element wherever it
+  sits.  Filled in when the `<marker>` element closes. -/
+  content : Array Node := #[]
+  /-- Whether the main walk actually reached this element (as opposed to a
+  slot under `display:none` or a losing `switch` branch, which stays
+  unresolvable, like `ClipEntry.filled`). -/
+  filled : Bool := false
+deriving Inhabited
+
+/-- The largest number of `marker` elements collected; later ones are
+unreferenceable, exactly as `maxClipPaths` bounds `clipPath`. -/
+def maxMarkers : Nat := 4096
+
 structure Doc where
   root : RootInfo
   nodes : Array Node
   /-- The `clipPath` table and the `clip-path` uses (T20). -/
   clips : Array ClipEntry := #[]
   uses : Array ClipUse := #[]
+  /-- The `marker` table (T52); `Marker.expand` resolves references against
+  it and consumes it after `Render.render` no longer needs anything but the
+  expanded `nodes`. -/
+  markers : Array MarkerEntry := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -1157,6 +1243,85 @@ def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
     height := (attr attrs "height").bind parseLengthOrPercent,
     viewBox := vb }
 
+/-! ## `marker` attribute grammars (T52)
+
+These four are read straight off a `<marker>` element's own attributes, the
+way `clipPathUnits` already is (`attr`, not the CSS-aware `attrOrStyle`):
+usvg's own resolution for them is `SvgNode::attribute`/`convert_length`, not
+the inherited-property cascade `applyEffective` runs, and no marker test in
+the corpus sets any of them from `style=""` or a stylesheet. -/
+
+/-- A length-or-percentage attribute, resolved against `refLen` -- T52's
+`refX`/`markerWidth` against the viewport's width, `refY`/`markerHeight`
+against its height, exactly like `parseTransformOrigin`'s lengths. -/
+def lengthOrPctAttr (attrs : Array Xml.Attr) (name : String) (dflt refLen : Fx) : Fx :=
+  match attr attrs name with
+  | some v => match parseLengthOrPercent v with
+    | some lp => resolvePct lp refLen
+    | none => dflt
+  | none => dflt
+
+/-- `orient`'s fixed-angle grammar: a number, then an optional lower-case unit
+(`deg` if absent, `grad`, `rad`, `turn`), converted to degrees as `Fx`
+(svgtypes' `Stream::parse_angle`/`Angle::to_degrees`).  `none` on anything
+left over after a recognised suffix or no number at all, matching
+`Angle::from_str`'s error, which `convert_orientation` turns into a fixed
+`0°` (not this function's job -- its caller decides the fallback). -/
+def parseAngleDeg (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseNumber t 0 with
+  | none => none
+  | some (n, j) =>
+    if j == t.size then some n
+    else if startsWith t j "deg" && j + 3 == t.size then some n
+    else if startsWith t j "grad" && j + 4 == t.size then some (Int.ediv (n * 9) 10)
+    else if startsWith t j "rad" && j + 3 == t.size then some (Int.ediv (n * 180 * 65536) pi16)
+    else if startsWith t j "turn" && j + 4 == t.size then some (n * 360)
+    else none
+
+/-- `orient`: `auto`, `auto-start-reverse`, an angle, or (absent/unparseable)
+a fixed `0°` (usvg's `convert_orientation`). -/
+def parseOrientAttr (attrs : Array Xml.Attr) : MarkerOrient :=
+  match attr attrs "orient" with
+  | none => .fixed 0
+  | some v =>
+    let t := trim v
+    if eqAscii t "auto" then .auto
+    else if eqAscii t "auto-start-reverse" then .autoStartReverse
+    else match parseAngleDeg t with
+      | some d => .fixed d
+      | none => .fixed 0
+
+/-- `preserveAspectRatio`: `[defer ]align[ meet|slice]` (svgtypes'
+`AspectRatio`, `defer` accepted and ignored like usvg).  Absent or
+unparseable is the default, `xMidYMid meet` -- as `(alignNone, alignX,
+alignY, slice)` = `(false, 1, 1, false)`, `Marker.viewBoxTransform`'s own
+parameters. -/
+def parseAspectAttr (attrs : Array Xml.Attr) : Bool × Nat × Nat × Bool :=
+  let dflt := (false, 1, 1, false)
+  match attr attrs "preserveAspectRatio" with
+  | none => dflt
+  | some v =>
+    let t := trim v
+    let t := if startsWith t 0 "defer " then trim (t.extract 6 t.size) else t
+    let e := skipWhile t 0 isAlpha
+    let word := t.extract 0 e
+    let align? : Option (Bool × Nat × Nat) :=
+      if eqAscii word "none" then some (true, 0, 0)
+      else if eqAscii word "xMinYMin" then some (false, 0, 0)
+      else if eqAscii word "xMidYMin" then some (false, 1, 0)
+      else if eqAscii word "xMaxYMin" then some (false, 2, 0)
+      else if eqAscii word "xMinYMid" then some (false, 0, 1)
+      else if eqAscii word "xMidYMid" then some (false, 1, 1)
+      else if eqAscii word "xMaxYMid" then some (false, 2, 1)
+      else if eqAscii word "xMinYMax" then some (false, 0, 2)
+      else if eqAscii word "xMidYMax" then some (false, 1, 2)
+      else if eqAscii word "xMaxYMax" then some (false, 2, 2)
+      else none
+    match align? with
+    | none => dflt
+    | some (an, ax, ay) => (an, ax, ay, eqAscii (trim (t.extract e t.size)) "slice")
+
 /-! ## `transform-origin` -/
 
 /-- One `transform-origin` token: a directional keyword or a length/percentage
@@ -1486,8 +1651,12 @@ def strokeBeforeFill (bs : ByteArray) : Bool := Id.run do
 inside a `style` attribute and CSS").  Confirmed by the corpus files
 `painting/mix-blend-mode/as-property.svg` and
 `painting/isolation/as-property.svg`, both of which must render *unblended*. -/
+-- T52: the `marker` shorthand is CSS-only too (`svgtree/parse.rs`'s CSS
+-- declaration parser expands it into the three longhands; presentation
+-- attribute parsing has no such case), confirmed by `the-marker-property.svg`
+-- ("Should be ignored") against `the-marker-property-in-CSS.svg`.
 def isCssOnlyProp (name : String) : Bool :=
-  name == "mix-blend-mode" || name == "isolation"
+  name == "mix-blend-mode" || name == "isolation" || name == "marker"
 
 /-- Parse a `clip-path` value into the referenced id: `url(#id)`, with optional
 whitespace and single or double quotes around the `#id` (svgtypes' `FuncIRI`).
@@ -1557,6 +1726,17 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
   | "clip-path" => { st with clipRef := parseClipRef v }
+  -- T52: `url(#id)` or `none`, exactly `clip-path`'s grammar, so `parseClipRef`
+  -- (which already yields `none` for `none` and anything else it can't parse
+  -- as a `FuncIRI`) is reused unchanged.  All three are ordinary inherited
+  -- presentation attributes; `marker` (the shorthand) is CSS-only
+  -- (`isCssOnlyProp`) and, when it does apply, sets all three together.
+  | "marker-start" => { st with markerStartId := parseClipRef v }
+  | "marker-mid" => { st with markerMidId := parseClipRef v }
+  | "marker-end" => { st with markerEndId := parseClipRef v }
+  | "marker" =>
+    let r := parseClipRef v
+    { st with markerStartId := r, markerMidId := r, markerEndId := r }
   | "clip-rule" =>
     let t := trim v
     if eqAscii t "evenodd" then { st with clipEvenOdd := true }
@@ -1962,6 +2142,9 @@ structure DefsScan where
   same rect `applyEffective` uses for `transform-origin`. -/
   pctRef : Grad.PctRef := {}
   clips : Array (String × Nat) := #[]
+  /-- T52: one slot per `marker` element with a usable `id`, same shape as
+  `clips`. -/
+  markers : Array (String × Nat) := #[]
 deriving Inhabited
 
 /-- The one pre-pass.  Collects every gradient element with its direct
@@ -1973,6 +2156,7 @@ document.  At most `Grad.maxDefs` gradients, `Grad.maxStops` stops each and
 def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
   let mut out : Array Grad.RawDef := #[]
   let mut clips : Array (String × Nat) := #[]
+  let mut markers : Array (String × Nat) := #[]
   let mut pctRef : Grad.PctRef := {}
   let mut seenRoot := false
   let mut depth : Nat := 0
@@ -2009,6 +2193,10 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
         | some cid => if clips.size < maxClipPaths then clips := clips.push (toStr cid, idx)
         | none => pure ()
+      if name == "marker" then
+        match (attr attrs "id").filter (·.size ≤ maxIdBytes) with
+        | some mid => if markers.size < maxMarkers then markers := markers.push (toStr mid, idx)
+        | none => pure ()
       if name == "linearGradient" || name == "radialGradient" then
         if out.size < Grad.maxDefs then
           out := out.push (parseGradDef name attrs)
@@ -2027,7 +2215,7 @@ def defsScan (events : Array Xml.Event) : DefsScan := Id.run do
         | none => pure ()
       colors := colors.push (((attrOrStyle attrs "color").bind parseColor).getD inhColor)
       depth := depth + 1
-  return { grads := out, pctRef := pctRef, clips := clips }
+  return { grads := out, pctRef := pctRef, clips := clips, markers := markers }
 
 /-! ## `text` (T36) -/
 
@@ -2132,7 +2320,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }, false⟩
   return (out, used)
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
@@ -2141,12 +2329,23 @@ inductive ClipMode where
   | render
   | defs
   | clip (k : Nat)
+  /-- T52: everything under a `<marker>` element, at table index `k`.  Behaves
+  like `.render` (shapes get a `shapeNode`, containers may layer, nested
+  `marker-start`/`-mid`/`-end` still resolve) except that every `Node` this
+  subtree would emit goes into `markerNodes[k]` instead of the document's
+  `nodes`, becoming `Doc.markers[k].content` once the `<marker>` element
+  itself closes.  A `<marker>` nested inside another (unusual, but not
+  disallowed) gets its own fresh `k` and is collected into its own slot,
+  independent of the marker it is textually inside. -/
+  | markerDef (k : Nat)
 deriving Inhabited
 
 /-- The mode of a `g`/`switch` opened in this mode: a `g` inside a `clipPath`
 is not a valid child, so usvg skips it and its subtree (`convert_clip_path_
 elements`); it is descended here in `defs` mode so that a `clipPath` inside it
-is still collected, which keeps it referenceable by id as in usvg. -/
+is still collected, which keeps it referenceable by id as in usvg.  A `g`
+inside a `<marker>` stays in that marker's mode, so its whole subtree keeps
+routing to the same `markerNodes` slot (T52). -/
 def ClipMode.inner : ClipMode → ClipMode
   | .clip _ => .defs
   | m => m
@@ -2154,9 +2353,11 @@ def ClipMode.inner : ClipMode → ClipMode
 /-- Is content in this mode actually drawn?  Only rendered content can open a
 compositing layer: a `clipPath` child contributes a fill and nothing else, and
 what is under `defs` is not drawn at all, so usvg never asks `should_isolate`
-about either (T20 × T22). -/
+about either (T20 × T22).  Marker content is drawn too, once per instance
+(T52), so it counts as rendered here as well. -/
 def ClipMode.isRender : ClipMode → Bool
   | .render => true
+  | .markerDef _ => true
   | _ => false
 
 /-- Per-element state kept in lockstep with the style stack (T20). -/
@@ -2318,6 +2519,22 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       selfClipId := none, selfClip := none, children := #[], filled := false }
   let mut clipCursor : Nat := 0
   let mut uses : Array ClipUse := #[]
+  -- T52: one slot per `<marker id>` the pre-pass found, mirroring `clipTable`.
+  -- `markerCursor` steps through them the same way `clipCursor` does.  Unlike
+  -- a `clipPath`, a marker's own geometry attributes (`refX`/`markerWidth`/
+  -- `viewBox`/`orient`/...) are all on the element itself, so the slot is
+  -- filled in as soon as the walk opens it; only `content` waits for `.close`,
+  -- once every descendant routed into `markerNodes[k]` (see `ClipMode.
+  -- markerDef`) has been collected.
+  let mut markerTable : Array MarkerEntry := scan.markers.map fun (mid, _) =>
+    { id := mid, filled := false }
+  let mut markerCursor : Nat := 0
+  let mut markerNodes : Array (Array Node) := scan.markers.map fun _ => #[]
+  -- Seventh lockstep stack: `some k` on the element that opened marker slot
+  -- `k` (so `.close` knows when to freeze `markerNodes[k]` into
+  -- `markerTable[k].content`), `none` on every other element, including ones
+  -- nested inside a marker.
+  let mut markerOpenSlot : Array (Option Nat) := #[]
   let mut skip : Nat := 0
   let mut nodes : Array Node := #[]
   let mut root : Option RootInfo := none
@@ -2334,7 +2551,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let st := stack.back?.getD default
         let fr := frames.back?.getD default
         if layerOpen.back?.getD false then
-          nodes := nodes.push .groupEnd
+          match fr.mode with
+          | .markerDef k => markerNodes := markerNodes.setIfInBounds k ((markerNodes.getD k #[]).push .groupEnd)
+          | _ => nodes := nodes.push .groupEnd
           layerDepth := layerDepth - 1
         stack := stack.pop
         elemStack := elemStack.pop
@@ -2342,6 +2561,15 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         switchSel := switchSel.pop
         layerOpen := layerOpen.pop
         frames := frames.pop
+        -- T52: this element is exactly where marker slot `k` was opened (not
+        -- merely inside it), so its whole content has finished arriving in
+        -- `markerNodes[k]`.
+        match markerOpenSlot.back?.getD none with
+        | some k =>
+          let e := markerTable.getD k default
+          markerTable := markerTable.setIfInBounds k { e with content := markerNodes.getD k #[] }
+        | none => pure ()
+        markerOpenSlot := markerOpenSlot.pop
         -- T20: the element's object bounding box is complete now.  It goes to
         -- the element's own use, and (through the element's own transform)
         -- into the parent's box -- but only for rendered content: what is
@@ -2386,6 +2614,10 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let mut frame : Frame := {}
         let mut renders : Bool := false
         let mut container : Bool := false
+        -- T52: `some k` only from the `marker` branch below, when this
+        -- element is exactly where slot `k` was opened; pushed onto
+        -- `markerOpenSlot` alongside the other six stacks.
+        let mut markerSlot : Option Nat := none
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
@@ -2505,7 +2737,13 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             -- `.close`.  A `<text>` is a container like a `g` — its runs and
             -- glyphs can overlap — so a `clip-path` on it takes the layer
             -- route too, on the same terms as the bottom's.
-            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            -- T52: `<text>` inside a `<marker>`'s content is not supported
+            -- (`with-a-text-child.svg`) -- skipped like any other unsupported
+            -- element, rather than routed through `markerNodes` alongside the
+            -- three `nodes.push` sites below, which stay pointed at the
+            -- document unconditionally.
+            if (match pf.mode with | .markerDef _ => true | _ => false) then skip := 1
+            else if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
@@ -2542,6 +2780,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                       { pf' with bbox := Box.union pf'.bbox (tbox.bind (Box.transformed st.ownMat)) }
                   | none => pure ()
               | .defs => pure ()
+              | .markerDef _ => pure ()  -- unreachable: gated above, kept for exhaustiveness
               | .clip k =>
                 -- T36 landed, so `<text>` *is* a valid `clipPath` child:
                 -- usvg converts it to paths first and clips with those.  Each
@@ -2561,10 +2800,19 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
               let cmds := shapeCmds name attrs
+              -- T52: usvg 0.48.1 actually instantiates markers on every basic
+              -- shape (`converter.rs`'s `EId::Rect | Circle | Ellipse |
+              -- Polyline | Polygon | Path` all take the same `convert_path`
+              -- route that calls `marker::convert`) -- confirmed against
+              -- `marker-on-rect.svg`/`-circle.svg`/`-rounded-rect.svg`,
+              -- titled "(SVG 2)" -- but never on `<text>`, which is not in
+              -- that list (`marker-on-text.svg`).
+              let markerable := isShape name
               match pf.mode with
-              | .render =>
+              | .render | .markerDef _ =>
                 match cmds with
-                | some cmds => if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st⟩
+                | some cmds =>
+                  if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable⟩
                 | none => pure ()
               | .defs => pure ()
               | .clip k =>
@@ -2589,6 +2837,74 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               frame := { mode := pf.mode, useSlot := slot, want,
                          bbox := if want then cmds.bind cmdsBox else none }
               renders := pf.mode.isRender
+          else if name == "marker" then
+            -- T52: like `clipPath`, a `<marker>` never renders itself -- only
+            -- `.markerDef k` routing of its descendants and, on `.close`,
+            -- freezing `markerNodes[k]` into `markerTable[k].content`.  The
+            -- slot the pre-pass reserved for *this* element, found by event
+            -- index; no slot means no usable `id` (or past `maxMarkers`), so
+            -- the element is collected (its subtree still routes through
+            -- `.markerDef` machinery harmlessly) but stays unreferenceable --
+            -- matching `clipPath`'s `none => skip := 1` would instead drop a
+            -- `<path>` inside it from `defsScan`'s later, unrelated passes,
+            -- which nothing here does, so there is no reason to skip.
+            while markerCursor < scan.markers.size &&
+                (scan.markers.getD markerCursor ("", 0)).2 < idx do
+              markerCursor := markerCursor + 1
+            let slotK :=
+              if markerCursor < scan.markers.size &&
+                  (scan.markers.getD markerCursor ("", 0)).2 == idx
+              then some markerCursor else none
+            match slotK with
+            | none => skip := 1
+            | some k =>
+              markerSlot := some k
+              let stM := applyEffective
+                { parent with ctm := Mat.identity, ownMat := Mat.identity,
+                              clips := #[], clipRef := none } attrs chain
+              let refX := lengthOrPctAttr attrs "refX" 0 stM.pctRefW
+              let refY := lengthOrPctAttr attrs "refY" 0 stM.pctRefH
+              let width := lengthOrPctAttr attrs "markerWidth" (Fx.ofNat 3) stM.pctRefW
+              let height := lengthOrPctAttr attrs "markerHeight" (Fx.ofNat 3) stM.pctRefH
+              let viewBox := match attr attrs "viewBox" with
+                | some v =>
+                  let ns := parseNumberList v
+                  if ns.size == 4 then some (ns.getD 0 0, ns.getD 1 0, ns.getD 2 0, ns.getD 3 0)
+                  else none
+                | none => none
+              let (alignNone, alignX, alignY, slice) := parseAspectAttr attrs
+              let orient := parseOrientAttr attrs
+              let unitsUser := match attr attrs "markerUnits" with
+                | some v => eqAscii (trim v) "userSpaceOnUse"
+                | none => false
+              let clip := match attr attrs "overflow" with
+                | none => true
+                | some v =>
+                  let t := trim v
+                  eqAscii t "hidden" || eqAscii t "scroll"
+              let valid := width > 0 && height > 0
+              -- The `overflow:hidden` clip rectangle, built once here so
+              -- `Marker.expand` only has to add one `ClipUse` per instance:
+              -- the `viewBox` rect if there is one, else `(0, 0, width,
+              -- height)` -- `refX`/`refY` do *not* shift it (`convert_rect`'s
+              -- `r.size()` drops the rect's own origin before this step).
+              let mut clipEntryIdx : Option Nat := none
+              if clip && valid then
+                let (rx, ry, rw, rh) := viewBox.getD (0, 0, width, height)
+                let rect := rectPath rx ry rw rh 0 0
+                let child : ClipChild := ⟨rect, false, Mat.identity, true, #[], false⟩
+                let entry : ClipEntry :=
+                  { id := "", transform := Mat.identity, transformValid := true,
+                    objectBBox := false, selfClipId := none, selfClip := none,
+                    children := #[child], filled := true }
+                clipTable := clipTable.push entry
+                clipEntryIdx := some (clipTable.size - 1)
+              markerTable := markerTable.setIfInBounds k
+                { (markerTable.getD k default) with
+                  refX, refY, width, height, viewBox, alignNone, alignX, alignY, slice,
+                  orient, unitsUser, clip, clipEntryIdx, valid, filled := true }
+              enter := some stM
+              frame := { mode := .markerDef k }
           else
             skip := 1
         match enter with
@@ -2625,10 +2941,18 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             if layered then (match frame.useSlot with | some k => #[k] | none => #[]) else #[]
           let st := if layered && frame.useSlot.isSome then { st with clips := st.clips.pop } else st
           if layered then
-            nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
+            let gb := Node.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩
+            match frame.mode with
+            | .markerDef k => markerNodes := markerNodes.setIfInBounds k ((markerNodes.getD k #[]).push gb)
+            | _ => nodes := nodes.push gb
             layerDepth := layerDepth + 1
           match shapeNode with
-          | some s => nodes := nodes.push (.shape { s with style := st })
+          | some s =>
+            match frame.mode with
+            | .markerDef k =>
+              markerNodes := markerNodes.setIfInBounds k
+                ((markerNodes.getD k #[]).push (.shape { s with style := st }))
+            | _ => nodes := nodes.push (.shape { s with style := st })
           | none => pure ()
           stack := stack.push st
           elemStack := chain
@@ -2636,6 +2960,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           switchSel := switchSel.push sel
           layerOpen := layerOpen.push layered
           frames := frames.push frame
+          markerOpenSlot := markerOpenSlot.push markerSlot
   -- T20: resolve the ids, over the slots the walk actually filled.  Like
   -- usvg's `links` map, a duplicated id resolves to the last such element.
   let idMap : Std.HashMap String Nat := Id.run do
@@ -2648,7 +2973,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let usesResolved := uses.map fun u => { u with entry := idMap.get? u.id }
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, nodes, clipsResolved, usesResolved⟩
+  | some r => return ⟨r, nodes, clipsResolved, usesResolved, markerTable⟩
 
 end Svg
 end LeanSvg
