@@ -81,3 +81,99 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## What was implemented
+
+All new logic lives in `LeanSvg/Filter/Morphology.lean` (imported by
+`Filter.lean`); the only touches to `Filter.lean`/`FilterApply.lean` are the
+one `import`, the `Kind.morphology` constructor, one `convertPrim` clause,
+one `runPrim` case, and removing `"feMorphology"` from `isKnownUnsupported`
+(added to `isPrimitive` instead).
+
+* **Parsing (usvg `convert_morphology`).** `operator` (`"dilate"`, else
+  `erode`). `radius`: usvg's generic `Vec<f32>` attribute parse is
+  all-or-nothing (one unreadable number drops the *whole* list), unlike
+  `stdDeviation`'s bespoke partial-tolerant parser that `Filter.stdDevOf`
+  already implements — so `radius` gets its own list parser
+  (`morphDecList`) rather than reusing it. A list of one number is `rx = ry`;
+  two numbers are `rx, ry`; absent, unreadable, empty, or 3+ numbers all fall
+  back to the default. The default, and both of usvg's zero-radius quirks,
+  are ported exactly: if both values are zero, both become `1`; if only one
+  is zero, *only that one* becomes `1` (not in the spec, usvg does it to
+  match Chrome/Safari); if either surviving value is negative, *both* values
+  revert to the default (`1`), discarding a still-valid other one — usvg's
+  `PositiveF32::new(…).unwrap()` on the pre-declared default. The default and
+  every parsed value are scaled by `primitiveUnits` on the 16.16 grid, same
+  as every other primitive's lengths.
+* **Rendering (resvg `filter/morphology.rs` and `apply_morphology`).** The
+  radius is scaled by the device transform; if either resulting value is not
+  strictly positive (a degenerate transform), resvg clears the whole layer
+  rather than passing it through, which `FilterApply`'s new case reproduces.
+  Otherwise each device radius is ceiling'd to whole pixels
+  (`morphCeil`, an exact-rational ceiling — never rounds a genuinely positive
+  product down to `0`, unlike a rounding-to-nearest 16.16 conversion would at
+  extreme scales). `columns`/`rows` are `min(2·⌈r⌉, dimension)`, exactly
+  resvg's own cap, and the window is resvg's asymmetric
+  `[i - target, i - target + win - 1]` (not symmetric around `i` unless the
+  window happens to run uncapped). The per-channel min/max runs directly on
+  premultiplied bytes, as resvg's `RGBA8` implementation does (no
+  demultiply/premultiply round-trip).
+* **Complexity.** resvg's own algorithm is a direct 2-D window scan,
+  `O(area · r²)`. A rectangle is separable for min/max (the window is a
+  product set `X(x) × Y(y)`, each axis clipped to the image independently),
+  so this implements it as two 1-D passes — one along rows, one along columns
+  — each `O(area · win)`, giving `O(area · r)` total: strictly less work than
+  resvg's own algorithm on every input, so nothing that would be tractable
+  for the reference renderer becomes intractable here. `columns`/`rows` are
+  already capped to the image's own dimensions (resvg's own cap, not an
+  additional one), so cost never depends on how large `radius` is written in
+  the file, only on the layer size `Render.lean` already bounds.
+
+## Skipped, and why
+
+* **`filters/feMorphology/source-with-opacity`**: fills with a `<pattern>`
+  paint server, which is out of scope (patterns are a separate task) and was
+  already failing before this change with the identical score
+  (`0.7735` within-8 before and after) — not a regression, not something
+  `feMorphology` itself touches.
+
+## Report
+
+Baseline commit `1ba4c27`. `run_corpora.py --fast --corpus resvg --route
+direct` (width 100), before → after:
+
+| dir | files | pass before | pass after | mean within-8 before | after |
+|---|---|---|---|---|---|
+| filters/feMorphology | 14 | 0 | 13 | 69.84% | 98.38% |
+
+At natural size (`--width 200`, the corpus files' own viewBox size):
+13/14 pass, all at 100.000% within-8 (the 13 non-pattern files are
+99.81–100.00% *exact*, i.e. bit-identical to resvg on all but a couple of
+antialiasing-seam pixels); `source-with-opacity` is the pre-existing pattern
+failure above.
+
+Whole suite (`--fast`, width 100): **1224 → 1237 of 1679 passing; newly
+passing 13, newly failing 0.**
+
+Other checks, all on the final commit:
+
+* `lake build`: no errors, no new warnings.
+* `scripts/check-theorems.sh`: `theorems ok` (`proofs/SizeBound.lean`
+  unaffected).
+* `tests/run_tests.py`: 32/36 pass (unchanged 31/35 plus the new
+  `35_morphology`, which is 100.000% exact); no existing file's score moved.
+* `tests/run_adversarial.py`: 84/84 clean. New input:
+  `filter_morphology_huge_radius.svg` (`radius="1e9 1e30"`, dilate, 300×300
+  canvas) — 0.77s, well inside the 120s timeout, demonstrating the window cap
+  holds regardless of how the radius is written. The three existing filter
+  adversarial cases (`filter_huge_stddev`, `filter_huge_region`,
+  `filter_budget`) are unaffected (same timings as before this task).
+* `tests/run_tiles.py`: 36/36 byte-identical, including the new
+  `35_morphology` (an anisotropic `radius="2 10"` dilate straddling the
+  quadrant seam).
+* Timing: `filters/feMorphology/huge-radius` (`radius="9999"` on a 200×200
+  canvas) is 402ms here vs resvg's own 1636ms on the same file — the
+  separable implementation is faster than the reference renderer's direct
+  scan, not just bounded by it.

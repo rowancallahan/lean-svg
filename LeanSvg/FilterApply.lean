@@ -526,6 +526,11 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
     | _ => Img.of (pdComposite op (drawOver (Canvas.new rw rh none) b 0 0) a) lin
   | .colorMatrix i m => Img.of (colorMatrix m ((inp i).into lin).cv) lin
   | .transfer i fr fg fb fa => Img.of (transfer fr fg fb fa ((inp i).into lin).cv) lin
+  | .morphology i op rx ry =>
+    let im := (inp i).into lin
+    match morphDev rx ry scx scy with
+    | none => Img.of (Canvas.new im.cv.w im.cv.h none) lin
+    | some (dx, dy) => Img.of (morphologyApply op dx dy im.cv) lin
 
 /-- `filter::apply`: run `f` on the layer `src`, whose user space maps to the
 layer's pixels by `ts`.  An invalid region clears the layer, as resvg does. -/

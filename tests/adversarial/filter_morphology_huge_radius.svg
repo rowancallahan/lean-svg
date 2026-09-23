@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
+  <!-- T69: morphology window is capped to the image size, so cost stays
+       O(area · dim) regardless of how large `radius` is -->
+  <filter id="f"><feMorphology operator="dilate" radius="1e9 1e30"/></filter>
+  <rect x="50" y="50" width="200" height="200" fill="teal" filter="url(#f)"/>
+</svg>
