@@ -114,7 +114,7 @@ Also `opacity`, `mix-blend-mode` and `isolation`, which make an element a
 compositing layer (§3.9), and `clip-path`/`clip-rule`/`clipPathUnits`
 (§3.10).
 
-Known deviations: nested `<svg>` skipped; `color-dodge` and `color-burn` are
+Nested `<svg>` is a viewport (T48, `LeanSvg/Viewport.lean`). Known deviations: `color-dodge` and `color-burn` are
 within two levels of resvg rather than exact, and a `normal` layer composite is
 an exact integer source-over rather than the f32 pipeline, within one level
 (§3.9).
