@@ -4,9 +4,12 @@ and the suite's own PNGs (for files resvg is known to get wrong).
 
     python3 tests/render_chrome.py OUT_DIR WIDTH file.svg [file.svg ...]
 
-Writes OUT_DIR/<basename>.chrome.png at WIDTH px wide, height from the SVG's
-aspect ratio, on a transparent background. The file is opened by path, so
-relative resources resolve the way a browser would resolve them.
+Writes OUT_DIR/<parent-dir>__<basename>.chrome.png at WIDTH px wide, height
+from the SVG's aspect ratio, on a transparent background. The file is opened
+by path, so relative resources resolve the way a browser would resolve them.
+The parent directory is included in the output name because this suite reuses
+basenames (e.g. many `complex-transform.svg`) across different test folders;
+keying on the basename alone silently overwrites unrelated outputs.
 """
 import sys
 from pathlib import Path
@@ -34,6 +37,7 @@ with sync_playwright() as p:
         img = page.locator("img")
         box = img.bounding_box()
         assert box and box["width"] > 0, "chromium could not render %s" % f
-        img.screenshot(path=str(out / (src.stem + ".chrome.png")), omit_background=True)
+        out_name = f"{src.parent.name}__{src.stem}.chrome.png"
+        img.screenshot(path=str(out / out_name), omit_background=True)
         html.unlink()
     browser.close()
