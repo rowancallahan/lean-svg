@@ -1,4 +1,7 @@
 import LeanSvg.Filter
+import LeanSvg.Filter.Gamma
+import LeanSvg.Filter.Tile
+import LeanSvg.Filter.DisplacementMap
 
 /-!
 # Filters (T51): running a filter on a layer's pixels
@@ -291,6 +294,7 @@ def tfTable (f : TF) : Option (Array Nat) :=
       let n := vs.size
       mk fun c => vs.getD (Nat.min (n - 1) (f32Floor (F32.mul c (F32.ofNat n)))) 0
   | .linear s i => mk fun c => F32.add (F32.mul s c) i
+  | .gamma amp ex off => mk fun c => F32.add (F32.mul amp (powF32 c ex)) off
 
 def transfer (fr fg fb fa : TF) (cv : Canvas) : Canvas :=
   let ap := fun (t : Option (Array Nat)) (c : Nat) => match t with
@@ -475,8 +479,13 @@ def getInput (src : Canvas) (region : Int × Int × Int × Int) (results : Array
                region.1, region.2.1, region.2.2.1, region.2.2.2, false⟩
   | .ref i => results.getD i ⟨src, region.1, region.2.1, region.2.2.1, region.2.2.2, false⟩
 
-/-- One primitive: resvg's `apply_*`.  `rw × rh` is the filter region's size. -/
-def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Img) : Img :=
+/-- One primitive: resvg's `apply_*`.  `rw × rh` is the filter region's size.
+`ox`/`oy` (absolute device pixels) are the filter region's own origin,
+needed only by `.tile` to turn an input's absolute recorded region into
+region-local pixel coordinates; every other case ignores them, so the
+default keeps every other call site unchanged. -/
+def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Img)
+    (ox oy : Int := 0) : Img :=
   let (scx, scy) := scaleOf ts
   match k with
   | .flood r g b a => Img.of (Canvas.new rw rh (some ⟨r, g, b, a⟩)) false
@@ -526,6 +535,13 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
     | _ => Img.of (pdComposite op (drawOver (Canvas.new rw rh none) b 0 0) a) lin
   | .colorMatrix i m => Img.of (colorMatrix m ((inp i).into lin).cv) lin
   | .transfer i fr fg fb fa => Img.of (transfer fr fg fb fa ((inp i).into lin).cv) lin
+  | .tile i =>
+    let im := inp i
+    Img.of (runTileCanvas rw rh (im.rx - ox) (im.ry - oy) im.rw im.rh im.cv) false
+  | .displacementMap i1 i2 chX chY scale =>
+    let a := ((inp i1).into lin).cv
+    let m := ((inp i2).into lin).cv
+    Img.of (runDisplacementMap rw rh scx scy scale chX chY a m) lin
 
 /-- `filter::apply`: run `f` on the layer `src`, whose user space maps to the
 layer's pixels by `ts`.  An invalid region clears the layer, as resvg does. -/
@@ -554,7 +570,7 @@ def run (f : Resolved) (ts : Mat) (src : Canvas) : Canvas := Id.run do
       | none => pure ()
     | .offset .. => isOffset := true
     | _ => pure ()
-    let mut res := runPrim p.kind p.linear ts rw rh (getInput src region results)
+    let mut res := runPrim p.kind p.linear ts rw rh (getInput src region results) x0 y0
     if region != sub then
       let (cx, cy, cw, ch) :=
         if isOffset then (0, 0, (x1 - x0), (y1 - y0))

@@ -374,9 +374,10 @@ per render (`maxFilterTotal`), and a `<filter>` has at most `Filter.maxPrims`
 primitives.
 
 Primitives usvg knows but this renderer does not implement (lighting,
-turbulence, morphology, convolution, tile, image, displacement, a `gamma`
-transfer function) make the whole `filter` value resolve to "no filter": the
-element renders exactly as before T51.
+turbulence, morphology, convolution, image) make the whole `filter` value
+resolve to "no filter": the element renders exactly as before T51. `feTile`,
+`feDisplacementMap` (`LeanSvg/Filter/Tile.lean`, `LeanSvg/Filter/DisplacementMap.lean`)
+and a `gamma` transfer function (`LeanSvg/Filter/Gamma.lean`) were added in T70.
 
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 

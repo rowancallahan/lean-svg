@@ -155,13 +155,14 @@ inductive CMKind where
   | lumToAlpha
 deriving Inhabited, Repr
 
-/-- One `feFuncX` (usvg `TransferFunction`), without `gamma`, which needs a
-`powf` and is left to the wave-2 task (a `gamma` makes the filter unsupported). -/
+/-- One `feFuncX` (usvg `TransferFunction`).  `gamma`'s `powF32` lives in
+`LeanSvg/Filter/Gamma.lean` (T70). -/
 inductive TF where
   | identity
   | table (vs : Array F32)
   | discrete (vs : Array F32)
   | linear (slope intercept : F32)
+  | gamma (amplitude exponent offset : F32)
 deriving Inhabited, Repr
 
 inductive CompOp where
@@ -183,6 +184,8 @@ inductive Kind where
   | composite (i1 i2 : Input) (op : CompOp)
   | colorMatrix (i : Input) (k : CMKind)
   | transfer (i : Input) (fr fg fb fa : TF)
+  | tile (i : Input)
+  | displacementMap (i1 i2 : Input) (chX chY : Nat) (scale : Int)
 deriving Inhabited
 
 /-- A rectangle in user space, `Fx`; `w` and `h` positive (`NonZeroRect`). -/
@@ -476,14 +479,15 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 /-- The tags usvg converts but this renderer does not implement yet: a
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
-  name == "feTile" || name == "feImage" || name == "feConvolveMatrix" ||
-  name == "feMorphology" || name == "feDisplacementMap" || name == "feTurbulence" ||
+  name == "feImage" || name == "feConvolveMatrix" ||
+  name == "feMorphology" || name == "feTurbulence" ||
   name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
-  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix"
+  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
+  name == "feTile" || name == "feDisplacementMap"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -629,7 +633,9 @@ def transferOf (attrs : Array Xml.Attr) : Option (Option TF) :=
       some (some (.discrete (((attr attrs "tableValues").bind f32List).getD #[])))
     else if eqAscii t "linear" then
       some (some (.linear (f32Attr attrs "slope" F32.one) (f32Attr attrs "intercept" 0)))
-    else if eqAscii t "gamma" then some none
+    else if eqAscii t "gamma" then
+      some (some (.gamma (f32Attr attrs "amplitude" F32.one) (f32Attr attrs "exponent" F32.one)
+        (f32Attr attrs "offset" 0)))
     else none
 
 /-- One primitive element to a `Kind`, given the names of the results before
@@ -677,6 +683,15 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
         | none => pure ()
     return some (.transfer inp (fs.getD 0 .identity) (fs.getD 1 .identity)
       (fs.getD 2 .identity) (fs.getD 3 .identity))
+  | "feTile" => some (.tile inp)
+  | "feDisplacementMap" =>
+    let chanOf := fun (v : Option ByteArray) => match v.map trim with
+      | some t => if eqAscii t "R" then 0 else if eqAscii t "G" then 1
+        else if eqAscii t "B" then 2 else 3
+      | none => 3
+    let scAvg : Fx := (scx + scy) / 2
+    some (.displacementMap inp inp2 (chanOf (attr a "xChannelSelector"))
+      (chanOf (attr a "yChannelSelector")) (numAttrScaled a "scale" 0 scAvg))
   | _ => none
 
 /-- `resolve_primitive_region`.  Coordinates are `try_convert_length`s in
