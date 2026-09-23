@@ -1,6 +1,6 @@
 name = "lean-svg"
 version = "0.1.0"
-defaultTargets = ["lean-svg", "fontdump", "pngdump", "jpegdump"]
+defaultTargets = ["lean-svg", "fontdump", "pngdump", "jpegdump", "shapedump"]
 
 # No dependencies on purpose: the trusted computing base is Lean core only.
 # (No mathlib, no FFI, no C libraries.)
@@ -30,3 +30,10 @@ root = "PngDump"
 [[lean_exe]]
 name = "jpegdump"
 root = "JpegDump"
+
+# Debug/oracle tool for LeanSvg.Bidi and LeanSvg.Shape (T93): shapes runs with
+# an embedded font and runs the bidi algorithm on lines read from stdin, for
+# tests/check_shape.py and tests/check_bidi.py; lean-svg does not link it.
+[[lean_exe]]
+name = "shapedump"
+root = "ShapeDump"
