@@ -1,6 +1,7 @@
 import LeanSvg.Mask
 import LeanSvg.Clip
 import LeanSvg.FilterApply
+import LeanSvg.Filter.ImageRender
 import LeanSvg.Png
 
 /-!
@@ -696,13 +697,50 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
         | none => pure ()
         | some parent =>
           livePixels := livePixels - cur.w * cur.h
+          -- T67: an `feImage` renders its image or linked element first, the
+          -- link through this function again on `fuel - 1` (`FeImage`).
+          let mut fs := parent.filters
+          for fi in [0:fs.size] do
+            for j in FeImage.jobs (fs.getD fi default) parent.fts cur.w cur.h do
+              match j.spec.href with
+              | .data uri =>
+                match FeImage.dataCanvas uri j.spec.aspect j.rw j.rh j.sx j.sy j.sw j.sh with
+                | some cv => fs := FeImage.setPre fs fi j.prim cv
+                | none => pure ()
+              | .other => pure ()
+              | .elem id =>
+                renders := renders + FeImage.cost doc.events
+                if renders > maxMaskRenders then
+                  err := some "feImage budget"
+                  break
+                if livePixels + cur.w * cur.h + j.rw * j.rh > maxLayerPixels then
+                  err := some "layer budget"
+                  break
+                match FeImage.subDoc doc.events id with
+                | .error msg =>
+                  err := some msg
+                  break
+                | .ok none => pure ()
+                | .ok (some sd) =>
+                  match renderNodes sd j.rw j.rh j.rw j.rh fuel (j.mat parent.fts) sd.nodes
+                      (Canvas.new j.rw j.rh none) { curClip with x0 := 0, y0 := 0, x1 := j.rw, y1 := j.rh }
+                      0 0 {} (livePixels + cur.w * cur.h + j.rw * j.rh) renders filterWork with
+                  | .error msg =>
+                    err := some msg
+                    break
+                  | .ok (icv, _, n, fw') =>
+                    renders := n
+                    filterWork := fw'
+                    fs := FeImage.setPre fs fi j.prim icv
+            if err.isSome then break
+          if err.isSome then break
           -- resvg's order (`render_group`): the filter, then the clip, then the
           -- mask, then the opacity and blend mode composite.  A filter layer is
           -- filtered in its own frame and cropped back into the parent's.
           let placed : Option (Canvas × Nat × Nat × Clip) :=
             if parent.filters.isEmpty then some (cur, curOx, curOy, curClip)
             else
-              let out := parent.filters.foldl (fun c f => FilterApply.run f parent.fts c) cur
+              let out := fs.foldl (fun c f => FilterApply.run f parent.fts c) cur
               (cropTo out (parent.lx - parent.ox) (parent.ly - parent.oy)
                   parent.cv.w parent.cv.h).map fun (c, nx, ny) =>
                 let ax := nx + parent.ox

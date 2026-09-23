@@ -2,6 +2,7 @@ import LeanSvg.Canvas
 import LeanSvg.Xml
 import LeanSvg.Fixed
 import LeanSvg.Geom
+import LeanSvg.Filter.Image
 import Std.Data.HashMap
 
 /-!
@@ -183,6 +184,7 @@ inductive Kind where
   | composite (i1 i2 : Input) (op : CompOp)
   | colorMatrix (i : Input) (k : CMKind)
   | transfer (i : Input) (fr fg fb fa : TF)
+  | image (s : FeImage.Spec)
 deriving Inhabited
 
 /-- A rectangle in user space, `Fx`; `w` and `h` positive (`NonZeroRect`). -/
@@ -476,14 +478,15 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 /-- The tags usvg converts but this renderer does not implement yet: a
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
-  name == "feTile" || name == "feImage" || name == "feConvolveMatrix" ||
+  name == "feTile" || name == "feConvolveMatrix" ||
   name == "feMorphology" || name == "feDisplacementMap" || name == "feTurbulence" ||
   name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
-  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix"
+  name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
+  name == "feImage"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -665,6 +668,7 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
       | none => .over
     some (.composite inp inp2 op)
   | "feColorMatrix" => some (.colorMatrix inp (colorMatrixOf a))
+  | "feImage" => some (.image (FeImage.parse a))
   | "feComponentTransfer" => Id.run do
     let mut fs : Array TF := #[.identity, .identity, .identity, .identity]
     for (cn, ca) in p.children do
@@ -692,7 +696,7 @@ def primRegion (p : RawPrim) (obb : Bool) (bbox : Option URect) (region : URect)
   let w := get "width" vbW
   let h := get "height" vbH
   let f16 := fun (v : Int) => Int.ediv (v + 128) 256
-  if p.name == "feFlood" && obb then
+  if (p.name == "feFlood" || p.name == "feImage") && obb then
     match bbox with
     | none => none
     | some b => bboxT16 (x.getD 0) (y.getD 0) (w.getD 65536) (h.getD 65536) b

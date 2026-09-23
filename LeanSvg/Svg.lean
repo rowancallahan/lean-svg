@@ -380,6 +380,9 @@ structure Doc where
   /-- The `mask` table and the `mask` uses (T49). -/
   masks : Array MaskEntry := #[]
   maskUses : Array MaskUse := #[]
+  /-- T67: the input events after usvg's `fix_recursive_fe_image`, before `use`
+  expansion: what an `feImage` link's sub-document is cut from. -/
+  events : Array Xml.Event := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -2574,6 +2577,8 @@ so CSS resolution and switch selection never drift out of sync. -/
 def interpret (events : Array Xml.Event) : Except String Doc := do
   -- T47: `use` references are copied in first; everything below sees the
   -- expanded stream (see `LeanSvg/Use.lean`).
+  let events := FeImage.fixRecursive events
+  let srcEvents := events
   let events ← Use.expand events (rootViewport events) maxClipPaths
   let combinedCss : ByteArray := Id.run do
     let mut out := ByteArray.empty
@@ -3259,7 +3264,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
     (maskUses.map fun u => { u with entry := maskIdMap.get? u.id }) maskHolders
   match root with
   | none => throw "no <svg> root element"
-  | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed⟩
+  | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, srcEvents⟩
 
 end Svg
 end LeanSvg
