@@ -3,6 +3,7 @@ import LeanSvg.Clip
 import LeanSvg.FilterApply
 import LeanSvg.Marker
 import LeanSvg.Filter.ImageRender
+import LeanSvg.PatternRender
 import LeanSvg.Png
 
 /-!
@@ -285,6 +286,11 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
       | .skip => cv
       | .solid c a8 => cv.fillMask m c a8
       | .grad sh => cv.fillMaskShader m sh
+    | .pattern i =>
+      match Pat.build doc Pat.patternFuel i s.cmds gctm (clip.vx + tgt.ox) (clip.vy + tgt.oy)
+              op st.opacity with
+      | .skip => cv
+      | .tile sh => cv.fillMaskPattern m sh
   -- `shape-rendering: crispEdges`/`optimizeSpeed` swaps in the non-antialiased
   -- rasterizer for both fill and stroke (`use_shape_antialiasing` in DESIGN.md
   -- §3.5's non-AA note); every other rendering mode keeps the default path.

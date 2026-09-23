@@ -18,10 +18,12 @@ import LeanSvg.Inflate
 import LeanSvg.PngDecode
 import LeanSvg.JpegDecode
 import LeanSvg.Image
+import LeanSvg.Pattern
 import LeanSvg.Svg
 import LeanSvg.Clip
 import LeanSvg.Mask
 import LeanSvg.Filter
 import LeanSvg.FilterApply
 import LeanSvg.Marker
+import LeanSvg.PatternRender
 import LeanSvg.Render
