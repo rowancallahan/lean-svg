@@ -4,6 +4,7 @@ import LeanSvg.Fixed
 import LeanSvg.Geom
 import LeanSvg.Filter.Image
 import LeanSvg.Filter.Turbulence
+import LeanSvg.Filter.Morphology
 import Std.Data.HashMap
 
 /-!
@@ -187,6 +188,7 @@ inductive Kind where
   | transfer (i : Input) (fr fg fb fa : TF)
   | image (s : FeImage.Spec)
   | turbulence (t : Turbulence.Params)
+  | morphology (i : Input) (op : MorphOp) (rx ry : Int)
 deriving Inhabited
 
 /-- A rectangle in user space, `Fx`; `w` and `h` positive (`NonZeroRect`). -/
@@ -484,14 +486,14 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 /-- The tags usvg converts but this renderer does not implement yet: a
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
-  name == "feTile" || name == "feConvolveMatrix" || name == "feMorphology" || name == "feDisplacementMap" ||
+  name == "feTile" || name == "feConvolveMatrix" || name == "feDisplacementMap" ||
   name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
   name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
-  name == "feImage" || name == "feTurbulence"
+  name == "feImage" || name == "feTurbulence" || name == "feMorphology"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -676,6 +678,9 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
   | "feImage" => some (.image (FeImage.parse a))
   | "feTurbulence" => some (.turbulence (Turbulence.params ((attr a "baseFrequency").bind f32List)
       (f32Attr a "numOctaves" F32.one) (f32Attr a "seed" 0) (attr a "stitchTiles") (attr a "type")))
+  | "feMorphology" =>
+    let (rx, ry) := radiusOf (attr a "radius") scx scy
+    some (.morphology inp (morphOpOf (attr a "operator")) rx ry)
   | "feComponentTransfer" => Id.run do
     let mut fs : Array TF := #[.identity, .identity, .identity, .identity]
     for (cn, ca) in p.children do
