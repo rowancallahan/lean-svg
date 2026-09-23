@@ -29,6 +29,15 @@ Open items in `docs/QUESTIONS.md`; diagnoses in `docs/resvg-wrong/`,
 **Still open (ask Rowan):** DTD internal entities, legacy encodings,
 bidi/RTL scope, `textPath` Chromium-vs-suite disagreements.
 
+## To do when parity is reached: a feature-support survey (Rowan, 2026-09-23)
+
+Survey the whole feature corpus (the resvg suite's feature directories plus
+the features it does not test) and decide, feature by feature: supported /
+not supported / supported differently. For each, write down the rule that
+defines "correct" for it (resvg, the suite PNG, Chromium, the spec, or our
+own policy such as no external resources) so the pass criterion is explicit
+per feature rather than "match resvg". This becomes part of `spec/`.
+
 ## To do after the current merges: a `spec/` folder (Rowan, 2026-09-23)
 
 Readers will not read the Lean code or the proofs, only the theorem
