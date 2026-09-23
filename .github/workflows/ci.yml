@@ -104,11 +104,17 @@ jobs:
             lake env lean "$f"
           done
 
+      # Each harness is independent; run all three even if an earlier one
+      # fails so a red run still reports every result instead of stopping
+      # at the first failure.
       - name: run_tests.py
+        if: always()
         run: python3 tests/run_tests.py
 
       - name: run_tiles.py
+        if: always()
         run: python3 tests/run_tiles.py
 
       - name: run_adversarial.py
+        if: always()
         run: python3 tests/run_adversarial.py

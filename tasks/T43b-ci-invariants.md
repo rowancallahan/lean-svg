@@ -218,13 +218,37 @@ left check 5 as specified. This should go green once whichever other task
 owns `12_badge`/`14_flower_transforms`/`15_spiral_stroke`/`16_stress_2000`
 lands. The `invariants` job is green on `main` today.
 
+### Confirmed on a real hosted run
+
+Pushed to `claude/feat-ci-invariants` and watched the actual run
+(https://github.com/rowancallahan/lean-svg/actions/runs/35805424014, cold —
+first push, no caches yet):
+
+- **`invariants`: green, 51s total.** `Install Lean` 15s (plain `elan
+  toolchain install`, no fallback needed — GitHub's runner has no egress
+  block), `lake build` 20s, the check-theorems.sh step itself 2s. Matches
+  local numbers closely.
+- **`tests`: red, but for exactly the documented reason.** `Install
+  resvg/usvg 0.48.1` cold: 82s combined (`cargo install`, no cache hit on
+  first run). `run_tests.py` reported **23/27 passed, 4 failed** —
+  `12_badge`, `14_flower_transforms`, `15_spiral_stroke`, `16_stress_2000` —
+  byte-for-byte the same table as the local run above, confirming the CI
+  wiring itself is correct and this is the pre-existing renderer state, not
+  a bug introduced by this task.
+
+One real wiring gap the hosted run exposed: `run_tiles.py` and
+`run_adversarial.py` were skipped once `run_tests.py` failed (GitHub
+Actions' default is to skip later steps after a failure), so a red run gave
+only one of the three results instead of all three. Fixed by adding `if:
+always()` to all three harness steps — each now runs independently and the
+job still reports failure if any of them does. Re-validated with
+`actionlint` (clean) after the fix; this fix is included in the pushed
+commit, not yet re-run on GitHub as of writing this line.
+
 ### Not done / deferred
 
 - Did not open a pull request, per the T43b amendment overriding T43's
   original instruction.
-- Have not seen an actual GitHub Actions run of this workflow (only local
-  reproduction of every step plus `actionlint`), since triggering one
-  requires pushing to `claude/feat-ci-invariants` — done as the final step
-  of this task. If CI infrastructure notifications are available afterward,
-  worth a follow-up glance to confirm the hosted run matches these numbers,
-  particularly the cache hit/miss behavior on a second push.
+- Have not seen a hosted run with warm caches (second push) to confirm the
+  cache-hit path for `~/.elan`, `.lake`, and the resvg/usvg binaries — only
+  the cold first run above. Worth a glance on the next push to this branch.
