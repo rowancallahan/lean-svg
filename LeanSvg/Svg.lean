@@ -2265,7 +2265,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
       let st := match weight with
         | some w => { st with fontWeight := parseFontWeight st.fontWeight w }
         | none => st
-      let st := { st with fontSize := parseFontSize st.fontSize size }
+      let st := { st with fontSize := parseFontSize st.fontSize size st.rootFontSize }
       match resolveFontFamily family with
       | some k => { st with fontAvailable := true, fontFamily := k }
       | none => { st with fontAvailable := false, fontFamily := 0 }
@@ -2965,7 +2965,7 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
     | .open_ "textPath" attrs =>
       match attr attrs "path" with
       | some v =>
-        match (shapeCmds "path" #[⟨"d", v⟩] 0 0 0 0).bind (fun cmds => TextPath.build cmds Mat.identity) with
+        match (shapeCmds "path" #[⟨"d", v⟩] 0 0 0 { size := 0 }).bind (fun cmds => TextPath.build cmds Mat.identity) with
         | some tbl => out := out.insert (inlinePathKey v) tbl
         | none => pure ()
       | none => pure ()
