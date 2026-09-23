@@ -16,7 +16,8 @@ because the pixels are what is compared:
   `feBlend`, `feComposite`, `feMerge`) makes it the size of the filter region;
 * each result carries its colour space, and an input is converted (demultiply,
   8-bit table, premultiply) only when the primitive's space differs;
-* a subregion clips by clearing whole pixels outside it, except on `feOffset`;
+* a subregion clips by clearing whole pixels outside it, `feOffset` included
+  (resvg exempts it; the spec, the suite and Chromium do not, T99);
 * the last result is converted to sRGB and replaces the layer.
 
 Arithmetic: `feGaussianBlur` is resvg's choice of algorithm — a five-pass box
@@ -576,20 +577,17 @@ def run (f : Resolved) (ts : Mat) (src : Canvas) : Canvas := Id.run do
   for p in f.prims do
     let some sub0 := devRect ts p.sub | return clear
     let mut sub := sub0
-    let mut isOffset := false
     match p.kind with
     | .offset (.ref i) _ _ =>
-      isOffset := true
       match results[i]? with
       | some r => sub := (r.rx, r.ry, r.rw, r.rh)
       | none => pure ()
-    | .offset .. => isOffset := true
     | _ => pure ()
     let mut res := runPrim p.kind p.linear ts rw rh (getInput src region results) x0 y0
     if region != sub then
-      let (cx, cy, cw, ch) :=
-        if isOffset then (0, 0, (x1 - x0), (y1 - y0))
-        else (sub.1 - x0, sub.2.1 - y0, sub.2.2.1, sub.2.2.2)
+      -- T99: `feOffset` is clipped like every other primitive (spec, suite,
+      -- Chromium); resvg skips it ("We do not support clipping on feOffset").
+      let (cx, cy, cw, ch) := (sub.1 - x0, sub.2.1 - y0, sub.2.2.1, sub.2.2.2)
       res := { res with cv := clearOutside res.cv cx cy cw ch,
                         rx := sub.1, ry := sub.2.1, rw := sub.2.2.1, rh := sub.2.2.2 }
     results := results.push res
