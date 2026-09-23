@@ -252,8 +252,15 @@ def build (doc : Svg.Doc) (fuel : Nat) (idx : Nat) (cmds : Array PathCmd) (ctm0 
   let ctm := if ox == 0 && oy == 0 then ctm0
              else (Mat.translate (ox * 256) (oy * 256)).mul ctm0
   let m := ctm.mul res.transform
-  let sx16 := Grad.sqrt16 (Grad.norm2 m.a m.b)
-  let sy16 := Grad.sqrt16 (Grad.norm2 m.c m.d)
+  -- `Transform::get_scale` (tiny-skia `path/src/transform.rs`) takes the norm
+  -- of each *row* — `(sx, kx) = (m.a, m.c)` for x, `(ky, sy) = (m.b, m.d)` for
+  -- y — not each column.  The two coincide for a pure rotation (both rows and
+  -- both columns are orthonormal there), which is why `with-patternTransform`
+  -- and `transform-and-patternTransform` (`rotate(30)`) already matched; a
+  -- `skewX`/`skewY` `patternTransform` has an asymmetric matrix where they
+  -- differ, and using the column norm swapped the tile's two axis scales.
+  let sx16 := Grad.sqrt16 (Grad.norm2 m.a m.c)
+  let sy16 := Grad.sqrt16 (Grad.norm2 m.b m.d)
   if sx16 == 0 || sy16 == 0 then .skip else
   let round16 := fun (v : Int) => Int.ediv (v + 32768) 65536
   let pxW := (round16 (Grad.mul16 wAbs sx16)).toNat
