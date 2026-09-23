@@ -17,12 +17,16 @@ VIOLATION unless all of the following hold:
 """
 
 import argparse
+import base64
 import random
+import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 from PIL import Image
@@ -318,6 +322,39 @@ def generate_cases():
         + "\n</svg>\n",
     )
 
+    # ---- T63: <image> ---------------------------------------------------
+    # A 30 MB data: URI (a PNG signature, then noise): decoded, rejected by
+    # the decoder, drawn as nothing.  Well under the 64 MiB input cap.
+    noise = random.Random(63).randbytes(22_000_000)
+    write_text(
+        "image_data_30mb.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n'
+        '<image width="100" height="100" href="data:image/png;base64,'
+        + base64.b64encode(b"\x89PNG\r\n\x1a\n" + noise).decode()
+        + '"/>\n<rect x="10" y="10" width="20" height="20"/>\n</svg>\n',
+    )
+
+    # A decompression bomb: ~65 KB of PNG that inflates to 4096x4096 RGBA
+    # (the per-image cap), drawn through 300 `use` copies.  The document-wide
+    # pixel budget (Image.maxTotalPixels) keeps two decodes and skips the rest.
+    def png_chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+    side = 4096
+    bomb = (b"\x89PNG\r\n\x1a\n"
+            + png_chunk(b"IHDR", struct.pack(">IIBBBBB", side, side, 8, 6, 0, 0, 0))
+            + png_chunk(b"IDAT", zlib.compress(b"\x00" * ((side * 4 + 1) * side), 9))
+            + png_chunk(b"IEND", b""))
+    write_text(
+        "image_bomb_uses.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+        ' width="100" height="100">\n<defs><image id="b" width="10" height="10" '
+        'href="data:image/png;base64,' + base64.b64encode(bomb).decode() + '"/></defs>\n'
+        + "".join('<use xlink:href="#b" x="%d" y="%d"/>' % (i % 10 * 10, i // 30 * 10)
+                  for i in range(300))
+        + "\n</svg>\n",
+    )
+
     # 64 KiB of deterministic noise that is not XML at all.
     write_bytes(
         "random_bytes.bin",
@@ -535,6 +572,49 @@ def check_no_clobber(binary):
     return result
 
 
+def check_image_refs_inert(binary):
+    """T63: an `<image>` whose href is not a `data:` URI (a path, `file:`,
+    `http:`) must render byte-identically to the same file with every
+    `<image>` removed: nothing is loaded, nothing is drawn."""
+    result = {
+        "name": "image_refs_inert",
+        "rc": None,
+        "ms": None,
+        "output": False,
+        "stderr": "",
+        "violations": [],
+    }
+    tmpdir = Path(tempfile.mkdtemp(prefix="lean-svg_adv_"))
+    src = ADV_DIR / "image_refs.svg"
+    try:
+        stripped = tmpdir / "stripped.svg"
+        stripped.write_text(re.sub(r"<image\b[^>]*/>", "", src.read_text()))
+        outs = []
+        start = time.perf_counter()
+        for svg, name in ((src, "a.png"), (stripped, "b.png")):
+            proc = subprocess.run(
+                [str(binary), str(svg), str(tmpdir / name)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=RENDER_TIMEOUT,
+            )
+            result["rc"] = proc.returncode
+            result["stderr"] = proc.stderr.decode("utf-8", "replace").strip()
+            if proc.returncode != 0:
+                result["violations"].append("render of %s failed" % svg.name)
+                return result
+            outs.append((tmpdir / name).read_bytes())
+        result["ms"] = (time.perf_counter() - start) * 1000.0
+        result["output"] = True
+        if outs[0] != outs[1]:
+            result["violations"].append("non-data: image hrefs changed the output")
+    except subprocess.TimeoutExpired:
+        result["violations"].append("timed out after %ds" % RENDER_TIMEOUT)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return result
+
+
 def check_max_input_size(binary):
     """A file over the input size limit (64 MiB) must be rejected cleanly,
     like every other hostile input: rc 1, no output, no hang."""
@@ -650,7 +730,8 @@ def main():
     if args.filter:
         cases = [c for c in cases if args.filter in c[1]]
 
-    extra_checks = {"no_clobber": check_no_clobber, "oversized_input": check_max_input_size}
+    extra_checks = {"no_clobber": check_no_clobber, "oversized_input": check_max_input_size,
+                    "image_refs_inert": check_image_refs_inert}
     extra_names = [n for n in extra_checks if not args.filter or args.filter in n]
     if not cases and not extra_names:
         print("no adversarial cases to run", file=sys.stderr)
