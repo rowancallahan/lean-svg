@@ -2961,8 +2961,11 @@ def textPathTable (paths : Std.HashMap String TextPath.Table) (attrs : Array Xml
 keyed by id, built once per document.  The first element carrying an id wins,
 as in usvg's `svgtree`; an id whose element is not a shape, or whose shape
 draws nothing, gets no table, which makes the `textPath` invalid.  The shape
-is taken with its own `transform` and nothing above it (`resolve_text_flow`). -/
-def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Table := Id.run do
+is taken with its own `transform` and nothing above it (`resolve_text_flow`),
+wrapped by its own `transform-origin` (T96: `resolve_transform`, the same
+viewport rect `pctRefW`/`pctRefH` as everywhere else). -/
+def textPathTables (events : Array Xml.Event) (pctRefW pctRefH : Fx) :
+    Std.HashMap String TextPath.Table := Id.run do
   let mut wanted : Std.HashMap String Bool := {}
   for ev in events do
     match ev with
@@ -2993,7 +2996,7 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
         if wanted.get? id == some false then
           wanted := wanted.insert id true
           let m := match attr attrs "transform" with
-            | some t => parseTransform t
+            | some t => wrapTransformOrigin attrs pctRefW pctRefH (parseTransform t)
             | none => Mat.identity
           match (shapeCmds nm attrs 0 0 0 { size := 0 }).bind (fun cmds => TextPath.build cmds m) with
           | some tbl => out := out.insert id tbl
@@ -3740,7 +3743,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
   -- copying, and T20's `clipPath` slots, which the walk below fills in
   -- because their contents need the cascade.  See "the shape of a defs table".
   let scan := defsScan events
-  let textPaths := textPathTables events
+  let textPaths := textPathTables events (Int.ediv scan.pctRef.w 256) (Int.ediv scan.pctRef.h 256)
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
   -- T51: every `<filter>` element, collected up front like the gradients.
   let fparsers : Filter.Parsers := ⟨parseColor, parseOpacity, opacityOne⟩
