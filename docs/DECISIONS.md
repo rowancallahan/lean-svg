@@ -99,3 +99,11 @@ now differ from resvg but match Chromium better (within-8 vs Chromium, 400 px):
 resvg rasterises the filter region axis-aligned and does not rotate
 turbulence or blur with the element. `tests/run_tests.py` still scores these
 three against resvg, so they show as failing there; this is expected.
+
+## T93 merged: `text/direction/rtl.svg` stops matching resvg (2026-09-23)
+
+resvg is rated wrong on this file. Before T93 we drew tofu boxes (which
+happened to score 0.984 vs the suite PNG); now the Arabic is shaped and
+right-to-left, in Amiri, while the suite PNG uses Noto Sans Arabic (0.980).
+Visually correct; the remaining gap is the font. Follow-up option: embed Noto
+Sans Arabic (OFL, ~0.2 MB subset) for the "Noto Sans Arabic" family.
