@@ -159,6 +159,12 @@ structure Style where
   fontItalic : Bool := false
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
+  /-- T90: CSS Fonts 4 `font-size-adjust` (number form, `ex-height`), as an
+  `Fx` aspect value; inherited.  usvg parses it and never reads it. -/
+  fontSizeAdjust : Option Fx := none
+  /-- T90: set on a `path` shape only (never inherited through the cascade):
+  indices of its commands that end inside an elliptical arc. -/
+  arcJoins : Array Nat := #[]
   /-- `font-kerning: none`, or SVG 1.1 `kerning="0"`, turns pair kerning off. -/
   textKerning : Bool := true
   textAnchor : Text.Anchor := .start
@@ -446,6 +452,8 @@ structure MaskEntry where
   userUnits : Bool := false
   contentBBox : Bool := false
   alpha : Bool := false
+  /-- T90: `color-interpolation="linearRGB"` on the `<mask>` itself. -/
+  linear : Bool := false
   x : Option Grad.LenPct := none
   y : Option Grad.LenPct := none
   w : Option Grad.LenPct := none
@@ -1188,8 +1196,11 @@ def arcPath (p1 : Pt) (rxIn ryIn phi : Fx) (fA fS : Bool) (p2 : Pt) : Array Path
 
 /-- Parse `d` path data.  On a syntax error the commands parsed so far are
 returned, as the SVG spec requires ("render up to the error"). -/
-def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
+def parsePathDataJ (bs : ByteArray) : Array PathCmd × Array Nat := Id.run do
   let mut out : Array PathCmd := #[]
+  -- T90: indices in `out` of the cubics that end *inside* an arc (where
+  -- `arcPath` split it), which are not path vertices for `marker-mid`.
+  let mut joins : Array Nat := #[]
   let mut i := 0
   let mut cmd : UInt8 := 0
   let mut cur : Pt := ⟨0, 0⟩
@@ -1309,9 +1320,14 @@ def parsePathData (bs : ByteArray) : Array PathCmd := Id.run do
     else if up == 97 then
       -- rx ry φ are never relative; only the endpoint is.
       let q := p 5
-      out := out.append (arcPath cur (g 0) (g 1) (g 2) (g 3 != 0) (g 4 != 0) q)
+      let arc := arcPath cur (g 0) (g 1) (g 2) (g 3 != 0) (g 4 != 0) q
+      for k in [0:arc.size - 1] do
+        joins := joins.push (out.size + k)
+      out := out.append arc
       cur := q
-  return out
+  return (out, joins)
+
+def parsePathData (bs : ByteArray) : Array PathCmd := (parsePathDataJ bs).1
 
 /-! ## Basic shapes as paths -/
 
@@ -2021,6 +2037,47 @@ def addClipUse (st : Style) (uses : Array ClipUse) : Style × Array ClipUse × O
   | some id => ({ st with clips := st.clips.push uses.size }, uses.push ⟨id, none, st.ctm, none⟩, some uses.size)
   | none => (st, uses, none)
 
+/-- T90: split the CSS `font` shorthand (`[style] [variant] [weight] [stretch]
+size[/line-height] family`) into `(italic, weight, size, family)`; `none`
+without a size and a family. -/
+def fontShorthand (v : ByteArray) : Option (Bool × Option ByteArray × ByteArray × ByteArray) := Id.run do
+  let t := trim v
+  let isWs := fun (b : UInt8) => b == 32 || b == 9 || b == 10 || b == 13
+  -- token boundaries
+  let mut toks : Array (Nat × Nat) := #[]
+  let mut i := 0
+  for _ in [0:t.size] do
+    if i ≥ t.size then break
+    if isWs (at' t i) then i := i + 1
+    else
+      let a := i
+      for _ in [a:t.size] do
+        if i < t.size && !isWs (at' t i) then i := i + 1
+      toks := toks.push (a, i)
+  let tok := fun (k : Nat) => let (a, b) := toks.getD k (0, 0); t.extract a b
+  let numeric := fun (b : ByteArray) => let c := at' b 0; (c ≥ 48 && c ≤ 57) || c == 46
+  let sizeKw := #["xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large",
+                  "larger", "smaller"]
+  let mut italic := false
+  let mut weight : Option ByteArray := none
+  for k in [0:Nat.min toks.size 5] do
+    let w := tok k
+    let nextNum := numeric (tok (k + 1)) || sizeKw.any (eqAscii (tok (k + 1)) ·)
+    if eqAscii w "italic" || eqAscii w "oblique" then italic := true
+    else if eqAscii w "bold" || eqAscii w "bolder" || eqAscii w "lighter" then weight := some w
+    else if numeric w && nextNum && k + 1 < toks.size then weight := some w
+    else if numeric w || sizeKw.any (eqAscii w ·) then
+      -- the size, an optional `/line-height`, then the family
+      let (a, b) := toks.getD k (0, 0)
+      let slash := findByte (t.extract a b) 0 47
+      let size := t.extract a (a + slash)
+      let mut f := k + 1
+      if slash == b - a && eqAscii (tok f) "/" then f := f + 2
+      else if slash == b - a && at' (tok f) 0 == 47 then f := f + 1
+      if f ≥ toks.size then return none
+      return some (italic, weight, size, t.extract (toks.getD f (0, 0)).1 t.size)
+  return none
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
@@ -2160,6 +2217,27 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
     else if eqAscii t "normal" then { st with fontItalic := false } else st
+  | "font" =>
+    -- T90: the CSS `font` shorthand, in either delivery form (usvg expands
+    -- only the CSS one): reset, then the longhands it names.
+    match fontShorthand v with
+    | none => st
+    | some (italic, weight, size, family) =>
+      let st := { st with fontItalic := italic, fontWeight := 400, textKerning := true,
+                          fontSizeAdjust := none }
+      let st := match weight with
+        | some w => { st with fontWeight := parseFontWeight st.fontWeight w }
+        | none => st
+      let st := { st with fontSize := parseFontSize st.fontSize size }
+      match resolveFontFamily family with
+      | some k => { st with fontAvailable := true, fontFamily := k }
+      | none => { st with fontAvailable := false, fontFamily := 0 }
+  | "font-size-adjust" =>
+    let t := trim v
+    if eqAscii t "none" then { st with fontSizeAdjust := none }
+    else match parseNumber t 0 with
+      | some (n, j) => if j == t.size && n > 0 then { st with fontSizeAdjust := some n } else st
+      | none => st
   | "letter-spacing" =>
     match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
     | some s => { st with letterSpacing := s } | none => st
@@ -2776,6 +2854,7 @@ def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     family := st.fontFamily,
     size := st.fontSize,
+    sizeAdjust := st.fontSizeAdjust,
     letterSpacing := st.letterSpacing,
     wordSpacing := st.wordSpacing,
     kerning := st.textKerning,
@@ -2807,7 +2886,26 @@ def textPathHref (attrs : Array Xml.Attr) : Option String :=
     | some v => v
     | none => (attr attrs "xlink:href").getD ByteArray.empty
   let t := trim href
-  if at' t 0 == 35 && t.size ≤ maxIdBytes + 1 then some (toStr (t.extract 1 t.size)) else none
+  if at' t 0 == 35 && t.size ≤ maxIdBytes + 1 then some (toStr (t.extract 1 t.size))
+  -- T90: a bare name is taken as an id too (the suite's `with-invalid-path-
+  -- and-xlink-href.svg` falls back to `xlink:href="path1"`); usvg rejects it.
+  else if t.size > 0 && t.size ≤ maxIdBytes
+      && !Image.hasByte t (fun b => b == 35 || b == 47 || b == 58 || b == 46 || b ≤ 32) then
+    some (toStr t)
+  else none
+
+/-- T90: the table key of a `textPath`'s own SVG 2 `path` attribute: a string
+no `id` can equal (it starts with a NUL). -/
+def inlinePathKey (v : ByteArray) : String := "\x00" ++ toStr v
+
+/-- T90: the arc-length table a `textPath` follows: its `path` attribute when
+that parses to something drawable (SVG 2: `path` wins over `href`), else the
+element its `href` links to. -/
+def textPathTable (paths : Std.HashMap String TextPath.Table) (attrs : Array Xml.Attr) :
+    Option TextPath.Table :=
+  match (attr attrs "path").bind (fun v => paths.get? (inlinePathKey v)) with
+  | some t => some t
+  | none => (textPathHref attrs).bind paths.get?
 
 /-- T50: the arc-length tables of every element some `textPath` links to,
 keyed by id, built once per document.  The first element carrying an id wins,
@@ -2824,6 +2922,17 @@ def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Tabl
       | none => pure ()
     | _ => pure ()
   let mut out : Std.HashMap String TextPath.Table := {}
+  -- T90: inline `path` attributes, in the `<text>`'s own user space.
+  for ev in events do
+    match ev with
+    | .open_ "textPath" attrs =>
+      match attr attrs "path" with
+      | some v =>
+        match (shapeCmds "path" #[⟨"d", v⟩] 0 0 0 0).bind (fun cmds => TextPath.build cmds Mat.identity) with
+        | some tbl => out := out.insert (inlinePathKey v) tbl
+        | none => pure ()
+      | none => pure ()
+    | _ => pure ()
   if wanted.isEmpty then return out
   for ev in events do
     match ev with
@@ -2917,6 +3026,37 @@ def collectText (events : Array Xml.Event) (openIdx : Nat) : ByteArray := Id.run
     | .text bs => out := out.append bs
   return out
 
+/-- T90: the SVG 2 layers of a `<text>`'s spans.  `clip-path`, `mask`,
+`filter`, `opacity` (and a blend mode or isolation) on a `tspan`/`textPath`
+make it a group of its own, like any other element (`should_isolate`); usvg
+does not (resvg's `svg2-changelog.md` lists it as a gap). -/
+structure SpanLayers where
+  /-- Each layer-owning span's style and its runs' font-metric box. -/
+  owners : Array (Style × Option Box) := #[]
+  /-- Per output shape, the owners it sits in, outermost first. -/
+  chains : Array (Array Nat) := #[]
+deriving Inhabited
+
+def spanNeedsLayer (st : Style) : Bool :=
+  st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+    || st.clipRef.isSome || st.maskRef.isSome
+    || match st.filterRaw with
+      | some v => !(eqAscii (trim v) "none")
+      | none => false
+
+/-- T90: each decoration's size from the style that declared it. -/
+def decorSizes (styles : Array Style) (sp : Text.SpanProps) : Text.SpanProps :=
+  let sz := fun (i : Option Nat) => (i.map fun k => (styles.getD k default).fontSize).getD 0
+  { sp with underlineSize := sz sp.underlineIdx, overlineSize := sz sp.overlineIdx,
+            throughSize := sz sp.throughIdx }
+
+/-- Give every style index below `n` a chain, `c` for the new ones. -/
+def padChains (a : Array (Array Nat)) (n : Nat) (c : Array Nat) : Array (Array Nat) := Id.run do
+  let mut a := a
+  for _ in [a.size : n] do
+    a := a.push c
+  return a
+
 /-- Turn the `<text>` element opened at `events[idx]` into shapes.
 
 The subtree is walked here rather than by `interpret`'s main loop because text
@@ -2948,7 +3088,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
     (chain : Array Css.ElemInfo) (budget : Nat)
     (paths : Std.HashMap String TextPath.Table) (ancestors : Array Style) :
-    Array Shape × Nat × Option Box := Id.run do
+    Array Shape × Nat × Option Box × SpanLayers := Id.run do
   let textAttrs := match events.getD idx default with
     | .open_ _ a => a
     | _ => #[]
@@ -3012,6 +3152,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           if throughActive && throughIdx.isNone && (s.ownLineThrough || atText) then
             styles := styles.push s; throughIdx := some (styles.size - 1)
     return (styles, underlineIdx, overlineIdx, throughIdx)
+  -- T90: the spans that need a layer of their own (`SpanLayers`), the chain
+  -- of them open at each nesting level, and each run style's chain.
+  let mut owners : Array Style := #[]
+  let mut layStack : Array (Array Nat) := #[#[]]
+  let mut chainOf : Array (Array Nat) := #[]
   let mut skip : Nat := 0
   let mut depth : Nat := 1
   for j in [idx + 1 : events.size] do
@@ -3022,6 +3167,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       if skip > 0 then skip := skip - 1
       else
         evs := evs.push .close
+        layStack := layStack.pop
         stStack := stStack.pop
         chStack := chStack.pop
         ccStack := ccStack.pop
@@ -3041,6 +3187,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         stStack := stStack.push st
         chStack := chStack.push ch
         ccStack := ccStack.push 0
+        let lc := layStack.back?.getD #[]
+        if spanNeedsLayer st then
+          layStack := layStack.push (lc.push owners.size)
+          owners := owners.push st
+        else layStack := layStack.push lc
         -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
         -- while its characters keep their slots in the position lists.
         let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
@@ -3052,7 +3203,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
           let ep := elemPosOf st attrs
           let ep : Text.ElemPos := { rots := ep.rots, hasRot := ep.hasRot }
-          match (textPathHref attrs).bind paths.get? with
+          let side := (attr attrs "side").map (fun v => eqAscii (trim v) "right")
+          match (textPathTable paths attrs).map (fun t => if side == some true then t.reverse else t) with
           | some tbl =>
             rendStack := rendStack.push rend
             let m := textStyle.ctm
@@ -3092,13 +3244,14 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         if targetText.size > 0 then
           let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles (stStack.push st)
           styles := styles'.push st
+          chainOf := padChains chainOf styles.size (layStack.back?.getD #[])
           let selfIdx := styles.size - 1
           let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
           let sp := spanPropsOf st bpx bsub bsup
           evs := evs.push
             (Text.Ev.text targetText st.spacePreserve selfIdx
-              { sp with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
-                        throughIdx := throughIdx }
+              (decorSizes styles
+                { sp with underlineIdx, overlineIdx, throughIdx })
               ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && st.fontAvailable))
         evs := evs.push .close
         skip := skip + 1
@@ -3108,21 +3261,27 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         let st := stStack.back?.getD default
         let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles stStack
         styles := styles'.push st
+        chainOf := padChains chainOf styles.size (layStack.back?.getD #[])
         let selfIdx := styles.size - 1
         let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         let sp := spanPropsOf st bpx bsub bsup
         evs := evs.push
           (Text.Ev.text bs st.spacePreserve selfIdx
-            { sp with underlineIdx := underlineIdx, overlineIdx := overlineIdx,
-                      throughIdx := throughIdx }
+            (decorSizes styles
+                { sp with underlineIdx, overlineIdx, throughIdx })
             -- usvg's zero-`font-size` guard is per text node (the span's own
             -- size), not inherited: `<text font-size="0"><tspan
             -- font-size="40">` still draws the tspan.  A `font-family` that
             -- does not resolve to an installed font draws nothing either
             -- (`process_chunk`'s `None => continue`), same as `display:none`.
             ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
-  let (placed, used, mbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
+  let (placed, used, mbox, sbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
   let mut out : Array Shape := #[]
+  let mut chains : Array (Array Nat) := #[]
+  let mut oboxes : Array (Option Box) := owners.map fun _ => none
+  for k in [0:sbox.size] do
+    for o in chainOf.getD k #[] do
+      oboxes := oboxes.modify o (Box.union · (sbox.getD k none))
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
@@ -3131,11 +3290,12 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       -- that property, so glyphs stay antialiased regardless of an ambient
       -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
       out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
+      chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
   -- `clipPathUnits="objectBoundingBox"` on this `<text>` actually sizes
   -- against.
-  return (out, used, mbox)
+  return (out, used, mbox, ⟨owners.zip oboxes, chains⟩)
 
 /-! ## `pattern` content
 
@@ -3212,7 +3372,7 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
-          let (shs, used, _) := textShapes applyEff events j st' chain budget {} stStack
+          let (shs, used, _, _) := textShapes applyEff events j st' chain budget {} stStack
           budget := budget - used
           nodes := nodes ++ shs.map Node.shape
           if layered then nodes := nodes.push .groupEnd
@@ -3849,6 +4009,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 { e with userUnits := isUser "maskUnits" false,
                          contentBBox := !(isUser "maskContentUnits" true),
                          alpha := stM.maskAlpha,
+                         linear := (attrOrStyle attrs "color-interpolation").any
+                           (fun v => eqAscii (trim v) "linearRGB"),
                          x := (attr attrs "x").bind parseCoord16,
                          y := (attr attrs "y").bind parseCoord16,
                          w := (attr attrs "width").bind parseCoord16,
@@ -4059,7 +4221,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               let layerClips : Array Nat :=
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
-              let (shs, used, mbox) := textShapes applyEffective events idx st chain textBudget textPaths stack
+              let (shs, used, mbox, spans) := textShapes applyEffective events idx st chain textBudget textPaths stack
               textBudget := textBudget - used
               -- T81: usvg's `objectBoundingBox` for `<text>` is the union of
               -- each glyph's *font-metric* box, not its outline (`Text.
@@ -4093,7 +4255,53 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               | none => pure ()
               match pf.mode with
               | .render =>
-                nodes := nodes ++ shs.map Node.shape
+                -- T90: each run inside its spans' layers (`SpanLayers`).
+                let mut opened : Array (Nat × Bool) := #[]
+                let base := layerDepth + (if layered then 1 else 0)
+                for si in [0:shs.size] do
+                  let c := spans.chains.getD si #[]
+                  let mut keep := 0
+                  for q in [0:opened.size] do
+                    if keep == q && c.getD q opened.size == (opened.getD q default).1 then keep := q + 1
+                  for _ in [keep:opened.size] do
+                    if (opened.back?.map (·.2)).getD false then nodes := nodes.push .groupEnd
+                    opened := opened.pop
+                  for q in [keep:c.size] do
+                    let o := c.getD q 0
+                    let (ost, obox) := spans.owners.getD o default
+                    let open? := base + opened.size < maxLayerDepth
+                    if open? then
+                      let (ost, uses', oslot) := addClipUse ost uses
+                      uses := uses'
+                      let (mu, mh, omslot) := addMaskUse ost.maskRef ost.ctm maskUses maskHolders openMasks
+                      maskUses := mu
+                      maskHolders := mh
+                      match oslot with
+                      | some k => uses := uses.modify k (fun u => { u with bbox := obox })
+                      | none => pure ()
+                      match omslot with
+                      | some k => maskUses := maskUses.modify k (fun u => { u with bbox := obox })
+                      | none => pure ()
+                      let gi : GroupInfo :=
+                        { opacity := ost.ownOpacity, blend := ost.blend, isolate := ost.isolate,
+                          clips := oslot.toArray, mask := omslot }
+                      let gi := match ost.filterRaw with
+                        | some raw =>
+                          if eqAscii (trim raw) "none" then gi else
+                          let fbox : Option Filter.URect := obox.bind fun b =>
+                            if Box.nonZero b then some ⟨b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0⟩ else none
+                          let cx : Filter.ElemCtx := ⟨fbox, ost.color, ost.fontSize, ost.pctRefW, ost.pctRefH⟩
+                          match Filter.resolve fparsers ftab raw cx with
+                          | .filters fs => { gi with filters := fs, filterCtm := ost.ctm }
+                          | .drop => { gi with dropped := true }
+                          | .noFilter => gi
+                        | none => gi
+                      nodes := nodes.push (.groupBegin gi)
+                    opened := opened.push (o, open?)
+                  nodes := nodes.push (.shape (shs.getD si default))
+                for _ in [0:opened.size] do
+                  if (opened.back?.map (·.2)).getD false then nodes := nodes.push .groupEnd
+                  opened := opened.pop
                 if pf.want then
                   match frames.back? with
                   | some pf' =>
@@ -4161,6 +4369,11 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 fineShape := fine
                 match (if fine then shapeCmds16 name attrs else cmds) with
                 | some cmds =>
+                  -- T90: an arc is one segment: no `marker-mid` where
+                  -- `arcPath` split it into cubics (the suite, Chromium).
+                  let st := if name == "path" && st.markerMidId.isSome then
+                      { st with arcJoins := ((attr attrs "d").map fun d => (parsePathDataJ d).2).getD #[] }
+                    else st
                   if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none, none⟩
                 | none => pure ()
               | .defs => pure ()
@@ -4388,13 +4601,14 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           match shapeNode with
           | some s =>
             let st := if fineShape then { st with ctm := st.ctm.mul (Mat.mk' 256 0 0 256 0 0) } else st
+            let st := { st with arcJoins := s.style.arcJoins }
             match frame.mode with
             | .markerDef k =>
               markerNodes := markerNodes.setIfInBounds k
                 ((markerNodes.getD k #[]).push (.shape { s with style := st }))
             | _ => nodes := nodes.push (.shape { s with style := st })
           | none => pure ()
-          stack := stack.push st
+          stack := stack.push { st with arcJoins := #[] }
           elemStack := chain
           childCounts := childCounts.push 0
           switchSel := switchSel.push sel

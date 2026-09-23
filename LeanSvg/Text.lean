@@ -121,6 +121,9 @@ structure SpanProps where
   /-- The base font's family, as a `FontSet` index (T91). -/
   family : Nat := 0
   size : Fx := Fx.ofNat 12
+  /-- T90: `font-size-adjust`'s aspect value (`Fx`): the used size becomes
+  `size · adjust / (xHeight / unitsPerEm)` once the face is known. -/
+  sizeAdjust : Option Fx := none
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
   /-- `font-kerning: none` (or SVG 1.1 `kerning="0"`) turns pair kerning off. -/
@@ -146,6 +149,12 @@ structure SpanProps where
   underlineIdx : Option Nat := none
   overlineIdx : Option Nat := none
   throughIdx : Option Nat := none
+  /-- T90: the font size of the element that declared each decoration, which
+  sizes its offset and thickness (Firefox, Safari, the suite; usvg uses the
+  glyph's own size, resvg#411).  `0` means the glyph's own. -/
+  underlineSize : Fx := 0
+  overlineSize : Fx := 0
+  throughSize : Fx := 0
   /-- `textLength`, already resolved to an `Fx` user-space length (`none` if
   the element carries no such attribute of its own: like `text-decoration`,
   it is not inherited). -/
@@ -553,6 +562,13 @@ structure Cluster where
   dropped : Bool := false
 deriving Inhabited
 
+/-- `a[i] := Box.cover a[i] p`, growing `a` with `none` up to `i` (T90). -/
+def coverAt (a : Array (Option Box)) (i : Nat) (p : Pt) : Array (Option Box) := Id.run do
+  let mut a := a
+  for _ in [a.size : i + 1] do
+    a := a.push none
+  return a.modify i (Box.cover · p)
+
 /-- Lay out one `<text>` element.
 
 `budget` caps how many characters the whole document may lay out; the returned
@@ -600,7 +616,7 @@ rotation angle and a single pen position:
   position, not the same 90° rotation every glyph gets — `tb-with-dx-on-
   second-tspan.svg` exercises exactly this fallback). -/
 def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool) :
-    Array Placed × Nat × Option Box :=
+    Array Placed × Nat × Option Box × Array (Option Box) :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
   let mut texts : Array (Array Nat) := #[]
@@ -658,7 +674,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       ts := ts.setIfInBounds i (t.extract 0 (budget - used))
       used := budget
     else used := used + t.size
-  if used == 0 then return (#[], 0, none)
+  if used == 0 then return (#[], 0, none, #[])
   -- ---- 4. flatten to characters
   let mut chars : Array Nat := Array.emptyWithCapacity used
   let mut cStyle : Array Nat := Array.emptyWithCapacity used
@@ -736,7 +752,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   for i in [0:total] do
     if cRend.getD i true then rend := rend.push i
   let rn := rend.size
-  if rn == 0 then return (#[], used, none)
+  if rn == 0 then return (#[], used, none, #[])
   -- ---- 8. chunk by chunk
   -- A decoration rectangle breaks more often than a glyph-outline run: usvg
   -- starts a new one not only where the style changes but at *any* character
@@ -753,6 +769,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   -- T81: the metric-box union, in the same `<text>` user space as `placed`'s
   -- outlines -- see "Text bounding box" above.
   let mut mbox : Option Box := none
+  -- T90: the same union per run style (`Placed.styleIdx`), for a layer on a
+  -- `tspan`/`textPath` that sizes against its own glyphs.
+  let mut sbox : Array (Option Box) := #[]
   let mut lastX : Int := 0
   let mut lastY : Int := 0
   let mut a : Nat := 0
@@ -794,6 +813,14 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       let i := rend.getD q 0
       let cp := chars.getD i 0
       let pr := cProps.getD i default
+      -- T90: `font-size-adjust` rescales the used size by the x-height of
+      -- the span's base font (T91's fallback leaves the base font's metrics
+      -- in charge of the span, as usvg's resolved font is)
+      let pr := match pr.sizeAdjust, fonts.getD (bases.getD (q - a) 0) none with
+        | some adj, some f =>
+          if f.xHeight ≤ 0 || f.unitsPerEm == 0 then pr
+          else { pr with size := Fx.clamp (Int.ediv (pr.size * adj * f.unitsPerEm) (f.xHeight * 256)) }
+        | _, _ => pr
       let fi := fis.getD (q - a) 0
       let mut adv : Int := 0
       match fonts.getD fi none with
@@ -970,6 +997,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
               let (top16, bot16) := metricTopBot f c.props.size
               for pt in metricCorners la lb lc la tox toy adv16 top16 bot16 do
                 mbox := Box.cover mbox pt
+                sbox := coverAt sbox c.styleIdx pt
             | _, _ => pure ()
       else
         if vertical then
@@ -1007,6 +1035,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             let (top16, bot16) := metricTopBot f c.props.size
             for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
               mbox := Box.cover mbox pt
+              sbox := coverAt sbox c.styleIdx pt
           | _, _ => pure ()
         x := x + c.adv
         adv := adv + c.adv
@@ -1035,16 +1064,16 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         ulCmds := closeSub ulCmds ulRun
         thCmds := closeSub thCmds thRun
       if styleChanged || shiftBreak then
-        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) =>
+        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) (dsz : Fx) =>
           match idx?, fonts.getD c.base none with
           | some idx, some f =>
             some { styleIdx := idx, ox := ox, oy := oy, rot := p.rot, width := 0,
-                   unitsPerEm := f.unitsPerEm, size := c.props.size,
+                   unitsPerEm := f.unitsPerEm, size := if dsz > 0 then dsz else c.props.size,
                    dyUnits := metric f, thicknessUnits := f.underlineThickness : DecorRun }
           | _, _ => none
-        olRun := mkRun olIdx (·.ascent)
-        ulRun := mkRun ulIdx (·.underlinePosition)
-        thRun := mkRun thIdx (·.strikeoutPosition)
+        olRun := mkRun olIdx (·.ascent) c.props.overlineSize
+        ulRun := mkRun ulIdx (·.underlinePosition) c.props.underlineSize
+        thRun := mkRun thIdx (·.strikeoutPosition) c.props.throughSize
       -- the run's width counts every character's advance, dropped or not,
       -- the same way the pen itself always moves on.
       olRun := olRun.map (fun r => { r with width := r.width + c.adv })
@@ -1071,7 +1100,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       lastX := chunkX + (if vertical then y else adv)
       lastY := chunkY + (if vertical then adv else y)
     a := b
-  return (placed, used, mbox)
+  return (placed, used, mbox, sbox)
 
 end Text
 end LeanSvg

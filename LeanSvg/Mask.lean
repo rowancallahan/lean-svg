@@ -1,4 +1,5 @@
 import LeanSvg.Clip
+import LeanSvg.FilterApply
 
 /-!
 # `mask` (T49)
@@ -163,10 +164,22 @@ def maskValue (alpha : Bool) (p : Nat) : Nat :=
     if rem ≥ 100 && rem ≤ 9900 then n / 10000 + 1
     else lumaF32 (p >>> 24) ((p >>> 16) &&& 255) ((p >>> 8) &&& 255) a
 
+/-- T90: the mask value under `color-interpolation="linearRGB"` on the
+`<mask>` (SVG 1.1 §14.4, the suite PNG and Chromium; usvg never reads it):
+the demultiplied colour goes through resvg's sRGB→linear table before the
+luminance weights, then times alpha, rounded up. -/
+def maskValueLinear (p : Nat) : Nat :=
+  let a := p &&& 255
+  if a == 0 then 0
+  else
+    let lin := fun (c : Nat) => FilterApply.srgbToLin.getD (Canvas.unpremul c a) 0
+    let n := 2126 * lin (p >>> 24) + 7152 * lin ((p >>> 16) &&& 255) + 722 * lin ((p >>> 8) &&& 255)
+    Nat.min 255 ((n * a + 2549999) / 2550000)
+
 /-- A rendered mask canvas whose pixel `(0, 0)` sits at device `(ox, oy)`, as
 a device-space `Clip.Mask`. -/
-def toClipMask (cv : Canvas) (ox oy : Nat) (alpha : Bool) : Clip.Mask :=
-  ⟨ox, oy, cv.w, cv.h, cv.px.map (maskValue alpha)⟩
+def toClipMask (cv : Canvas) (ox oy : Nat) (alpha : Bool) (linear : Bool := false) : Clip.Mask :=
+  ⟨ox, oy, cv.w, cv.h, cv.px.map (if linear && !alpha then maskValueLinear else maskValue alpha)⟩
 
 end Mask
 end LeanSvg

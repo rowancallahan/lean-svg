@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <!-- T90: filters under rotation/skew run in the element's user space -->
+  <filter id="aniso"><feGaussianBlur stdDeviation="8 0"/></filter>
+  <filter id="shadow"><feOffset dx="12" dy="0"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="flood" primitiveUnits="objectBoundingBox"><feFlood flood-color="orange" width="0.6"/></filter>
+  <rect x="30" y="40" width="70" height="50" fill="seagreen" filter="url(#aniso)" transform="rotate(30 65 65)"/>
+  <rect x="140" y="30" width="50" height="50" fill="steelblue" filter="url(#shadow)" transform="skewX(25) rotate(-15)"/>
+  <rect x="210" y="110" width="60" height="60" fill="black" filter="url(#flood)" transform="rotate(-40 240 140)"/>
+</svg>

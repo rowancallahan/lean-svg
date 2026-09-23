@@ -367,7 +367,8 @@ def expandContentList (doc : Doc) (idMap : Std.HashMap String Nat) :
           let segs := toSegments s'.cmds
           let targets : Array (Bool × Option String × Array (Pt × Nat)) :=
             #[(true, s'.style.markerStartId, match startVertex segs with | some p => #[(p, 0)] | none => #[]),
-              (false, s'.style.markerMidId, midVertices segs),
+              (false, s'.style.markerMidId,
+                (midVertices segs).filter fun (_, i) => !s'.style.arcJoins.contains i),
               (false, s'.style.markerEndId, match endVertex segs with | some pi => #[pi] | none => #[])]
           for (isStart, idOpt, verts) in targets do
             match idOpt with
