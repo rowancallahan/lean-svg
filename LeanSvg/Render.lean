@@ -724,7 +724,19 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
             for j in FeImage.jobs (fs.getD fi default) parent.fts cur.w cur.h do
               match j.spec.href with
               | .data uri =>
-                match FeImage.dataCanvas uri j.spec.aspect j.rw j.rh j.sx j.sy j.sw j.sh with
+                -- T77: one decode+place, budgeted like a link render (its own
+                -- pixel count is already capped by `ImageData.maxPixels`; this
+                -- bounds how many times a filter with one embedded image can
+                -- be replayed, e.g. through `use`).
+                renders := renders + 1
+                if renders > maxMaskRenders then
+                  err := some "feImage budget"
+                  break
+                if livePixels + cur.w * cur.h + j.rw * j.rh > maxLayerPixels then
+                  err := some "layer budget"
+                  break
+                match FeImage.dataCanvas uri j.spec.aspect j.spec.quality j.rw j.rh j.uw j.uh
+                    (j.mat parent.fts) with
                 | some cv => fs := FeImage.setPre fs fi j.prim cv
                 | none => pure ()
               | .other => pure ()

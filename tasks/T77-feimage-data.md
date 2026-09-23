@@ -86,3 +86,98 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## What was implemented
+
+The one marked call site, `FeImage.dataCanvas` (`LeanSvg/Filter/Image.lean`),
+wired to T63's `LeanSvg.Image` decoders — the whole gap was that stub always
+returning `none` (the dummy primitive), so every `data:` `feImage` rendered
+transparent.
+
+* **`Job` (`LeanSvg/Filter/ImageRender.lean`)** gained `uw`/`uh`: the
+  primitive subregion's own width/height in *user* units (`p.sub.w`/`.h`,
+  already computed for `devRect`), alongside the existing device-pixel
+  `sx`/`sy`/`sw`/`sh`. `preserveAspectRatio`'s fit depends on the subregion's
+  *aspect ratio*, which is `uw`/`uh`'s, not necessarily `sw`/`sh`'s — they
+  only agree when the filter's `ts` scale is uniform (`sx == sy`), the
+  ordinary case, but can differ under an anisotropic ancestor `transform`.
+* **`FeImage.Spec` gained `quality`**: `image-rendering` read directly off
+  the `feImage` element (`Image.parseRendering`, defaulting to bicubic), the
+  same attribute `<image>` itself uses. usvg's `find_attribute` would also
+  walk the `feImage`'s *document* ancestors (`filter`, `defs`, …) when the
+  attribute is absent there, which this does not do; every corpus case sets
+  it on `feImage` itself when it matters (`painting/image-rendering/on-feImage`).
+* **`FeImage.dataCanvas`** now: decodes `uri` with `Image.load` (T63); fits it
+  into `(0, 0, uw, uh)` — usvg's `image::convert_inner` with
+  `filter_subregion.translate_to(0, 0)` — via `Image.place`, which returns
+  the rectangle, the placed image, and (for a `slice` aspect) a clip rect,
+  all still in that local user space; flattens the rectangle and maps it
+  through `mat` (the caller's `Job.mat parent.fts`, resvg's
+  `apply_image`/`[sx 0 0 sy subregion.x subregion.y]` — the exact transform
+  the `href="#id"` link case already renders with) to rasterize it onto the
+  `rw × rh` region canvas; builds the device-space sampler with
+  `Image.build placed mat 0 0` and composites with `Canvas.fillMaskImage`,
+  the same primitives `<image>` itself uses. A `slice` clip is intersected
+  with a small local `clipToRect` (duplicates `Render.clipMask`'s ~10 lines;
+  this module is one of `Render`'s own dependencies and cannot import it
+  back). `none` — the dummy primitive — for anything `Image.load`/`place`
+  already treats that way: undecodable bytes, an empty viewport, a singular
+  `mat`.
+* **Budget.** `Render.lean`'s `groupEnd` now charges the `.data` branch
+  exactly like the `.elem` branch it sits beside: `renders += 1` against
+  `maxMaskRenders` (`"feImage budget"`), and the region canvas against
+  `livePixels`/`maxLayerPixels` (`"layer budget"`), before decoding. Each
+  individual decode is already capped at `ImageData.maxPixels` (T61/T63); this
+  bounds how many times one filter with an embedded image can be replayed
+  (e.g. applied to many elements via `use`), the same risk `feimage_many_links`
+  covers for links.
+
+## Skipped, and why
+
+* **`image-rendering` inherited from a document ancestor of `feImage`**
+  (rather than only the element's own attribute) — no corpus case needs it,
+  and `feImage`'s ancestors (`filter`, `defs`) are never otherwise styled.
+* **Anisotropic filter scale** (`sx != sy` in `FilterApply.scaleOf`):
+  `preserveAspectRatio`'s fit uses `uw`/`uh` (correct, per above) but the
+  *rounding* of the placed rectangle back to device pixels goes through
+  `Mat.apply`'s ordinary floor, same as every other primitive's geometry —
+  not specifically checked against resvg's `f32` here. No corpus file
+  exercises a `feImage` under a non-uniform scale.
+
+## Report
+
+Baseline commit `a5d147b`. `run_corpora.py --fast --corpus resvg --route direct`
+(width 100) and the headline `--width 200` pass, before → after (identical
+delta at both widths):
+
+| corpus | file | within-8 before | within-8 after |
+|---|---|---|---|
+| filters/feImage/embedded-png.svg | 48.160% | 100.000% |
+| painting/image-rendering/on-feImage.svg | 48.160% | 100.000% |
+| filters/feImage/preserveAspectRatio=none.svg | 74.080% | 100.000% |
+| filters/feImage/with-subregion-3.svg | 75.000% | 100.000% |
+| filters/feImage/with-subregion-4.svg | 75.000% | 100.000% |
+| filters/feImage/with-subregion-5.svg | 84.000% | 100.000% |
+| filters/feImage/with-subregion-1.svg | 91.000% | 100.000% |
+| filters/feImage/with-subregion-2.svg | 91.000% | 100.000% |
+
+All 5 files named in this task now pass, plus 3 more `with-subregion` files
+that were failing for the identical reason (not in the task's list, but the
+same stub). Whole suite (1679 files): width 100 pass 1521 → 1529, width 200
+pass 1542 → 1550; **newly passing 8, newly failing 0** at both widths.
+
+Other checks, all on the final tree:
+
+* `lake build`: no errors, no new warnings.
+* `scripts/check-theorems.sh`: `theorems ok`.
+* `tests/run_tests.py`: 47/51 pass (was 46/50; the 4 pre-existing failures
+  are unchanged and unrelated — `12_badge`, `14_flower_transforms`,
+  `15_spiral_stroke`, `16_stress_2000`). No file's score dropped; new
+  `77_feimage_data` (default fit, `preserveAspectRatio="none"` +
+  `image-rendering="optimizeSpeed"`, a percentage subregion, and the
+  no-href/non-data-href dummy cases) 100.000% within 8, PASS.
+* `tests/run_adversarial.py`: 117/117 clean (was 116; the new test file adds
+  one budget/parse case for free).
+* `tests/run_tiles.py`: 51/51 byte-identical, `77_feimage_data` included.
