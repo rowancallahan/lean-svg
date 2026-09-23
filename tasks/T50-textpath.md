@@ -168,7 +168,7 @@ Files: `LeanSvg/TextPath.lean` (new), `LeanSvg/Text.lean` (`Ev.openPath`,
 `glyphCmds` → `glyphCmdsLin` with a general linear part, bit-identical for the
 old callers), `LeanSvg/Svg.lean` (`textPathHref`, `textPathTables`,
 `startOffsetOf`, the `textPath` branch of `textShapes`, one table built in
-`interpret`), `LeanSvg.lean` (import), `tests/svg/28_textpath.svg`.
+`interpret`), `LeanSvg.lean` (import), `tests/svg/30_textpath.svg`.
 
 resvg corpus, `--fast --route direct`, pass counts before → after:
 
@@ -195,7 +195,7 @@ dropped and is now drawn without the baseline or length adjustment the file
 tests.
 
 Local checks: `lake build` succeeds with no warnings. `tests/run_tests.py`:
-no score changed, and the new `28_textpath` scores 99.80 (PASS; 24/28, the
+no score changed, and the new `30_textpath` scores 99.80 (PASS; 24/28, the
 same four failures as before). `run_adversarial.py`: 62/62 clean.
 `run_tiles.py`: 28/28 byte-identical. `scripts/check-theorems.sh`: theorems
 ok.
