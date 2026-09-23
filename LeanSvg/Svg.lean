@@ -8,6 +8,7 @@ import LeanSvg.Viewport
 import LeanSvg.Use
 import LeanSvg.Filter
 import LeanSvg.Image
+import LeanSvg.SvgImage
 import Std.Data.HashMap
 
 /-!
@@ -246,6 +247,9 @@ structure Shape where
   /-- T63: an `<image>`.  `cmds` is then the rectangle it paints through and
   this is the paint, in place of `style.fill`. -/
   image : Option Image.Placed := none
+  /-- T84: an `<image>` of an SVG document, an index into `Doc.svgImages`.
+  `cmds` is then its viewport and the style paints nothing itself. -/
+  svgImage : Option Nat := none
 deriving Inhabited
 
 /-! ## `clipPath` (T20), and the shape of a defs table
@@ -528,6 +532,8 @@ structure Doc where
   `PatternRender.build` reads `patternContent.getD entry.contentSlot`. -/
   patterns : Pat.Defs := {}
   patternContent : Array (Array Node) := #[]
+  /-- T84: the SVG images' sub-documents, rendered by `Render.renderNodes`. -/
+  svgImages : Array SvgImage.Entry := #[]
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
@@ -3041,7 +3047,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
       -- that property, so glyphs stay antialiased regardless of an ambient
       -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none⟩
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
   return (out, used)
 
 /-! ## `pattern` content
@@ -3144,7 +3150,7 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
           match shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH with
-          | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none⟩)
+          | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none, none⟩)
           | none => pure ()
           if layered then nodes := nodes.push .groupEnd
           skip := 1
@@ -3309,6 +3315,44 @@ def imageShape (attrs : Array Xml.Attr) (st : Style) (budget : Nat) :
     (Image.place pix ((lx "x").getD 0) ((ly "y").getD 0) (lx "width") (ly "height") ar
       st.imageRendering, budget - pix.w * pix.h)
 
+/-- T84: an `<image>` of an SVG document (`LeanSvg/SvgImage.lean`) with source
+`src`: its entry, the elements it spends of the `elems` left, and the viewport
+as a clip for `slice`.  `depth` is the element's nesting and `layerDepth` the
+layers above its content, both shared with the sub-document.  `none` when it
+draws nothing: over a budget, a sub-document that does not parse, or an empty
+size. -/
+def svgImageEntry (attrs : Array Xml.Attr) (st : Style) (src : ByteArray) (elems depth layerDepth : Nat) :
+    Option (SvgImage.Entry × Nat × Option (Fx × Fx × Fx × Fx)) := do
+  let evs ← match Xml.parse src with
+    | .ok e => some e
+    | .error _ => none
+  let (n, d) := SvgImage.stats evs
+  if n > elems || depth + d > Xml.maxDepth then none
+  let r ← match evs.find? (fun e => match e with | .open_ _ _ => true | _ => false) with
+    | some (.open_ "svg" a) => some (parseRoot a)
+    | _ => none
+  let (sw, sh) ← resolveRootSize r
+  let rootMat := match r.viewBox with
+    | some vb => (Viewport.viewBoxTransform vb r.aspect sw sh).getD Mat.identity
+    | none => Mat.identity
+  let lx := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefW)
+  let ly := fun (n : String) => (attr attrs n).bind (parseTextLenAll st.fontSize st.pctRefH)
+  let ar := match attr attrs "preserveAspectRatio" with
+    | some v => Viewport.parseAspectRatio v
+    | none => {}
+  let (x, y, w, h, inner) ←
+    SvgImage.place sw sh rootMat ((lx "x").getD 0) ((ly "y").getD 0) (lx "width") (ly "height") ar
+  let clip := if ar.slice && ar.align.isSome then some (x, y, w, h) else none
+  some (⟨evs, layerDepth, x, y, w, h, inner⟩, n, clip)
+
+/-- T84: how a document is interpreted.  The top level is `{}`; an SVG
+image's sub-document starts at the layer depth its image sits at, and loads no
+images of its own (usvg drops external ones; here every one, so SVG images
+never nest). -/
+structure SubCfg where
+  layerDepth : Nat := 0
+  nested : Bool := false
+
 /-- Walk the event stream with a style stack.
 
 T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
@@ -3333,7 +3377,7 @@ bounded forward lookahead to find the first direct child whose tag usvg
 recognises and whose own `passesConditions` holds; that index becomes its
 `switchSel` target.  All three stacks move together at every push/pop site
 so CSS resolution and switch selection never drift out of sync. -/
-def interpret (events : Array Xml.Event) : Except String Doc := do
+def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc := do
   -- T47: `use` references are copied in first; everything below sees the
   -- expanded stream (see `LeanSvg/Use.lean`).
   let events := FeImage.fixRecursive events
@@ -3466,7 +3510,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- T22's fifth stack, again in lockstep with `stack`: did this element open a
   -- compositing layer (so its `.close` must emit a `groupEnd`)?
   let mut layerOpen : Array Bool := #[]
-  let mut layerDepth : Nat := 0
+  let mut layerDepth : Nat := cfg.layerDepth
   -- T20: a sixth stack, in lockstep with the other five, for `clipPath`
   -- collection and object bounding boxes (see `Frame`).
   let mut frames : Array Frame := #[]
@@ -3511,7 +3555,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- bounded by a constant however much text the input contains.
   let mut textBudget : Nat := 100000
   -- T63: decoded image pixels the whole document may keep (`Image.maxTotalPixels`).
-  let mut imageBudget : Nat := Image.maxTotalPixels
+  let mut imageBudget : Nat := if cfg.nested then 0 else Image.maxTotalPixels
+  -- T84: what SVG images may still add to the document: elements (with the
+  -- document's own, at most `Xml.maxElements`) and bytes of source.
+  let mut svgImages : Array SvgImage.Entry := #[]
+  let mut svgElems : Nat := Xml.maxElements - (SvgImage.stats events).1
+  let mut svgBytes : Nat := if cfg.nested then 0 else SvgImage.maxTotalBytes
   for idx in [0:events.size] do
     match events.getD idx default with
     | .text _ => pure ()
@@ -3977,7 +4026,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
                 fineShape := fine
                 match (if fine then shapeCmds16 name attrs else cmds) with
                 | some cmds =>
-                  if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none⟩
+                  if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none, none⟩
                 | none => pure ()
               | .defs => pure ()
               | .clip k =>
@@ -4087,10 +4136,28 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let (placed, budget') :=
                 if pf.mode.isRender then imageShape attrs st imageBudget else (none, imageBudget)
               imageBudget := budget'
+              -- T84: not a raster image, so maybe an SVG document.
+              let mut svgImg : Option (Nat × Array PathCmd × Option (Fx × Fx × Fx × Fx)) := none
+              if placed.isNone && pf.mode.isRender && !cfg.nested then
+                let href := (attr attrs "href").orElse (fun _ => attr attrs "xlink:href")
+                let (src?, spent) := match href with
+                  | some v => SvgImage.load v svgBytes
+                  | none => (none, 0)
+                svgBytes := svgBytes - spent
+                match src?.bind (svgImageEntry attrs st · svgElems (stack.size + 1) (layerDepth + 1)) with
+                | some (e, ne, clip) =>
+                  svgElems := svgElems - ne
+                  svgImages := svgImages.push e
+                  svgImg := some (svgImages.size - 1, Image.rectCmds e.x e.y e.w e.h, clip)
+                | none => pure ()
+              let sliceClip := match placed, svgImg with
+                | some (_, _, c), _ => c
+                | none, some (_, _, c) => c
+                | none, none => none
               -- `slice`: usvg's group clipped to the viewport, as a synthetic
               -- one-rect `clipPath` on this element's chain (like T48's).
               let mut st := st
-              if let some (_, _, some (x, y, w, h)) := placed then
+              if let some (x, y, w, h) := sliceClip then
                 let child : ClipChild := ⟨rectPath x y w h 0 0, false, Mat.identity, true, #[], false⟩
                 clipTable := clipTable.push
                   { id := "", transform := Mat.identity, transformValid := true,
@@ -4107,12 +4174,22 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               | some (cmds, p, _) =>
                 if st.visible then
                   shapeNode := some ⟨cmds, { st with fill := .solid ⟨0, 0, 0, 255⟩, stroke := .none },
-                    false, some p⟩
-              | none => pure ()
+                    false, some p, none⟩
+              | none =>
+                match svgImg with
+                | some (k, cmds, _) =>
+                  if st.visible then
+                    shapeNode := some { cmds, style := { st with fill := .none, stroke := .none },
+                                        svgImage := some k }
+                | none => pure ()
               let want := slot.isSome || mslot.isSome || pf.want || st.filterRaw.isSome
+              let cmds? := match placed, svgImg with
+                | some (c, _, _), _ => some c
+                | none, some (_, c, _) => some c
+                | none, none => none
               enter := some st
               frame := { mode := pf.mode, useSlot := slot, maskUse := mslot, want,
-                         bbox := if want then (placed.map (·.1)).bind cmdsBox else none,
+                         bbox := if want then cmds?.bind cmdsBox else none,
                          isShapeLeaf := true }
               renders := pf.mode.isRender
           else
@@ -4233,7 +4310,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,
-      srcEvents, patTable, patternContent⟩
+      srcEvents, patTable, patternContent, svgImages⟩
+
+def interpret (events : Array Xml.Event) : Except String Doc := interpretWith {} events
 
 end Svg
 end LeanSvg

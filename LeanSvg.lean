@@ -18,6 +18,8 @@ import LeanSvg.Inflate
 import LeanSvg.PngDecode
 import LeanSvg.JpegDecode
 import LeanSvg.Image
+import LeanSvg.Gzip
+import LeanSvg.SvgImage
 import LeanSvg.Pattern
 import LeanSvg.Svg
 import LeanSvg.Clip

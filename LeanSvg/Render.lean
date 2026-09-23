@@ -561,10 +561,11 @@ T49: a group with a `mask` renders each mask's content by calling this function
 again, on `fuel - 1`, over the mask's own node stream (`Mask` module comment). -/
 def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (rootMat : Mat) →
     (nodes : Array Svg.Node) → (cv0 : Canvas) → (clip0 : Clip) → (ox0 oy0 : Nat) →
-    Clip.Cache → (live0 : Nat) → (renders0 : Nat) → (fwork0 : Nat) →
-    Except String (Canvas × Clip.Cache × Nat × Nat)
-  | 0, _, _, cv0, _, _, _, cache, _, renders, fwork => .ok (cv0, cache, renders, fwork)
-  | fuel + 1, rootMat, nodes, cv0, clip0, ox0, oy0, cache0, live0, renders0, fwork0 => Id.run do
+    Clip.Cache → (live0 : Nat) → (renders0 : Nat) → (fwork0 : Nat) → (svgOff0 : Bool) →
+    Except String (Canvas × Clip.Cache × Nat × Nat × Bool)
+  | 0, _, _, cv0, _, _, _, cache, _, renders, fwork, off => .ok (cv0, cache, renders, fwork, off)
+  | fuel + 1, rootMat, nodes, cv0, clip0, ox0, oy0, cache0, live0, renders0, fwork0, svgOff0 =>
+  Id.run do
   let mut cur : Canvas := cv0
   let mut stack : Array Layer := #[]
   let mut cache : Clip.Cache := cache0
@@ -587,13 +588,50 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
   -- layer (a filter that resolved to nothing), so its `groupEnd` pops nothing.
   let mut passStack : Array Bool := #[]
   let mut filterWork : Nat := fwork0
+  -- T84: set once an SVG image failed on a shared budget; later ones then
+  -- draw nothing rather than spend the same work again.
+  let mut svgOff : Bool := svgOff0
   for i in [0:nodes.size] do
     match nodes.getD i default with
     | .shape s =>
       if skipDepth == 0 then
-        let (cv', cache') := drawShape curRoot ⟨curW, curH, curClip, curOx, curOy⟩ doc cur cache s
-        cur := cv'
-        cache := cache'
+        match s.svgImage with
+        | none =>
+          let (cv', cache') := drawShape curRoot ⟨curW, curH, curClip, curOx, curOy⟩ doc cur cache s
+          cur := cv'
+          cache := cache'
+        | some k =>
+          -- T84: the sub-document renders through this function on `fuel - 1`
+          -- into a layer that is the image's device box (`SvgImage.layerBox`),
+          -- under the counters of this render, then composites at full
+          -- opacity (resvg's `render_vector`).  Any failure draws nothing.
+          let e := doc.svgImages.getD k default
+          let ctm := curRoot.mul s.style.ctm
+          let (chain?, cache') := Clip.resolve doc curW curH curRoot cache s.style.clips
+          cache := cache'
+          let cost := FeImage.cost e.events
+          match chain?, SvgImage.layerBox (SvgImage.devBox ctm e.x e.y e.w e.h)
+              curClip.x0 curClip.y0 curClip.x1 curClip.y1 with
+          | some chain, some (bx0, by0, bx1, by1) =>
+            let lw := bx1 - bx0
+            let lh := by1 - by0
+            if svgOff || renders + cost > maxMaskRenders || livePixels + lw * lh > maxLayerPixels then
+              svgOff := true
+            else
+              match Svg.interpretWith { layerDepth := e.layerDepth, nested := true } e.events with
+              | .error _ => renders := renders + cost
+              | .ok sd0 =>
+                let sd := Marker.expand sd0
+                match renderNodes sd curW curH fullW fullH fuel (ctm.mul e.inner) sd.nodes
+                    (Canvas.new lw lh none) { curClip with x0 := bx0, y0 := by0, x1 := bx1, y1 := by1 }
+                    bx0 by0 {} (livePixels + lw * lh) (renders + cost) filterWork true with
+                | .error _ => svgOff := true
+                | .ok (icv, _, n, fw', _) =>
+                  renders := n
+                  filterWork := fw'
+                  cur := SvgImage.draw cur (Clip.applyToCanvas chain icv bx0 by0)
+                    (bx0, by0, bx1, by1) curOx curOy
+          | _, _ => pure ()
     | .groupBegin g =>
       if skipDepth > 0 then skipDepth := skipDepth + 1
       else if g.dropped then skipDepth := 1
@@ -744,11 +782,12 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
                 | .ok (some sd) =>
                   match renderNodes sd j.rw j.rh j.rw j.rh fuel (j.mat parent.fts) sd.nodes
                       (Canvas.new j.rw j.rh none) { curClip with x0 := 0, y0 := 0, x1 := j.rw, y1 := j.rh }
-                      0 0 {} (livePixels + cur.w * cur.h + j.rw * j.rh) renders filterWork with
+                      0 0 {} (livePixels + cur.w * cur.h + j.rw * j.rh) renders filterWork svgOff with
                   | .error msg =>
                     err := some msg
                     break
-                  | .ok (icv, _, n, fw') =>
+                  | .ok (icv, _, n, fw', off') =>
+                    svgOff := off'
                     renders := n
                     filterWork := fw'
                     fs := FeImage.setPre fs fi j.prim icv
@@ -791,11 +830,12 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
               match renderNodes doc parent.fw parent.fh fullW fullH fuel
                   (parent.maskMat.mul st.content) e.nodes
                   (Canvas.new lay.w lay.h none) lclip lox loy cache
-                  (livePixels + lay.w * lay.h) renders filterWork with
+                  (livePixels + lay.w * lay.h) renders filterWork svgOff with
               | .error msg =>
                 err := some msg
                 break
-              | .ok (mcv, c', n, fw') =>
+              | .ok (mcv, c', n, fw', off') =>
+                svgOff := off'
                 cache := c'
                 renders := n
                 filterWork := fw'
@@ -831,7 +871,7 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
       else cur := parent.cv
       curOx := parent.ox
       curOy := parent.oy
-  return .ok (cur, cache, renders, filterWork)
+  return .ok (cur, cache, renders, filterWork, svgOff)
 
 /-- An interpreted document and one set of options to straight-alpha RGBA bytes,
 together with the canvas size they were produced at.
@@ -849,8 +889,8 @@ def renderRgba (opts : Options) (doc : Svg.Doc) :
   if w * h > maxPixels then throw s!"canvas {w}x{h} exceeds the {maxPixels} px limit"
   -- The whole image's size, for resvg's `max_filter_bbox` (T51).
   let (fullW, fullH, _, _) ← canvasSetup doc.root { opts with viewport := none }
-  let (cv, _, _, _) ← renderNodes doc w h fullW fullH (maskFuel + 1) rootMat doc.nodes
-    (Canvas.new w h opts.background) clip 0 0 {} 0 0 0
+  let (cv, _, _, _, _) ← renderNodes doc w h fullW fullH (maskFuel + 1) rootMat doc.nodes
+    (Canvas.new w h opts.background) clip 0 0 {} 0 0 0 false
   return (w, h, cv.toRgbaBytes)
 
 /-- Bands per worker thread.
