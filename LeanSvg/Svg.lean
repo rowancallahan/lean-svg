@@ -80,6 +80,13 @@ structure Style where
   /-- `isolation: isolate`; not inherited, CSS only, like `blend`. -/
   isolate : Bool := false
   visible : Bool := true
+  /-- `shape-rendering: crispEdges`/`optimizeSpeed` (`usvg`'s
+  `ShapeRendering::use_shape_antialiasing() == false`): the shape is filled and
+  stroked with `Raster.rasterizeCrisp` instead of the antialiased default, and
+  a thin stroke skips the hairline shortcut (`painter.rs`'s
+  `treat_as_hairline` also refuses when `!paint.anti_alias`). Inherited;
+  `auto`/`geometricPrecision` (the default) turn antialiasing back on. -/
+  crisp : Bool := false
   /-- The CSS `color` property: inherited, defaults to black, and is what
   `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
   applies `color` before any other property so the resolution sees the
@@ -1668,6 +1675,11 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  | "shape-rendering" =>
+    let t := trim v
+    if eqAscii t "crispEdges" || eqAscii t "optimizeSpeed" then { st with crisp := true }
+    else if eqAscii t "geometricPrecision" || eqAscii t "auto" then { st with crisp := false }
+    else st
   -- T36: text properties.  Inherited like every other property here; only
   -- `Svg.textShapes` ever reads them.
   | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
@@ -2166,7 +2178,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm }⟩
+      -- `text-rendering`, not `shape-rendering`, decides glyph antialiasing
+      -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
+      -- that property, so glyphs stay antialiased regardless of an ambient
+      -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }⟩
   return (out, used)
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
