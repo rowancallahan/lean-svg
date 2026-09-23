@@ -25,5 +25,6 @@ import LeanSvg.Mask
 import LeanSvg.Filter
 import LeanSvg.FilterApply
 import LeanSvg.Marker
+import LeanSvg.RootFit
 import LeanSvg.PatternRender
 import LeanSvg.Render

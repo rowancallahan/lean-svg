@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <!-- no width/height/viewBox: the canvas is refit to the content's
+       object bounding box (right, bottom), strokes excluded -->
+  <g transform="translate(40 30) rotate(20)">
+    <rect x="0" y="0" width="160" height="90" fill="#3366cc" stroke="black" stroke-width="12"/>
+    <circle cx="160" cy="180" r="60" fill="orange"/>
+  </g>
+  <path d="M 20 250 C 120 330 220 170 290 260" fill="none" stroke="green" stroke-width="6"/>
+</svg>

@@ -107,6 +107,13 @@ def generate_cases():
         + "<g>" * 60 + "<text>t</text>" + rect + "</g>" * 60
         + "</f:x>" + rect + "\n</svg>\n",
     )
+    # A root with no size is refit to its content's box (usvg
+    # calculate_svg_bbox); a huge box must still hit the canvas caps.
+    write_text(
+        "refit_huge.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="100000" y="100000" width="10" height="10"/></svg>\n',
+    )
     write_text("ns_unknown_prefix.svg", ns_head + "<q:rect/>\n</svg>\n")
     # Worst case for prefix lookup: 63 bindings in scope and 10^5 elements
     # whose prefixed attributes resolve through the outermost one.
