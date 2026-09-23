@@ -538,6 +538,9 @@ def runPrim (k : Kind) (lin : Bool) (ts : Mat) (rw rh : Nat) (inp : Input → Im
   | .convolveMatrix i order kernel divisor bias target edge preserveAlpha =>
     Img.of (ConvolveMatrix.run order kernel divisor bias target edge preserveAlpha
       ((inp i).into lin).cv) lin
+  -- `inp .source` carries the filter region's origin in `rx`/`ry`.
+  | .lighting i lp =>
+    Img.of (Lighting.apply lp sinCosF32 ts (inp .source).rx (inp .source).ry rw rh (inp i).cv) lin
 
 /-- `filter::apply`: run `f` on the layer `src`, whose user space maps to the
 layer's pixels by `ts`.  An invalid region clears the layer, as resvg does. -/

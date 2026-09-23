@@ -6,6 +6,7 @@ import LeanSvg.Filter.Image
 import LeanSvg.Filter.Turbulence
 import LeanSvg.Filter.Morphology
 import Std.Data.HashMap
+import LeanSvg.Filter.Lighting
 
 /-!
 # Filters (T51): the model, the `<filter>` pre-pass and usvg's resolution
@@ -209,6 +210,7 @@ inductive Kind where
   row-major; `edge` is `0` duplicate, `1` wrap, `2` none (usvg's `EdgeMode`). -/
   | convolveMatrix (i : Input) (order : Nat × Nat) (kernel : Array F32)
       (divisor bias : F32) (target : Nat × Nat) (edge : Nat) (preserveAlpha : Bool)
+  | lighting (i : Input) (p : Lighting.Params)
 deriving Inhabited
 
 /-- A primitive's per-pixel cost, in the same units `Render.lean`'s
@@ -525,14 +527,13 @@ def unitsOf (v : Option ByteArray) (dfltObb : Bool) : Bool :=
 /-- The tags usvg converts but this renderer does not implement yet: a
 `<filter>` containing one of them degrades to "no filter" as a whole. -/
 def isKnownUnsupported (name : String) : Bool :=
-  name == "feTile" || name == "feDisplacementMap" ||
-  name == "feDiffuseLighting" || name == "feSpecularLighting"
+  name == "feTile" || name == "feDisplacementMap"
 
 def isPrimitive (name : String) : Bool :=
   isKnownUnsupported name || name == "feDropShadow" || name == "feGaussianBlur" ||
   name == "feOffset" || name == "feBlend" || name == "feFlood" || name == "feComposite" ||
   name == "feMerge" || name == "feComponentTransfer" || name == "feColorMatrix" ||
-  name == "feImage" || name == "feTurbulence" || name == "feMorphology" || name == "feConvolveMatrix"
+  name == "feImage" || name == "feTurbulence" || name == "feMorphology" || name == "feConvolveMatrix" || name == "feDiffuseLighting" || name == "feSpecularLighting"
 
 /-- `parse_in`, then `resolve_input`'s fallback: an unknown reference becomes
 the previous result, or `SourceGraphic` for the first primitive. -/
@@ -791,6 +792,9 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
         | none => pure ()
     return some (.transfer inp (fs.getD 0 .identity) (fs.getD 1 .identity)
       (fs.getD 2 .identity) (fs.getD 3 .identity))
+  | "feDiffuseLighting" | "feSpecularLighting" =>
+    some <| (Lighting.convert (p.name == "feSpecularLighting") (fun as n => (attr as n).bind f32All) a
+      (prop a "lighting-color") p.children p.color P.color).elim (.flood 0 0 0 0) (.lighting inp)
   | _ => none
 
 /-- `resolve_primitive_region`.  Coordinates are `try_convert_length`s in

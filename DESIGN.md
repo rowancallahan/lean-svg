@@ -389,6 +389,17 @@ events in `Doc.events`.  Each link costs `1 + events/4096` of
 `maxMaskRenders`.  `data:` images go through one stub (`FeImage.dataCanvas`)
 until the decoders land; everything else is usvg's dummy primitive.
 
+Primitives usvg knows but this renderer does not implement (turbulence,
+morphology, convolution, tile, image, displacement, a `gamma` transfer
+function) make the whole `filter` value resolve to "no filter": the
+element renders exactly as before T51.
+
+The lighting pair (T66, `LeanSvg/Filter/Lighting.lean`) runs resvg's `f32`
+arithmetic operation for operation on `F32`, with a scalar correctly-rounded
+`sqrt` and a `powf` that is computed on a 2^-44 grid with an error bound and
+falls back to an exact 2^-80 computation only near a rounding tie (at most
+`exactBudget` times per primitive).
+
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
 | file | exact | ≤ 8 | ≤ 32 | max d |

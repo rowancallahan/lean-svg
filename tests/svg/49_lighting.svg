@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <!-- T66: feDiffuseLighting / feSpecularLighting with the three light sources -->
+  <defs>
+    <filter id="dist" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+      <feDiffuseLighting surfaceScale="4" lighting-color="#fc8">
+        <feDistantLight azimuth="45" elevation="40"/>
+      </feDiffuseLighting>
+    </filter>
+    <filter id="point" x="0" y="0" width="1" height="1">
+      <feSpecularLighting surfaceScale="3" specularConstant="1.5" specularExponent="7.3" lighting-color="#8cf">
+        <fePointLight x="200" y="40" z="30"/>
+      </feSpecularLighting>
+    </filter>
+    <filter id="spot" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+      <feDiffuseLighting surfaceScale="-2" diffuseConstant="1.2">
+        <feSpotLight x="20" y="160" z="80" pointsAtX="120" pointsAtY="260" specularExponent="3.5" limitingConeAngle="35"/>
+      </feDiffuseLighting>
+    </filter>
+    <filter id="comp" x="0" y="0" width="1" height="1">
+      <feSpecularLighting in="SourceAlpha" surfaceScale="5" specularExponent="20" result="spec">
+        <feDistantLight azimuth="225" elevation="30"/>
+      </feSpecularLighting>
+      <feComposite in="spec" in2="SourceGraphic" operator="arithmetic" k2="1" k3="1"/>
+    </filter>
+  </defs>
+  <g filter="url(#dist)">
+    <rect x="10" y="10" width="120" height="120" fill-opacity="0.3"/>
+    <rect x="40" y="40" width="60" height="60" fill-opacity="0.8"/>
+  </g>
+  <g filter="url(#point)">
+    <rect x="160" y="10" width="130" height="120" fill-opacity="0.2"/>
+    <rect x="190" y="30" width="50" height="70" fill-opacity="0.9"/>
+  </g>
+  <g filter="url(#spot)">
+    <rect x="10" y="160" width="120" height="130" fill-opacity="0.5"/>
+    <rect x="30" y="200" width="80" height="30" fill-opacity="1"/>
+  </g>
+  <rect x="170" y="170" width="110" height="110" rx="20" fill="seagreen" filter="url(#comp)"/>
+</svg>
