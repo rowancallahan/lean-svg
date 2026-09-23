@@ -1,4 +1,5 @@
 import LeanSvg.Geom
+import LeanSvg.TextPath
 import LeanSvg.Font
 import LeanSvg.Fonts.NotoSans
 import LeanSvg.Fonts.NotoSansBold
@@ -26,6 +27,9 @@ anchoring), simplified to what one Latin face per span can do:
   adjacent characters of the same chunk;
 * the alphabetic baseline only (`dominant-baseline`, `alignment-baseline` and
   `baseline-shift` are not applied).
+
+A chunk inside a `textPath` (T50) is laid out the same way and then placed
+glyph by glyph along the path by `LeanSvg/TextPath.lean`.
 
 Precision: pen positions and advances are carried in 16.16 fixed point (units
 of 1/65536 px) and only rounded to `Fx` once, when a glyph's control points
@@ -118,6 +122,12 @@ dropped whole, as usvg's tree builder does) and one `text` node per XML
 character-data run. -/
 inductive Ev where
   | open_ (p : ElemPos)
+  /-- A valid `textPath` (direct child of `<text>`, linking to a shape):
+  its arc-length table, resolved `startOffset` and arc-length `accuracy` (16.16
+  px, `TextPath.accuracyFor` the text's scale).  `p` carries only
+  `rotate`, since usvg ignores `x`/`y`/`dx`/`dy` on a `textPath`.  An invalid
+  one is sent as an `open_` whose characters are not rendered. -/
+  | openPath (p : ElemPos) (path : TextPath.Table) (startOffset accuracy : Int)
   | close
   /-- `preserve` is the node's inherited `xml:space`; `rendered` is false for a
   `display:none` span, whose characters still consume position-list slots but
@@ -273,9 +283,9 @@ def isWordSep (cp : Nat) : Bool :=
 /-! ## Glyph outlines -/
 
 /-- One glyph's outline, scaled by `size / unitsPerEm`, flipped in `y`,
-optionally rotated about the pen, and translated to the pen position
-`(ox, oy)` — all in one pass, so each control point is rounded to `Fx`
-exactly once.  `ox`/`oy` are 16.16 (1/65536 px).
+mapped through the 16.16 linear part `[la lc; lb ld]` about the pen, and
+translated to the pen position `(ox, oy)` — all in one pass, so each control
+point is rounded to `Fx` exactly once.  `ox`/`oy` are 16.16 (1/65536 px).
 
 This walks `Font.rawContours` rather than calling `Font.outline`, for
 precision: `Font.outline` elevates every TrueType quadratic to a cubic and
@@ -286,19 +296,17 @@ so does tiny-skia, which is what resvg feeds glyph outlines to), so the
 elevation is pure loss here.  Coordinates are carried in *half* font units so
 that the implied on-curve point between two consecutive off-curve points —
 the one place TrueType asks for a midpoint — is exact rather than floored. -/
-def glyphCmds (f : Font) (gid : Nat) (sizeFx : Fx) (rot : Fx) (ox oy : Int) :
+def glyphCmdsLin (f : Font) (gid : Nat) (sizeFx : Fx) (la lb lc ld : Int) (ox oy : Int) :
     Array PathCmd := Id.run do
   let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
   let den : Int := 2 * upem
   let k : Int := sizeFx * 256
-  let (sn, cs) := if rot == 0 then ((0 : Int), (65536 : Int)) else sinCos16 (degToRad16 rot)
   -- `x2`/`y2` are twice the font-unit coordinate.
   let tr := fun (x2 y2 : Int) =>
     let sx := Int.ediv (x2 * k + upem) den
     let sy := -(Int.ediv (y2 * k + upem) den)
-    let (rx, ry) :=
-      if rot == 0 then (sx, sy)
-      else (Int.ediv (cs * sx - sn * sy) 65536, Int.ediv (sn * sx + cs * sy) 65536)
+    let rx := Int.ediv (la * sx + lc * sy) 65536
+    let ry := Int.ediv (lb * sx + ld * sy) 65536
     (⟨Fx.clamp (Int.ediv (rx + ox + 128) 256), Fx.clamp (Int.ediv (ry + oy + 128) 256)⟩ : Pt)
   let mut out : Array PathCmd := #[]
   for pts in Font.rawContours f gid do
@@ -346,6 +354,14 @@ def glyphCmds (f : Font) (gid : Nat) (sizeFx : Fx) (rot : Fx) (ox oy : Int) :
     out := out.push .close
   return out
 
+/-- `glyphCmdsLin` with the linear part a rotation by `rot` degrees (the
+identity, which maps every point exactly to itself, when `rot` is zero). -/
+def glyphCmds (f : Font) (gid : Nat) (sizeFx : Fx) (rot : Fx) (ox oy : Int) : Array PathCmd :=
+  if rot == 0 then glyphCmdsLin f gid sizeFx 65536 0 0 65536 ox oy
+  else
+    let (sn, cs) := sinCos16 (degToRad16 rot)
+    glyphCmdsLin f gid sizeFx cs sn (-sn) cs ox oy
+
 /-! ## Layout -/
 
 /-- One laid-out character. -/
@@ -355,6 +371,9 @@ structure Cluster where
   props : SpanProps
   /-- Advance in 16.16 px, kerning and spacing included. -/
   adv : Int := 0
+  /-- The advance before `letter-spacing`/`word-spacing` (usvg's `width`),
+  used to centre a glyph on its point along a `textPath`. -/
+  width : Int := 0
   /-- Cleared by the `letter-spacing` rule that drops a cluster whose advance
   went to zero or below. -/
   dropped : Bool := false
@@ -375,12 +394,36 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   let mut styleIdxs : Array Nat := #[]
   let mut propsOf : Array SpanProps := #[]
   let mut renderedOf : Array Bool := #[]
+  -- text flow (`collect_text_chunks_impl`): `flows[k-1]` is the `k`-th valid
+  -- `textPath`; a node's flow is `0` (linear) or `k`.  usvg resets the flow to
+  -- linear whenever *any* child element ends, even inside a `textPath`.
+  -- `segOf` counts textPath boundaries: a chunk must start wherever it changes.
+  let mut flows : Array (TextPath.Table × Int × Int) := #[]
+  let mut flowOf : Array Nat := #[]
+  let mut segOf : Array Nat := #[]
+  let mut curFlow : Nat := 0
+  let mut seg : Nat := 0
+  let mut kinds : Array Bool := #[]
   let mut depth : Nat := 0
   for ev in evs do
     match ev with
-    | .open_ _ => depth := depth + 1
-    | .close => depth := depth - 1
+    | .open_ _ =>
+      depth := depth + 1
+      kinds := kinds.push false
+    | .openPath _ tbl so acc =>
+      depth := depth + 1
+      kinds := kinds.push true
+      flows := flows.push (tbl, so, acc)
+      curFlow := flows.size
+      seg := seg + 1
+    | .close =>
+      depth := depth - 1
+      curFlow := 0
+      if kinds.back?.getD false then seg := seg + 1
+      kinds := kinds.pop
     | .text bs pres si pr rend =>
+      flowOf := flowOf.push curFlow
+      segOf := segOf.push seg
       texts := texts.push (trimChars pres (decodeUtf8 bs))
       -- `collect_text_nodes` starts the `<text>` element's own children at
       -- depth 0; our `depth` counts the `<text>` open itself, hence `- 1`.
@@ -406,12 +449,16 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   let mut cStyle : Array Nat := Array.emptyWithCapacity used
   let mut cProps : Array SpanProps := Array.emptyWithCapacity used
   let mut cRend : Array Bool := Array.emptyWithCapacity used
+  let mut cFlow : Array Nat := Array.emptyWithCapacity used
+  let mut cSeg : Array Nat := Array.emptyWithCapacity used
   for i in [0:ts.size] do
     for c in ts.getD i #[] do
       chars := chars.push c
       cStyle := cStyle.push (styleIdxs.getD i 0)
       cProps := cProps.push (propsOf.getD i default)
       cRend := cRend.push (renderedOf.getD i true)
+      cFlow := cFlow.push (flowOf.getD i 0)
+      cSeg := cSeg.push (segOf.getD i 0)
   let total := chars.size
   -- ---- 5. per-element character spans, then the position lists
   --
@@ -426,7 +473,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   let mut ni : Nat := 0
   for j in [0:evs.size] do
     match evs.getD j default with
-    | .open_ _ =>
+    | .open_ _ | .openPath _ _ _ _ =>
       offsets := offsets.setIfInBounds j off
       openStack := openStack.push j
     | .close =>
@@ -445,7 +492,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   let mut lastRot : Fx := 0
   for j in [0:evs.size] do
     match evs.getD j default with
-    | .open_ p =>
+    | .open_ p | .openPath p _ _ _ =>
       let o := offsets.getD j 0
       let c := counts.getD j 0
       for k in [0:Nat.min p.xs.size c] do
@@ -490,12 +537,16 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
   let mut a : Nat := 0
   for _ in [0:rn] do
     if a ≥ rn then break
-    -- the chunk is [a, b): it ends where the next absolute `x`/`y` begins
+    -- the chunk is [a, b): it ends where the next absolute `x`/`y` begins,
+    -- or at a `textPath` boundary
+    let seg0 := cSeg.getD (rend.getD a 0) 0
     let mut b := a + 1
     for q in [a + 1 : rn] do
       let p := pos.getD (rend.getD q 0) {}
-      if p.x.isSome || p.y.isSome then break
+      if p.x.isSome || p.y.isSome || cSeg.getD (rend.getD q 0) 0 != seg0 then break
       b := q + 1
+    let fk := cFlow.getD (rend.getD a 0) 0
+    let flow := if fk == 0 then none else flows[fk - 1]?
     -- advances, with kerning
     let mut cl : Array Cluster := Array.emptyWithCapacity (b - a)
     for q in [a:b] do
@@ -513,7 +564,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
           fu := fu + Font.kern f gid (Font.glyphId f nextCp)
         adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
       | none => pure ()
-      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv }
+      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv }
     -- `letter-spacing`, then `word-spacing` (usvg applies each only when some
     -- span of the chunk actually asks for it)
     if cl.any (fun c => c.props.letterSpacing != 0) then
@@ -521,7 +572,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
         let c := cl.getD q default
         let adv := if q + 1 == cl.size then c.adv else c.adv + c.props.letterSpacing * 256
         cl := cl.setIfInBounds q
-          (if adv ≤ 0 then { c with adv := 0, dropped := true } else { c with adv := adv })
+          (if adv ≤ 0 then { c with adv := 0, width := 0, dropped := true } else { c with adv := adv })
     if cl.any (fun c => c.props.wordSpacing != 0) then
       for q in [0:cl.size] do
         let c := cl.getD q default
@@ -537,8 +588,23 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
     let p0 := pos.getD (rend.getD a 0) {}
     let chunkX : Int := match p0.x with | some v => v * 256 | none => lastX
     let chunkY : Int := match p0.y with | some v => v * 256 | none => lastY
+    -- On a path (`resolve_clusters_positions_path`) the chunk's `x` is an extra
+    -- offset along the path and its `y` is ignored; each cluster sits at the
+    -- point of its advance midpoint, `dx` included.
+    let nrm : Array (Option TextPath.Normal) := match flow with
+      | some (tbl, so, acc) => Id.run do
+        let mut s : Int := (p0.x.getD 0) * 256 + so + x0
+        let mut offs : Array Int := Array.emptyWithCapacity cl.size
+        for q in [0:cl.size] do
+          let c := cl.getD q default
+          s := s + (pos.getD (a + q) {}).dx * 256
+          offs := offs.push (s + Int.ediv c.width 2)
+          s := s + c.adv
+        return TextPath.normals tbl acc offs
+      | none => #[]
     let mut x : Int := x0
     let mut y : Int := 0
+    let mut pathEnd : Int × Int := (0, 0)
     for q in [0:cl.size] do
       let c := cl.getD q default
       -- usvg indexes `dx`/`dy`/`rotate` by the character's position among the
@@ -547,24 +613,53 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
       -- while chunk starts and `x`/`y` use the position among *all*
       -- characters.  `rotate-and-display-none.svg` pins this down.
       let p := pos.getD (a + q) {}
-      x := x + p.dx * 256
-      y := y + p.dy * 256
-      if !c.dropped then
-        match faces.get c.props.face with
-        | some f =>
-          let cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot (chunkX + x) (chunkY + y)
-          if cmds.size > 0 then
-            if curStyle == some c.styleIdx then curCmds := curCmds ++ cmds
-            else
-              match curStyle with
-              | some s => if curCmds.size > 0 then placed := placed.push ⟨s, curCmds⟩
-              | none => pure ()
-              curStyle := some c.styleIdx
-              curCmds := cmds
+      let mut cmds : Array PathCmd := #[]
+      if flow.isSome then
+        -- off the path: hidden, and its `dy` is not accumulated either
+        match nrm.getD q none with
         | none => pure ()
-      x := x + c.adv
-    lastX := chunkX + x
-    lastY := chunkY + y
+        | some n =>
+          -- `y` accumulates `dy`, applied across the tangent
+          y := y + p.dy * 256
+          pathEnd := (n.x + c.adv, n.y)
+          if !c.dropped then
+            match faces.get c.props.face with
+            | some f =>
+              -- T(n) · R(tangent) · T(-width/2, dy) · R(rotate)
+              let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
+                else sinCos16 (degToRad16 p.rot)
+              let hw := Int.ediv c.width 2
+              cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size
+                (Int.ediv (n.cos * cr - n.sin * sr) 65536)
+                (Int.ediv (n.sin * cr + n.cos * sr) 65536)
+                (Int.ediv (-(n.cos * sr) - n.sin * cr) 65536)
+                (Int.ediv (n.cos * cr - n.sin * sr) 65536)
+                (n.x + Int.ediv (-(n.cos * hw) - n.sin * y) 65536)
+                (n.y + Int.ediv (n.cos * y - n.sin * hw) 65536)
+            | none => pure ()
+      else
+        x := x + p.dx * 256
+        y := y + p.dy * 256
+        if !c.dropped then
+          match faces.get c.props.face with
+          | some f =>
+            cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot (chunkX + x) (chunkY + y)
+          | none => pure ()
+        x := x + c.adv
+      if cmds.size > 0 then
+        if curStyle == some c.styleIdx then curCmds := curCmds ++ cmds
+        else
+          match curStyle with
+          | some s => if curCmds.size > 0 then placed := placed.push ⟨s, curCmds⟩
+          | none => pure ()
+          curStyle := some c.styleIdx
+          curCmds := cmds
+    if flow.isSome then
+      lastX := pathEnd.1
+      lastY := pathEnd.2
+    else
+      lastX := chunkX + x
+      lastY := chunkY + y
     a := b
   match curStyle with
   | some s => if curCmds.size > 0 then placed := placed.push ⟨s, curCmds⟩

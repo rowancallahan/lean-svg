@@ -2081,6 +2081,64 @@ def elemPosOf (st : Style) (attrs : Array Xml.Attr) : Text.ElemPos :=
     rots := rots.getD #[],
     hasRot := rots.isSome }
 
+/-- The `#id` a `textPath` links to (`href`, else `xlink:href`), if any. -/
+def textPathHref (attrs : Array Xml.Attr) : Option String :=
+  let href := match attr attrs "href" with
+    | some v => v
+    | none => (attr attrs "xlink:href").getD ByteArray.empty
+  let t := trim href
+  if at' t 0 == 35 && t.size ≤ maxIdBytes + 1 then some (toStr (t.extract 1 t.size)) else none
+
+/-- T50: the arc-length tables of every element some `textPath` links to,
+keyed by id, built once per document.  The first element carrying an id wins,
+as in usvg's `svgtree`; an id whose element is not a shape, or whose shape
+draws nothing, gets no table, which makes the `textPath` invalid.  The shape
+is taken with its own `transform` and nothing above it (`resolve_text_flow`). -/
+def textPathTables (events : Array Xml.Event) : Std.HashMap String TextPath.Table := Id.run do
+  let mut wanted : Std.HashMap String Bool := {}
+  for ev in events do
+    match ev with
+    | .open_ "textPath" attrs =>
+      match textPathHref attrs with
+      | some id => wanted := wanted.insert id false
+      | none => pure ()
+    | _ => pure ()
+  let mut out : Std.HashMap String TextPath.Table := {}
+  if wanted.isEmpty then return out
+  for ev in events do
+    match ev with
+    | .open_ nm attrs =>
+      match attr attrs "id" with
+      | some v =>
+        let id := toStr v
+        if wanted.get? id == some false then
+          wanted := wanted.insert id true
+          let m := match attr attrs "transform" with
+            | some t => parseTransform t
+            | none => Mat.identity
+          match (shapeCmds nm attrs).bind (fun cmds => TextPath.build cmds m) with
+          | some tbl => out := out.insert id tbl
+          | none => pure ()
+      | none => pure ()
+    | _ => pure ()
+  return out
+
+/-- `startOffset` in 16.16 px: a length (resolved against the `textPath`'s
+own font size), or a percentage of the path's total length.  Anything
+unparsable is `0`, usvg's default. -/
+def startOffsetOf (st : Style) (tbl : TextPath.Table) (attrs : Array Xml.Attr) : Int :=
+  match attr attrs "startOffset" with
+  | none => 0
+  | some v =>
+    let t := trim v
+    match parseNumber t 0 with
+    | some (n, j) =>
+      if at' t j == 37 && j + 1 == t.size then Int.ediv (tbl.total * n) 25600
+      else match parseTextLen st.fontSize 0 t 0 with
+        | some (l, k) => if k == t.size then l * 256 else 0
+        | none => 0
+    | none => 0
+
 /-- Turn the `<text>` element opened at `events[idx]` into shapes.
 
 The subtree is walked here rather than by `interpret`'s main loop because text
@@ -2093,7 +2151,11 @@ single branch.
 styling goes through exactly the same CSS resolution as everything else.
 Elements other than `tspan` (and `a`, which SVG says to treat as a `tspan`
 here) are dropped together with their character data, as usvg's tree builder
-does — that covers `textPath` and `tref`, which this task does not support.
+does — that covers `tref`, which is not supported.  A `textPath` that is a
+direct child of the `<text>` element becomes `Text.Ev.openPath` when it links
+to an entry of `paths` (T50), and a non-rendering span otherwise (usvg skips an
+invalid one but its characters keep their position-list slots); one anywhere
+else is dropped whole, as usvg's tree builder does.
 
 Only `Text.SpanProps` and an index into a local table of resolved styles cross
 into `LeanSvg/Text.lean`; the styles come back attached to whole runs of
@@ -2102,11 +2164,20 @@ glyphs, which become ordinary `Shape`s.  `evenOdd` is forced off because
 the `<text>` element's, because `transform` on a `tspan` is not a thing. -/
 def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
     (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
-    (chain : Array Css.ElemInfo) (budget : Nat) : Array Shape × Nat := Id.run do
+    (chain : Array Css.ElemInfo) (budget : Nat)
+    (paths : Std.HashMap String TextPath.Table) : Array Shape × Nat := Id.run do
   let textAttrs := match events.getD idx default with
     | .open_ _ a => a
     | _ => #[]
   let mut styles : Array Style := #[]
+  -- Vertical text on a path is not implemented: under a vertical
+  -- `writing-mode` on the `<text>` element itself a `textPath` is still
+  -- dropped whole, as before T50.
+  let vertical := match attrOrStyle textAttrs "writing-mode" with
+    | some v =>
+      let t := trim v
+      eqAscii t "tb" || eqAscii t "tb-rl" || eqAscii t "vertical-rl" || eqAscii t "vertical-lr"
+    | none => false
   let mut evs : Array Text.Ev := #[Text.Ev.open_ (elemPosOf textStyle textAttrs)]
   let mut stStack : Array Style := #[textStyle]
   let mut chStack : Array (Array Css.ElemInfo) := #[chain]
@@ -2129,7 +2200,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     | .open_ nm attrs =>
       depth := depth + 1
       if skip > 0 then skip := skip + 1
-      else if nm == "tspan" || nm == "a" then
+      else if nm == "tspan" || nm == "a" || (nm == "textPath" && depth == 2 && !vertical) then
         let isFirst := ccStack.back?.getD 0 == 0
         ccStack := match ccStack.back? with
           | some c => ccStack.pop.push (c + 1)
@@ -2142,8 +2213,23 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         ccStack := ccStack.push 0
         -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
         -- while its characters keep their slots in the position lists.
-        rendStack := rendStack.push ((rendStack.back?.getD true) && !isDisplayNone attrs)
-        evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
+        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs
+        if nm == "textPath" then
+          -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
+          let ep := elemPosOf st attrs
+          let ep : Text.ElemPos := { rots := ep.rots, hasRot := ep.hasRot }
+          match (textPathHref attrs).bind paths.get? with
+          | some tbl =>
+            rendStack := rendStack.push rend
+            let m := textStyle.ctm
+            evs := evs.push (Text.Ev.openPath ep tbl (startOffsetOf st tbl attrs)
+              (TextPath.accuracyFor m.a m.b m.c m.d))
+          | none =>
+            rendStack := rendStack.push false
+            evs := evs.push (Text.Ev.open_ ep)
+        else
+          rendStack := rendStack.push rend
+          evs := evs.push (Text.Ev.open_ (elemPosOf st attrs))
       else skip := skip + 1
     | .text bs =>
       if skip == 0 then
@@ -2270,6 +2356,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   -- copying, and T20's `clipPath` slots, which the walk below fills in
   -- because their contents need the cascade.  See "the shape of a defs table".
   let scan := defsScan events
+  let textPaths := textPathTables events
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
     -- `transform-origin` percentages resolve against usvg's per-element
@@ -2644,7 +2731,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
               if layered then
                 nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
-              let (shs, used) := textShapes applyEffective events idx st chain textBudget
+              let (shs, used) := textShapes applyEffective events idx st chain textBudget textPaths
               textBudget := textBudget - used
               -- The laid-out glyph outlines are in this `<text>`'s own user
               -- space (`textShapes` gives every run the element's `ctm`), so
