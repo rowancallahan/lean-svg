@@ -511,6 +511,12 @@ Render time per 200×200 file: 28–43 ms including process start.
 
 ## 6. Per-file pass criteria (T100)
 
+A fourth kind, `excluded`, overrides the rule for files whose behaviour
+Rowan has decided (`docs/DECISIONS.md`): DTD entities, `enable-background`
+(where resvg is not the reference), zero/negative document size (refused),
+and external resources in files that would otherwise need a human check.
+They are listed but never scored or queued for review.
+
 Judging every file against resvg conflates two different questions: "does
 lean-svg match resvg" and "is lean-svg correct". resvg-test-suite's own
 `results.csv` rates the seven big renderers against the SVG spec per file

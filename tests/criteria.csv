@@ -1,25 +1,25 @@
 file,corpus,reference,reason
-filters/enable-background/accumulate-with-new.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/accumulate.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/filter-on-shape.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/inherit.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/new-with-invalid-region-1.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/new-with-invalid-region-2.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/new-with-invalid-region-3.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/new-with-region.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/new.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/shapes-after-filter.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/stop-on-the-first-new-1.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/stop-on-the-first-new-2.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-clip-path.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-filter-on-the-same-element.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-filter.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-mask.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
-filters/enable-background/with-opacity-1.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-opacity-2.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-opacity-3.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-opacity-4.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/enable-background/with-transform.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+filters/enable-background/accumulate-with-new.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/accumulate.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/filter-on-shape.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/inherit.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/new-with-invalid-region-1.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/new-with-invalid-region-2.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/new-with-invalid-region-3.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/new-with-region.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/new.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/shapes-after-filter.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/stop-on-the-first-new-1.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/stop-on-the-first-new-2.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-clip-path.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-filter-on-the-same-element.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-filter.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-mask.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-opacity-1.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-opacity-2.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-opacity-3.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-opacity-4.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/enable-background/with-transform.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
 filters/feBlend/empty.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/feBlend/mode=color-burn.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/feBlend/mode=darken.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -280,9 +280,9 @@ filters/filter/global-transform.svg,resvg-suite,resvg,resvg=1 (correct) in resvg
 filters/filter/huge-region.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/filter/in-to-invalid-1.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/filter/in-to-invalid-2.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-filters/filter/in=BackgroundAlpha-with-enable-background.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/filter/in=BackgroundAlpha.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-filters/filter/in=BackgroundImage-with-enable-background.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+filters/filter/in=BackgroundAlpha-with-enable-background.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/filter/in=BackgroundAlpha.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+filters/filter/in=BackgroundImage-with-enable-background.svg,resvg-suite,excluded,"enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
 filters/filter/in=BackgroundImage.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/filter/in=FillPaint-on-g-without-children.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
 filters/filter/in=FillPaint-with-gradient.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
@@ -1105,14 +1105,14 @@ structure/image/external-png.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-te
 structure/image/external-svg-with-transform.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/image/external-svg.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/image/external-svgz.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/image/float-size.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
+structure/image/float-size.svg,resvg-suite,excluded,"external resources are never loaded (Rowan, 2026-09-23)"
 structure/image/image-with-float-size-scaling.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/image/no-height-non-square.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/image/no-height-on-svg.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
+structure/image/no-height-on-svg.svg,resvg-suite,excluded,"external resources are never loaded (Rowan, 2026-09-23)"
 structure/image/no-height.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/image/no-width-and-height-on-svg.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
+structure/image/no-width-and-height-on-svg.svg,resvg-suite,excluded,"external resources are never loaded (Rowan, 2026-09-23)"
 structure/image/no-width-and-height.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/image/no-width-on-svg.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
+structure/image/no-width-on-svg.svg,resvg-suite,excluded,"external resources are never loaded (Rowan, 2026-09-23)"
 structure/image/no-width.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/image/preserveAspectRatio=none-on-svg.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/image/preserveAspectRatio=none.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1158,11 +1158,11 @@ structure/style-attribute/comments.svg,resvg-suite,resvg,resvg=1 (correct) in re
 structure/style-attribute/non-presentational-attribute.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/style-attribute/simple-case.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/style-attribute/transform.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/svg/attribute-value-via-ENTITY-reference.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
+structure/svg/attribute-value-via-ENTITY-reference.svg,resvg-suite,excluded,"DTD entities are not supported (Rowan, 2026-09-23)"
 structure/svg/deeply-nested-svg.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/svg/elements-via-ENTITY-reference-1.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/svg/elements-via-ENTITY-reference-2.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/svg/elements-via-ENTITY-reference-3.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
+structure/svg/elements-via-ENTITY-reference-1.svg,resvg-suite,excluded,"DTD entities are not supported (Rowan, 2026-09-23)"
+structure/svg/elements-via-ENTITY-reference-2.svg,resvg-suite,excluded,"DTD entities are not supported (Rowan, 2026-09-23)"
+structure/svg/elements-via-ENTITY-reference-3.svg,resvg-suite,excluded,"DTD entities are not supported (Rowan, 2026-09-23)"
 structure/svg/explicit-svg-namespace.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/svg/funcIRI-parsing.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
 structure/svg/funcIRI-with-invalid-characters.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1170,7 +1170,7 @@ structure/svg/funcIRI-with-quotes.svg,resvg-suite,resvg,resvg=1 (correct) in res
 structure/svg/invalid-id-attribute-1.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
 structure/svg/invalid-id-attribute-2.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
 structure/svg/mixed-namespaces.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/svg/negative-size.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
+structure/svg/negative-size.svg,resvg-suite,excluded,"invalid document size: lean-svg refuses it, as resvg does"
 structure/svg/nested-svg-one-with-rect-and-one-with-viewBox.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/svg/nested-svg-with-overflow-auto.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/svg/nested-svg-with-overflow-visible.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1199,7 +1199,7 @@ structure/svg/proportional-viewBox.svg,resvg-suite,resvg,resvg=1 (correct) in re
 structure/svg/rect-inside-a-non-SVG-element.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/svg/viewBox-not-at-zero-pos.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/svg/xmlns-validation.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/svg/zero-size.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
+structure/svg/zero-size.svg,resvg-suite,excluded,"invalid document size: lean-svg refuses it, as resvg does"
 structure/switch/comment-as-first-child.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/switch/display-none-on-child.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/switch/non-SVG-child.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1312,7 +1312,7 @@ structure/use/with-currentColor.svg,resvg-suite,resvg,resvg=1 (correct) in resvg
 structure/use/with-size.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/use/xlink-to-a-child-of-a-non-SVG-element.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/use/xlink-to-a-child-of-an-invalid-element.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-structure/use/xlink-to-an-external-file.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+structure/use/xlink-to-an-external-file.svg,resvg-suite,excluded,"external resources are never loaded (Rowan, 2026-09-23)"
 structure/use/xlink-to-an-invalid-element-1.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/use/xlink-to-an-invalid-element-2.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 structure/use/xlink-to-an-invalid-element-3.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1608,7 +1608,7 @@ text/textPath/writing-mode=tb.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-t
 text/tref/link-to-a-complex-text.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/tref/link-to-a-non-SVG-element.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/tref/link-to-a-non-text-element.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-text/tref/link-to-an-external-file-element.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+text/tref/link-to-an-external-file-element.svg,resvg-suite,excluded,"external resources are never loaded (Rowan, 2026-09-23)"
 text/tref/link-to-text.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/tref/nested.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/tref/position-attributes.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1744,3 +1744,8 @@ text/writing-mode/vertical-rl.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-t
 93_arabic.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
 93_devanagari.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
 94_font_speed.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
+95_marker_paint_order.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
+96_text_layout.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
+97_font_weight.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
+97_small_caps_marks.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"
+99_feoffset_subregion.svg,local,resvg,"local regression file, no results.csv row; resvg is the only oracle used for it today"

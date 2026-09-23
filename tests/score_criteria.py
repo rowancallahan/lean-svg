@@ -92,6 +92,11 @@ def main():
 
     for row in criteria:
         f, corpus, ref = row["file"], row["corpus"], row["reference"]
+        assert ref in ("resvg", "chrome", "human", "excluded"), (f, ref)
+        if ref == "excluded":
+            # behaviour decided by Rowan (make_criteria.py): not scored
+            counts[(ref, "excluded")] += 1
+            continue
         if ref == "human":
             v = verdicts.get(f)
             if v is None:
@@ -131,16 +136,19 @@ def main():
         print("  %-6s  %4d file(s)  pass %4d  fail %3d  missing %3d  unreviewed %3d  (pass rate of scored: %s)"
               % (ref, total, p, sub.get("fail", 0), sub.get("missing", 0), sub.get("unreviewed", 0), rate))
 
+    print("  excluded %4d file(s)  (decided behaviour, not scored; see tests/criteria.csv)"
+          % counts[("excluded", "excluded")])
+
     all_pass = sum(counts[(r, "pass")] for r in ("resvg", "chrome", "human"))
     all_fail = sum(counts[(r, "fail")] for r in ("resvg", "chrome", "human"))
     all_missing = sum(counts[(r, "missing")] for r in ("resvg", "chrome", "human"))
     all_unreviewed = counts[("human", "unreviewed")]
     scored = all_pass + all_fail
     print(
-        "\n== overall ==\n  total %d  pass %d  fail %d  missing %d  unreviewed %d  "
+        "\n== overall ==\n  total %d (incl. excluded)  pass %d  fail %d  missing %d  unreviewed %d  "
         "(pass rate of scored: %s)"
         % (
-            scored + all_missing + all_unreviewed, all_pass, all_fail, all_missing, all_unreviewed,
+            scored + all_missing + all_unreviewed + counts[("excluded", "excluded")], all_pass, all_fail, all_missing, all_unreviewed,
             "%.1f%%" % (100.0 * all_pass / scored) if scored else "-",
         )
     )
