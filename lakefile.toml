@@ -1,6 +1,6 @@
 name = "lean-svg"
 version = "0.1.0"
-defaultTargets = ["lean-svg", "fontdump"]
+defaultTargets = ["lean-svg", "fontdump", "pngdump"]
 
 # No dependencies on purpose: the trusted computing base is Lean core only.
 # (No mathlib, no FFI, no C libraries.)
@@ -18,3 +18,9 @@ root = "Main"
 [[lean_exe]]
 name = "fontdump"
 root = "FontDump"
+
+# Debug/oracle tool for LeanSvg.PngDecode (T61). Reads PNG paths off the
+# command line; lean-svg does not link it.
+[[lean_exe]]
+name = "pngdump"
+root = "PngDump"
