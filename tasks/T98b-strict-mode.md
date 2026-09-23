@@ -9,9 +9,23 @@ Rowan's follow-up to T98 (font fallback with a warnings file):
   warnings: at most two files out, both no-clobber (T98's behaviour). Its
   theorem: writes at most these two paths, never overwrites.
 - **Exit codes** distinguish the outcomes: `0` success, no warnings; `2`
-  success with warnings (PNG written; in strict mode the warnings go to
-  stderr only); `1` failure (nothing written, as today). Document them in
-  the README/usage text.
+  success with warnings (PNG written; in strict mode the warnings are
+  dropped, the exit code is the only signal); `1` failure (nothing written,
+  as today). Document them in the README.
+- **No stdout or stderr, ever** (Rowan: "it should only go from the input
+  files to the output files with no side effects, except for the exit
+  codes"). Reason: a text channel driven by input content (e.g. a font name
+  echoed in a message) is an unreasoned-about output. Remove every
+  stdout/stderr write from the `lean-svg` binary, including T98's stderr note
+  and today's error messages (`lean-svg: error: ...`) and usage text: a bad
+  command line is exit code `1`. Failures are reported by exit code only; a
+  small fixed set of distinct failure codes (bad arguments, unreadable input,
+  output exists, render failed) is fine if documented. The only place
+  warning text may go is `<output>.warnings.txt` under `--warnings`.
+  Make it checkable: the effect layer has no print op, and
+  `tests/check_invariants.py` fails if the `lean-svg` main path can write to
+  stdout/stderr (dev tools such as `fontdump`/`shapedump` are exempt).
+  Update `tests/*.py` that parse the old messages to use exit codes.
 - Axioms stay `[propext]` only; `scripts/check-theorems.sh`,
   `tests/check_invariants.py` pass; update the effect count there only if
   the new op requires it, and say so.
