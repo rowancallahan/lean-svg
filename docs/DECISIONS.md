@@ -36,12 +36,11 @@ After items 1–3 above, in this order:
 4. **Review pass.** Quick full run; Rowan looks at every file that is not
    close (a click-through gallery: reference | ours | diff) and marks each
    acceptable or not.
-5. **Compressed PNG output.** Real DEFLATE instead of stored blocks. Keep
-   the size bound (`proofs/SizeBound.lean`) true: a conforming encoder falls
-   back to stored blocks, so the upper bound survives. Prefer a pure
-   in-repo encoder, or lean-zip at proof time only (ROADMAP §4), so the
-   shipped binary stays dependency- and FFI-free.
-6. **Lock down behaviour.** Accept the current outputs as golden images
+5. **Compressed PNG output: use lean-zip.** The size theorem only needs a
+   loose bound: the compressed output is no bigger than the stored
+   (uncompressed) encoding, which `proofs/SizeBound.lean` already bounds.
+   The goal is only that output can never grow without bound.
+6. **Lock down behaviour (our own bytes).** Accept the current outputs as golden images
    (byte hashes of our own PNGs for the whole corpus plus the local tests),
    and make any change to a locked output fail CI unless explicitly
    re-blessed. After this point regressions are caught exactly, not by a
