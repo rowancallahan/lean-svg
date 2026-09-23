@@ -1,6 +1,7 @@
 import LeanSvg.ImageData
 import LeanSvg.PngDecode
 import LeanSvg.JpegDecode
+import LeanSvg.GifDecode
 import LeanSvg.Viewport
 import LeanSvg.Shader
 
@@ -18,11 +19,11 @@ Pipeline, mirroring usvg's `parser/image.rs` and resvg's `image.rs`:
   (strip tab/LF/CR, split at the first `,`, a `;base64` suffix on the header,
   percent-decoding, forgiving base64).  The MIME type picks the decoder like
   usvg's `default_data_resolver`; `text/plain` (also what a missing or broken
-  MIME type becomes) sniffs the magic bytes.  GIF, WebP and SVG images are
-  `none` for now.
-* `load`: decode through `PngDecode`/`JpegDecode`, check the size contract of
-  `ImageData` once more (a violation is `none`, never a crash), premultiply
-  with tiny-skia's `premultiply_u8`.
+  MIME type becomes) sniffs the magic bytes.  WebP and SVG images are `none`
+  for now.
+* `load`: decode through `PngDecode`/`JpegDecode`/`GifDecode` (first frame
+  only, T78), check the size contract of `ImageData` once more (a violation
+  is `none`, never a crash), premultiply with tiny-skia's `premultiply_u8`.
 * `place`: `x`/`y`/`width`/`height` (auto-sized from the image) and
   `preserveAspectRatio` → the view box the image pixels map onto
   (`convert_inner`'s `fit_view_box` + `aligned_pos`).
@@ -201,15 +202,17 @@ def dataUri (href0 : ByteArray) : Option (String × ByteArray) :=
 inductive Fmt where
   | png
   | jpeg
-  /-- GIF, WebP, SVG, or anything else: not drawn (yet). -/
+  | gif
+  /-- WebP, SVG, or anything else: not drawn (yet). -/
   | other
 deriving BEq, Repr
 
-/-- The magic bytes `imagesize::image_type` checks for the two formats we can
-decode. -/
+/-- The magic bytes `imagesize::image_type` checks for the three formats we
+can decode. -/
 def sniff (d : ByteArray) : Fmt :=
   if at' d 0 == 0x89 && at' d 1 == 0x50 && at' d 2 == 0x4E && at' d 3 == 0x47 then .png
   else if at' d 0 == 0xFF && at' d 1 == 0xD8 && at' d 2 == 0xFF then .jpeg
+  else if at' d 0 == 0x47 && at' d 1 == 0x49 && at' d 2 == 0x46 && at' d 3 == 0x38 then .gif
   else .other
 
 /-- usvg's `default_data_resolver`: the declared MIME type wins; only
@@ -217,6 +220,7 @@ def sniff (d : ByteArray) : Fmt :=
 def fmtOf (mime : String) (d : ByteArray) : Fmt :=
   if mime == "image/png" then .png
   else if mime == "image/jpeg" || mime == "image/jpg" then .jpeg
+  else if mime == "image/gif" then .gif
   else if mime == "text/plain" then sniff d
   else .other
 
@@ -250,17 +254,19 @@ def ofDecoded (d : ImageData.Decoded) : Option Pix :=
     return out⟩
 
 /-- `href` bytes to pixels with the given decoders; `none` for anything that
-is not an embedded PNG/JPEG that decodes. -/
-def loadWith (png jpeg : ByteArray → Option ImageData.Decoded) (href : ByteArray) : Option Pix :=
+is not an embedded PNG/JPEG/GIF that decodes. -/
+def loadWith (png jpeg gif : ByteArray → Option ImageData.Decoded) (href : ByteArray) : Option Pix :=
   match dataUri href with
   | none => none
   | some (mime, d) =>
     match fmtOf mime d with
     | .png => (png d).bind ofDecoded
     | .jpeg => (jpeg d).bind ofDecoded
+    | .gif => (gif d).bind ofDecoded
     | .other => none
 
-def load (href : ByteArray) : Option Pix := loadWith PngDecode.decode JpegDecode.decode href
+def load (href : ByteArray) : Option Pix :=
+  loadWith PngDecode.decode JpegDecode.decode GifDecode.decode href
 
 /-- Decoded pixels one document may hold in all (two full-size images).  A
 few bytes of deflate can decode to `ImageData.maxPixels`, so without a

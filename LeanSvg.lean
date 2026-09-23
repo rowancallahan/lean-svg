@@ -17,6 +17,7 @@ import LeanSvg.ImageData
 import LeanSvg.Inflate
 import LeanSvg.PngDecode
 import LeanSvg.JpegDecode
+import LeanSvg.GifDecode
 import LeanSvg.Image
 import LeanSvg.Pattern
 import LeanSvg.Svg
