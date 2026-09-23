@@ -385,13 +385,58 @@ def glyphCmdsLin (f : Font) (gid : Nat) (sizeFx : Fx) (la lb lc ld : Int) (ox oy
     out := out.push .close
   return out
 
+/-- The rotation-only linear part `glyphCmds` feeds `glyphCmdsLin`, factored
+out so `T81`'s text-bbox rectangle (below) can rotate by the exact same
+matrix a glyph's own outline does. -/
+def rotMat16 (rot : Fx) : Int × Int × Int × Int :=
+  if rot == 0 then (65536, 0, 0, 65536)
+  else
+    let (sn, cs) := sinCos16 (degToRad16 rot)
+    (cs, sn, -sn, cs)
+
 /-- `glyphCmdsLin` with the linear part a rotation by `rot` degrees (the
 identity, which maps every point exactly to itself, when `rot` is zero). -/
 def glyphCmds (f : Font) (gid : Nat) (sizeFx : Fx) (rot : Fx) (ox oy : Int) : Array PathCmd :=
-  if rot == 0 then glyphCmdsLin f gid sizeFx 65536 0 0 65536 ox oy
-  else
-    let (sn, cs) := sinCos16 (degToRad16 rot)
-    glyphCmdsLin f gid sizeFx cs sn (-sn) cs ox oy
+  let (la, lb, lc, ld) := rotMat16 rot
+  glyphCmdsLin f gid sizeFx la lb lc ld ox oy
+
+/-! ## Text bounding box (T81)
+
+A `<text>`'s `objectBoundingBox` (what a `filter`/`mask`/`clipPathUnits=
+"objectBoundingBox"` on it sizes against) is *not* the union of its glyph
+outlines: usvg's `convert_span` builds it from each visible cluster's font
+*metrics* instead -- `(0, -ascent)` to `(advance, -descent)` in the glyph's
+own local space, `ascent`/`descent` the resolved font metrics at that span's
+size, not the glyph's actual ink. This is why a filter region sized off text
+with no descenders does not grow to fit one, and why `letter-spacing` (which
+only inserts extra advance *between* clusters, never before the first or
+after the last) does not widen the box past the outermost glyphs' own
+advances. The rectangle is carried through the exact same rotation and
+translation as the glyph's own outline, so it lands in the same `<text>`
+user space `layout` already returns outlines in. -/
+
+/-- One glyph cluster's metric-box corners, already rotated and translated
+into the `<text>` element's user space -- `(la, lb, lc, ld, ox, oy)` the same
+six values `glyphCmdsLin` takes for this glyph's own outline, `adv16` its
+(already `letter-spacing`/`word-spacing`-adjusted) advance clamped up to one
+pixel when it collapsed to zero or below (usvg: `if advance <= 0.0 { advance
+= 1.0 }`), `top16`/`bot16` the font's ascent/descent scaled to this glyph's
+size (screen-`y`, so `top16` is usually negative). -/
+def metricCorners (la lb lc ld ox oy adv16 top16 bot16 : Int) : Array Pt :=
+  let tr := fun (lx ly : Int) =>
+    let rx := Int.ediv (la * lx + lc * ly) 65536
+    let ry := Int.ediv (lb * lx + ld * ly) 65536
+    (⟨Fx.clamp (Int.ediv (rx + ox + 128) 256), Fx.clamp (Int.ediv (ry + oy + 128) 256)⟩ : Pt)
+  #[tr 0 top16, tr adv16 top16, tr adv16 bot16, tr 0 bot16]
+
+/-- The 16.16 screen-space top/bottom of one glyph's metric box, from the
+font's resolved ascent/descent (`Font.ascent` positive, `Font.descent`
+negative, both font units above/below the baseline, see `Font.lean`) scaled
+to `sizeFx`. -/
+def metricTopBot (f : Font) (sizeFx : Fx) : Int × Int :=
+  let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+  (-(Font.unitsToFx16 f.ascent sizeFx upem), -(Font.unitsToFx16 f.descent sizeFx upem))
+
 /-! ## Text decoration (`text-decoration`)
 
 `underline`/`overline`/`line-through` are drawn as a plain filled rectangle
@@ -529,7 +574,7 @@ rotation angle and a single pen position:
   position, not the same 90° rotation every glyph gets — `tb-with-dx-on-
   second-tspan.svg` exercises exactly this fallback). -/
 def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool) :
-    Array Placed × Nat :=
+    Array Placed × Nat × Option Box :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
   let mut texts : Array (Array Nat) := #[]
@@ -587,7 +632,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       ts := ts.setIfInBounds i (t.extract 0 (budget - used))
       used := budget
     else used := used + t.size
-  if used == 0 then return (#[], 0)
+  if used == 0 then return (#[], 0, none)
   -- ---- 4. flatten to characters
   let mut chars : Array Nat := Array.emptyWithCapacity used
   let mut cStyle : Array Nat := Array.emptyWithCapacity used
@@ -671,7 +716,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   for i in [0:total] do
     if cRend.getD i true then rend := rend.push i
   let rn := rend.size
-  if rn == 0 then return (#[], used)
+  if rn == 0 then return (#[], used, none)
   -- ---- 8. chunk by chunk
   -- A decoration rectangle breaks more often than a glyph-outline run: usvg
   -- starts a new one not only where the style changes but at *any* character
@@ -685,6 +730,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   -- against the whole thing, so a gradient across an underline spans the
   -- true run width even when the line itself is several disjoint segments.
   let mut placed : Array Placed := #[]
+  -- T81: the metric-box union, in the same `<text>` user space as `placed`'s
+  -- outlines -- see "Text bounding box" above.
+  let mut mbox : Option Box := none
   let mut lastX : Int := 0
   let mut lastY : Int := 0
   let mut a : Nat := 0
@@ -842,17 +890,32 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           if !c.dropped then
             match faces.get c.props.face with
             | some f =>
-              -- T(n) · R(tangent) · T(-width/2, dy) · R(rotate)
+              -- T(n) · R(tangent) · T(-width/2, dy + baseline-shift) · R(rotate)
+              --
+              -- T54's `resolveBaseline16` gives the same pen offset the
+              -- horizontal branch adds straight into `gy` (unrotated by the
+              -- character's own `rotate`); here the perpendicular-to-path
+              -- axis plays that role, so it folds into `y` exactly like `dy`
+              -- does, before the tangent rotation -- not into the
+              -- accumulator itself (`y` stays a pure `dy` running sum for
+              -- the next character), just this glyph's own translation.
+              let pr := c.props
+              let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
+                pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
+              let yEff := y + bshift
               let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
                 else sinCos16 (degToRad16 p.rot)
               let hw := Int.ediv c.width 2
-              cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size
-                (Int.ediv (n.cos * cr - n.sin * sr) 65536)
-                (Int.ediv (n.sin * cr + n.cos * sr) 65536)
-                (Int.ediv (-(n.cos * sr) - n.sin * cr) 65536)
-                (Int.ediv (n.cos * cr - n.sin * sr) 65536)
-                (n.x + Int.ediv (-(n.cos * hw) - n.sin * y) 65536)
-                (n.y + Int.ediv (n.cos * y - n.sin * hw) 65536)
+              let la := Int.ediv (n.cos * cr - n.sin * sr) 65536
+              let lb := Int.ediv (n.sin * cr + n.cos * sr) 65536
+              let lc := Int.ediv (-(n.cos * sr) - n.sin * cr) 65536
+              let tox := n.x + Int.ediv (-(n.cos * hw) - n.sin * yEff) 65536
+              let toy := n.y + Int.ediv (n.cos * yEff - n.sin * hw) 65536
+              cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size la lb lc la tox toy
+              let adv16 := if c.adv ≤ 0 then 65536 else c.adv
+              let (top16, bot16) := metricTopBot f c.props.size
+              for pt in metricCorners la lb lc la tox toy adv16 top16 bot16 do
+                mbox := Box.cover mbox pt
             | none => pure ()
       else
         if vertical then
@@ -882,7 +945,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
                 let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
                   pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
                 (p.rot, chunkX + x, chunkY + y + bshift)
-            cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size rot gx gy
+            let (la, lb, lc, ld) := rotMat16 rot
+            cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size la lb lc ld gx gy
+            let adv16 := if c.adv ≤ 0 then 65536 else c.adv
+            let (top16, bot16) := metricTopBot f c.props.size
+            for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
+              mbox := Box.cover mbox pt
           | none => pure ()
         x := x + c.adv
       let styleChanged := curStyle != some c.styleIdx
@@ -944,7 +1012,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       lastX := chunkX + (if vertical then y else x)
       lastY := chunkY + (if vertical then x else y)
     a := b
-  return (placed, used)
+  return (placed, used, mbox)
 
 end Text
 end LeanSvg

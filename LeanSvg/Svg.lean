@@ -2865,7 +2865,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
     (chain : Array Css.ElemInfo) (budget : Nat)
     (paths : Std.HashMap String TextPath.Table) (ancestors : Array Style) :
-    Array Shape × Nat := Id.run do
+    Array Shape × Nat × Option Box := Id.run do
   let textAttrs := match events.getD idx default with
     | .open_ _ a => a
     | _ => #[]
@@ -3038,7 +3038,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             -- does not resolve to an installed font draws nothing either
             -- (`process_chunk`'s `None => continue`), same as `display:none`.
             ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
-  let (placed, used) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
+  let (placed, used, mbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
   let mut out : Array Shape := #[]
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
@@ -3048,7 +3048,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       -- that property, so glyphs stay antialiased regardless of an ambient
       -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
       out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
-  return (out, used)
+  -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
+  -- comment), not the glyph outlines' -- what a `filter`/`mask`/
+  -- `clipPathUnits="objectBoundingBox"` on this `<text>` actually sizes
+  -- against.
+  return (out, used, mbox)
 
 /-! ## `pattern` content
 
@@ -3125,7 +3129,7 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
-          let (shs, used) := textShapes applyEff events j st' chain budget {} stStack
+          let (shs, used, _) := textShapes applyEff events j st' chain budget {} stStack
           budget := budget - used
           nodes := nodes ++ shs.map Node.shape
           if layered then nodes := nodes.push .groupEnd
@@ -3929,9 +3933,19 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                 st.ctm maskUses maskHolders openMasks
               maskUses := mu
               maskHolders := mh
-              let needs := pf.mode.isRender &&
-                (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || slot.isSome
-                 || mslot.isSome)
+              -- T81: a `filter` is `should_isolate`'s third case, same as the
+              -- generic shape/image path (`hasFilter` below).  Unlike that
+              -- path, `<text>` opens and closes its own layer right here, so
+              -- there is no need for the generic path's `.close`-time patch
+              -- (`frame.filterAt`): the object bounding box (`tbox`, from
+              -- `textShapes`) is already in hand by the time the layer is
+              -- decided, so `Filter.resolve` runs inline, below.
+              let hasFilter := pf.mode.isRender && match st.filterRaw with
+                | some v => !(eqAscii (trim v) "none")
+                | none => false
+              let other := st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+                || slot.isSome || mslot.isSome
+              let needs := pf.mode.isRender && (other || hasFilter)
               let layered := needs && layerDepth < maxLayerDepth
               let st := if needs && !layered then
                   { st with opacity := mulOpacity st.opacity st.ownOpacity } else st
@@ -3940,18 +3954,32 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               let layerClips : Array Nat :=
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
-              if layered then
-                nodes := nodes.push (.groupBegin
-                  { opacity := st.ownOpacity, blend := st.blend, isolate := st.isolate,
-                    clips := layerClips, mask := mslot })
-              let (shs, used) := textShapes applyEffective events idx st chain textBudget textPaths stack
+              let (shs, used, mbox) := textShapes applyEffective events idx st chain textBudget textPaths stack
               textBudget := textBudget - used
-              -- The laid-out glyph outlines are in this `<text>`'s own user
-              -- space (`textShapes` gives every run the element's `ctm`), so
-              -- their union is its object bounding box.
-              let want := slot.isSome || mslot.isSome || pf.want
-              let tbox :=
-                if want then shs.foldl (fun b sh => Box.union b (cmdsBox sh.cmds)) none else none
+              -- T81: usvg's `objectBoundingBox` for `<text>` is the union of
+              -- each glyph's *font-metric* box, not its outline (`Text.
+              -- layout`'s doc comment) -- `mbox` is already that, in this
+              -- `<text>`'s own user space (`textShapes` gives every run the
+              -- element's `ctm`).
+              let want := slot.isSome || mslot.isSome || pf.want || hasFilter
+              let tbox := if want then mbox else none
+              if layered then
+                let gi : GroupInfo :=
+                  { opacity := st.ownOpacity, blend := st.blend, isolate := st.isolate,
+                    clips := layerClips, mask := mslot }
+                let gi := if hasFilter then
+                    let fbox : Option Filter.URect := tbox.bind fun b =>
+                      if Box.nonZero b then some ⟨b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0⟩ else none
+                    let cx : Filter.ElemCtx := ⟨fbox, st.color, st.fontSize, st.pctRefW, st.pctRefH⟩
+                    match st.filterRaw with
+                    | some raw =>
+                      match Filter.resolve fparsers ftab raw cx with
+                      | .filters fs => { gi with filters := fs, filterCtm := st.ctm }
+                      | .drop => { gi with dropped := true }
+                      | .noFilter => { gi with passthrough := !other }
+                    | none => gi
+                  else gi
+                nodes := nodes.push (.groupBegin gi)
               match slot with
               | some k => uses := uses.modify k (fun u => { u with bbox := tbox })
               | none => pure ()

@@ -1,0 +1,20 @@
+<svg viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     font-family="Noto Sans" font-size="32">
+  <!-- T81: a filter's `objectBoundingBox` on `<text>` is the font's own
+       ascent/descent metric box, not the glyph outlines': none of "Text"
+       has a descender, but the flood should still reach down to where one
+       would sit, not hug the ink. -->
+  <filter id="f1" x="0" y="0" width="1" height="1">
+    <feFlood flood-color="green"/>
+  </filter>
+  <text x="20" y="60" filter="url(#f1)">Text</text>
+  <text x="20" y="60">Text</text>
+
+  <!-- T81: `baseline-shift` on a `textPath` glyph, not just the horizontal
+       layout branch. -->
+  <path id="p1" d="M 20 150 L 180 150" fill="none" stroke="gray" stroke-width="0.5"/>
+  <text font-size="24">
+    <textPath xlink:href="#p1" baseline-shift="-15">shifted</textPath>
+  </text>
+</svg>
