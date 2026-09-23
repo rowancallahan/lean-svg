@@ -3,6 +3,7 @@ import LeanSvg.Bytes
 import LeanSvg.Fixed
 import LeanSvg.Geom
 import LeanSvg.Font
+import LeanSvg.Baseline
 import LeanSvg.Raster
 import LeanSvg.Canvas
 import LeanSvg.Png

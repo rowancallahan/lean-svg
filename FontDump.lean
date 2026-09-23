@@ -13,6 +13,11 @@ units), the number of `PathCmd`s the cubic outline (`Font.outline`) comes to
 (exercising that code path without needing to print the whole thing), and
 the kerning to the next character (`Font.kern`, `null` for the last one).
 
+`--metrics` instead prints the font-level metrics T54 added
+(`ascent`/`descent`/`xHeight`/`capHeight`/`subscriptOffset`/
+`superscriptOffset`), for `tests/check_font.py`'s oracle to check against
+fontTools' own decompiled `OS/2`/`hhea` tables.
+
 This is the **only** file in the project that performs `IO` besides
 `LeanSvg.Prog.execIO` and `Main.lean`: it reads the font path given on the
 command line (or uses one of the fonts embedded in `LeanSvg.Fonts.*`).
@@ -26,7 +31,9 @@ open LeanSvg
 
 def usage : String :=
   "usage: fontdump <font.ttf> <text>\n" ++
-  "       fontdump --embedded <NotoSans|NotoSansBold|NotoSansItalic> <text>\n"
+  "       fontdump --embedded <NotoSans|NotoSansBold|NotoSansItalic> <text>\n" ++
+  "       fontdump --metrics <font.ttf>\n" ++
+  "       fontdump --metrics --embedded <NotoSans|NotoSansBold|NotoSansItalic>\n"
 
 def embeddedBytes (name : String) : Option ByteArray :=
   if name == "NotoSans" then some (LeanSvg.Fonts.NotoSans.bytes ())
@@ -109,8 +116,39 @@ def runOn (bytes : ByteArray) (text : String) : IO UInt32 := do
     IO.eprintln "fontdump: could not parse font"
     return 1
 
+/-! ## Font-level metrics (T54) -/
+
+def metricsObj (f : Font) : String :=
+  "{" ++
+    "\"unitsPerEm\":" ++ toString f.unitsPerEm ++ "," ++
+    "\"ascent\":" ++ toString f.ascent ++ "," ++
+    "\"descent\":" ++ toString f.descent ++ "," ++
+    "\"xHeight\":" ++ toString f.xHeight ++ "," ++
+    "\"capHeight\":" ++ toString f.capHeight ++ "," ++
+    "\"subscriptOffset\":" ++ toString f.subscriptOffset ++ "," ++
+    "\"superscriptOffset\":" ++ toString f.superscriptOffset ++
+  "}"
+
+def runMetricsOn (bytes : ByteArray) : IO UInt32 := do
+  match LeanSvg.Font.parse bytes with
+  | some f =>
+    IO.println (metricsObj f)
+    return 0
+  | none =>
+    IO.eprintln "fontdump: could not parse font"
+    return 1
+
 def main (args : List String) : IO UInt32 := do
   match args with
+  | ["--metrics", "--embedded", name] =>
+    match embeddedBytes name with
+    | some bytes => runMetricsOn bytes
+    | none =>
+      IO.eprintln s!"fontdump: unknown embedded font {name}"
+      return 2
+  | ["--metrics", path] =>
+    let bytes ← IO.FS.readBinFile path
+    runMetricsOn bytes
   | ["--embedded", name, text] =>
     match embeddedBytes name with
     | some bytes => runOn bytes text
