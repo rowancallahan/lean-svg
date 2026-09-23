@@ -29,6 +29,22 @@ Open items in `docs/QUESTIONS.md`; diagnoses in `docs/resvg-wrong/`,
 **Still open (ask Rowan):** DTD internal entities, legacy encodings,
 bidi/RTL scope, `textPath` Chromium-vs-suite disagreements.
 
+## To do after the current merges: a `spec/` folder (Rowan, 2026-09-23)
+
+Readers will not read the Lean code or the proofs, only the theorem
+statements and their explanations. So:
+
+- Move every theorem into a `spec/` folder: the effect-layer theorems
+  (`LeanSvg/Effect.lean`), `proofs/*` (size bound, locality, decoder
+  contracts, gzip cap, image locality) and the axiom/invariant audit.
+  Proofs may live beside them, but `spec/` is what people read.
+- `spec/` gets its own small static website (HTML) to read through.
+- Each theorem gets a plain-language statement and an explanation of why it
+  holds and what it rules out; Rowan writes the long-form essay and the
+  walkthrough (expected to be several times longer than today's SPEC.md).
+- Keep the checks (`scripts/check-theorems.sh`, CI) pointing at the new
+  locations.
+
 ## The road to shipping (Rowan, 2026-09-23)
 
 After items 1–3 above, in this order:
