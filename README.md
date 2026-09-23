@@ -50,8 +50,8 @@ lake build
 .lake/build/bin/lean-svg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
 ```
 
-Exit codes: 0 success, 1 render error (message on stderr, no file written),
-2 bad arguments.
+Exit codes: 0 success, 1 render error (message on stderr, no file written) —
+including refusing to overwrite an existing output file — 2 bad arguments.
 
 ## Test
 
@@ -67,10 +67,12 @@ python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
 
 - `SPEC.md` — every claim in English beside its Lean form, and an explicit list
   of what is *not* proven.
-- `learn/` — a standalone hello-world project that builds the effect monad from scratch, with an exercise (kept locally, not tracked in this repository).
-  scratch, with an exercise: prove no-clobber yourself.
+- `learn/` — a standalone hello-world project that builds the effect monad
+  from scratch, with an exercise (kept locally, not tracked in this
+  repository): prove no-clobber yourself, then compare with `LeanSvg/Effect.lean`.
 - `proofs/SizeBound.lean` — checked output-size bounds, verified separately
-  with `lake env lean proofs/SizeBound.lean`: the encoder returns at most
+  with `lake env lean proofs/SizeBound.lean`: `render` rejects any input over
+  64 MiB before parsing; the encoder returns at most
   `5 * max(width, height)^2 + 132` bytes; a successful `render` returns at most
   67,452,996 bytes under the current canvas limits. These concern returned
   byte arrays, not filesystem behavior.

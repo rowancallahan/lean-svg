@@ -21,7 +21,7 @@ EOF
 foundations. Lean has three standard axioms — `propext`, `Quot.sound` and
 `Classical.choice` — and any of the three is ordinary; Mathlib rests on all
 of them. `sorryAx` is the one that matters: it means a hole, and a theorem
-reporting it proves nothing. The six effect theorems report `[propext]`. The size bounds below report
+reporting it proves nothing. The seven effect theorems report `[propext]`. The size bounds below report
 `[propext, Quot.sound]` for the encoder and
 `[propext, Classical.choice, Quot.sound]` for the renderer, with no `sorryAx`.
 
@@ -39,7 +39,7 @@ on input and output paths.
 So the statements themselves need checking by a human, line by line, against
 what a reader would take them to mean. That review has not happened yet.
 Until it does, treat section 1 as *claims whose proofs check*, not as
-*guarantees*. The model in `LeanSvg/Effect.lean` and the six-line
+*guarantees*. The model in `LeanSvg/Effect.lean` and the eleven-line
 `Prog.execIO` deserve the most scrutiny, because the effect claims are stated
 relative to them. The byte-array size bounds below concern pure functions
 and do not depend on the filesystem model or interpreter.
@@ -48,9 +48,13 @@ and do not depend on the filesystem model or interpreter.
 
 ## 1. Proved
 
-The six effect theorems live in `LeanSvg/Effect.lean` and are stated against a
-**model** of the filesystem, `FS`, which is a function from a path to its
-contents. The separate output-size theorems live in `proofs/SizeBound.lean`.
+The seven effect theorems live in `LeanSvg/Effect.lean` and are stated against a
+**model** of the filesystem, `FS := String → Option ByteArray`, a function
+from a path to its contents, or `none` if the path is absent. This is what
+makes "the output path already exists" expressible at all: the earlier model,
+`String → ByteArray`, gave every path contents unconditionally, so a missing
+file and an empty file were indistinguishable and no-clobber could not even be
+stated. The separate output-size theorems live in `proofs/SizeBound.lean`.
 
 ### Nothing but the output file is touched
 
@@ -62,33 +66,55 @@ theorem runFS_frame (inp out : String) (p : Prog α) (fs : FS) (q : String) (hq 
     (runFS inp out p fs).2 q = fs q
 ```
 
-### The result depends only on the input file
+### The result depends only on the input file and whether the output exists
 
-> If two filesystems agree on the input path, every program returns the same
-> answer on both. So a program cannot secretly read anything else.
+> If two filesystems agree on the input path, and agree on whether the output
+> path is present (not on what it holds — the program can query only that),
+> every program returns the same answer on both. So a program cannot secretly
+> read anything else, or the output path's contents.
 
 ```lean
-theorem runFS_input_only (inp out : String) (p : Prog α) (fs fs' : FS) (h : fs inp = fs' inp) :
+theorem runFS_input_only (inp out : String) (p : Prog α) (fs fs' : FS)
+    (hin : fs inp = fs' inp) (hout : (fs out).isSome = (fs' out).isSome) :
     (runFS inp out p fs).1 = (runFS inp out p fs').1
 ```
 
-### The renderer either fails cleanly or writes exactly its output
+### The renderer refuses to clobber, and otherwise fails cleanly or writes exactly its output
 
-> Read the input, run the pure renderer. If it errors, the filesystem is
-> untouched. If it succeeds, the output path holds exactly the bytes it
-> produced. There is no third outcome.
+> Read the input. If the output path already exists, fail immediately and
+> touch nothing. Otherwise run the pure renderer: if it errors, the filesystem
+> is untouched; if it succeeds, the output path holds exactly the bytes it
+> produced. There is no fourth outcome.
 
 ```lean
-theorem renderProgram_spec (render : ByteArray → Except ε ByteArray) (inp out : String) (fs : FS) :
-    runFS inp out (renderProgram render) fs =
-      match render (fs inp) with
-      | .ok png => (.ok (), fs.write out png)
-      | .error e => (.error e, fs)
+theorem renderProgram_spec (clobberError : ε) (render : ByteArray → Except ε ByteArray)
+    (inp out : String) (fs : FS) :
+    runFS inp out (renderProgram clobberError render) fs =
+      if (fs out).isSome then
+        (.error clobberError, fs)
+      else
+        match render ((fs inp).getD ByteArray.empty) with
+        | .ok png => (.ok (), fs.write out png)
+        | .error e => (.error e, fs)
 ```
 
-The remaining three are corollaries: `renderProgram_error_no_write` (on error,
-nothing changed), `renderProgram_ok_output` (on success, the output path holds
-the bytes), `renderProgram_ok_frame` (on success, nothing else moved).
+### No-clobber
+
+> If the output path already holds something when the program starts, running
+> it changes the file system not at all.
+
+```lean
+theorem renderProgram_no_clobber (clobberError : ε) (render : ByteArray → Except ε ByteArray)
+    (inp out : String) (fs : FS) (b : ByteArray) (h : fs out = some b) :
+    (runFS inp out (renderProgram clobberError render) fs).2 = fs
+```
+
+The remaining three are corollaries, each with an added `fs out = none`
+hypothesis (a success or an ordinary render error can only happen once
+no-clobber has let the program past its first check): `renderProgram_error_no_write`
+(on error, nothing changed), `renderProgram_ok_output` (on success, the output
+path holds `some` the bytes), `renderProgram_ok_frame` (on success, nothing
+else moved).
 
 ### Returned byte arrays have a bounded size
 
@@ -122,14 +148,26 @@ lake build
 lake env lean proofs/SizeBound.lean
 ```
 
+### The input is rejected before parsing if it is too large
+
+`proofs/SizeBound.lean` also proves the cheapest of the resource theorems:
+
+```lean
+theorem render_rejects_large (opts : Options) (input : ByteArray) (h : input.size > maxInput) :
+    ∃ e, render opts input = .error e
+```
+
+`maxInput` is 64 MiB. The check is the first line of `render`, before `Xml.parse`
+runs at all, so the proof does not touch the XML/SVG pipeline.
+
 ---
 
 ## 2. Enforced without a theorem
 
-- **There are exactly two effects.** `Op` has two constructors, `readInput` and
-  `writeOutput`. A program that opens a socket or reads a second file cannot be
-  *written down*, so no theorem is needed. This is the strongest guarantee in
-  the project and it is structural.
+- **There are exactly three effects.** `Op` has three constructors, `readInput`,
+  `outputExists` and `writeOutput`. A program that opens a socket or reads a
+  second file cannot be *written down*, so no theorem is needed. This is the
+  strongest guarantee in the project and it is structural.
 - **Everything terminates.** No `partial` anywhere, so Lean's termination
   checker has accepted every definition. Note what this does *not* say: it
   bounds nothing about how long.
@@ -140,11 +178,12 @@ lake env lean proofs/SizeBound.lean
 
 ## 3. Checked at runtime
 
-These protections are implemented as runtime checks. The output-size theorem
-above now uses the canvas checks; the other limits have no corresponding
-resource theorem here.
+These protections are implemented as runtime checks. The output-size and
+max-input-size theorems above now cover the canvas and input-size checks; the
+other limits have no corresponding resource theorem here.
 
 - Canvas dimensions ≤ 16384 and total pixels ≤ 16777216.
+- Input size ≤ 64 MiB (`maxInput`; proved above, `render_rejects_large`).
 - XML nesting depth ≤ 64; element count ≤ 1000000.
 - Fuel limits on gradient `href` chains, clip nesting, composite glyphs.
 - A layer-pixel budget for group opacity.
@@ -158,27 +197,29 @@ Read this section as the specification's honest edge.
 **The output is not proved to be a valid PNG.** There is no PNG specification in
 Lean here. The encoder is ordinary code, tested against a real decoder.
 
-**No-clobber is not proved, and cannot currently be stated.** The model says
-`FS := String → ByteArray`: every path has contents, so a missing file reads as
-empty and "this file already exists" is not expressible. Until the model
-changes, the renderer may overwrite anything at the output path. Planned as
-M3b item 1, and it is the next one to do.
+**No-clobber is now proved** (`renderProgram_no_clobber`, section 1). This
+entry is kept, struck through in spirit, as a record of what changed: the
+model was `FS := String → ByteArray`, every path had contents unconditionally,
+so a missing file read as empty and "this file already exists" was not
+expressible. It is now `String → Option ByteArray`.
 
-**Input and output paths are not required to differ.** `lean-svg a.svg a.svg`
-reads the file and then overwrites it. `runFS_frame` is still true, because the
-output path is the one path permitted to change. The theorem is honest; it
-protects less than "only touches the two files you named" suggests. No-clobber
-subsumes this, which is why it is the priority.
+**Input and output paths given the same value are handled by no-clobber, not
+specially.** `lean-svg a.svg a.svg` reads the file, then queries whether `a.svg`
+(the output path) exists — it does, since it is also the input — and refuses.
+Nothing distinguishes this from any other pre-existing output; there is no
+separate "paths differ" check, by design (see `PLAN.md` M3b.0).
 
 **Time and memory are not bounded.** Termination is guaranteed, duration is not.
 
-**Input size is not limited.** No maximum on the input file.
-
-**`Prog.execIO` is trusted, not proved.** Six lines mapping the two operations
-onto `IO.FS.readBinFile` and `IO.FS.writeBinFile`. The theorems describe the
-model; this function is the claim that the model corresponds to reality. It
-inherits whatever the Lean runtime and the operating system do, including
-symlinks, permissions and races.
+**`Prog.execIO` is trusted, not proved.** Eleven lines mapping the three
+operations onto `System.FilePath.pathExists`, `IO.FS.readBinFile` and
+`IO.FS.writeBinFile`. The theorems describe the model; this function is the
+claim that the model corresponds to reality. It inherits whatever the Lean
+runtime and the operating system do, including symlinks, permissions and
+races — including a TOCTOU race between the `pathExists` check and the
+eventual `writeBinFile`: the model treats the check as atomic with the rest of
+the program, which a real filesystem does not guarantee under concurrent
+writers.
 
 **Rendering fidelity is empirical and always will be.** Measured against resvg:
 a file passes when ≥ 99% of pixels are within 8 levels. That is a measurement,
@@ -191,8 +232,11 @@ not a claim, and the reference is another program, not a specification.
 In order of how much weight each carries:
 
 1. **The model.** `FS` and `runFS` define what the theorems mean. A wrong model
-   makes a correct proof worthless — see no-clobber above for a live example.
-2. **`execIO`**, six lines, unproved.
+   makes a correct proof worthless — no-clobber (section 1) needed the model
+   itself changed, from `String → ByteArray` to `String → Option ByteArray`,
+   before the property could even be stated, which is a live example of the
+   risk.
+2. **`execIO`**, eleven lines, unproved, including the TOCTOU gap noted above.
 3. **The Lean kernel and toolchain** (v4.34.0), and `propext`.
 4. **The invariants** in `tasks/README.md`, kept by review rather than by types.
 
