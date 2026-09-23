@@ -81,3 +81,88 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## What was implemented
+
+`feTurbulence`, all in `LeanSvg/Filter/Turbulence.lean`, a port of resvg
+0.48.1's `filter/turbulence.rs` + `apply_turbulence` + usvg's
+`convert_turbulence`:
+
+* **Parsing** (usvg): `baseFrequency` as a `Vec<f32>` of one or two numbers,
+  both reset to `0` if either is negative (or the list is malformed);
+  `numOctaves` rounded half away from zero, negative → 0; `seed` truncated to
+  `i32` (saturating); `stitchTiles="stitch"`; `type="fractalNoise"`, anything
+  else is `turbulence`.
+* **Set-up**, exact: the Park–Miller `random` with Rust's truncating `/`/`%`,
+  the seed normalisation (including the `i32` wrap of `-i32::MIN`), the
+  lattice shuffle, and unit gradients rounded to 2^-24. A `0/0` gradient
+  (both raw components zero) is NaN in resvg; it is tracked and a channel that
+  touches it comes out 0, as `f32_bound` makes a NaN.
+* **Stitching**: the adjusted frequency, `width` and per-pixel `wrap` are
+  computed with every `f64` operation rounded as binary64 (`r64`), because the
+  wrap points are discontinuous. `i32` wrapping of `width *= 2` and
+  `2·wrap − 4096` is kept.
+* **Coordinates**: `((x + region.x − ts.tx) / sx) · f · 2^k` is an exact
+  rational per column/row and octave, giving the lattice indices (with resvg's
+  `t as i32` saturation, wrapping `+ 1`, and the fraction going to 0 past
+  `2^52`), `r0` and `s_curve(r0)` at 2^-24. All of this is precomputed per
+  axis, O((w + h) · octaves).
+* **Per pixel**: the dot products and the three lerps for all four channels in
+  `Int64` at 2^-24. Every factor stays below 2^31, so nothing overflows.
+  Octave sums are exact (`noise · 2^(K−k)`), and the output is
+  `round-half-up(clamp(255·n))` (turbulence) or `(255·n + 255)/2`
+  (fractalNoise), then premultiplied (`multiply_alpha`). The result is in the
+  primitive's colour space, as in resvg, and the region origin comes from
+  `SourceGraphic`'s region.
+* **Bounds**: `numOctaves` is capped at 16. Octave `k` adds at most
+  `180/2^k` levels, so the cap changes the output by < 0.006 levels. Each
+  turbulence primitive counts `1 + octaves` units in `Render`'s filter-work
+  budget (`Filter.Prim.cost`, a one-line change in `Render.lean`), because an
+  octave costs about as much as ten ordinary passes.
+
+Measured error: against a Python f64 port of resvg's code (64×64, 3 octaves,
+both types), the premultiplied output matches exactly on 4095/4096
+(turbulence) and 4089/4096 (fractalNoise) pixels, off by 1 otherwise. The
+fractal misses are exact 127.5 ties at lattice points, where the noise is about
+1e-8 and its sign is below 2^-24. The remaining differences in the corpus come
+from the shared un/premultiply half-way cases (e.g. `37·255/74 = 127.5`),
+amplified by the linearRGB→sRGB table.
+
+## Skipped, and why
+
+* **`numOctaves` beyond about 60**: resvg's `x·2^k` then passes 2^63, and
+  `t − t as i64` stops being a fraction, so its output turns into noise
+  saturated to 0/255. Reproducing that needs a soft binary64 for the whole
+  noise function. Up to 60 octaves the capped output agrees with resvg (99.99%
+  within 8 at 300×300, the same as at 16 octaves).
+* **Fractal 127.5 ties** at exact lattice points, described above: ±1 level.
+
+## Report
+
+Baseline commit `1ba4c27`. `run_corpora.py --fast --corpus resvg --route direct` (width 100):
+
+| dir | files | pass before | pass after | mean within-8 before | after |
+|---|---|---|---|---|---|
+| filters/feTurbulence | 19 | 0 | 19 | 66.66% | 99.99% |
+
+At natural size (`--width` omitted), all 19 pass too (worst within-8:
+`complex-transform` 99.89%, where the missing pixels are on the skewed region's
+edge).
+All of `filters/`: 257 → 276 of 397.
+Whole suite: **1224 → 1243 of 1679; newly passing 19, newly failing 0**, no
+file's within-8 dropped.
+
+Other checks, all on the final tree:
+
+* `lake build`: no errors, no warnings.
+* `scripts/check-theorems.sh`: `invariants ok`, `theorems ok`.
+* `tests/run_tests.py`: every file's score unchanged; new `35_turbulence`
+  99.986% within 8 (PASS); 32/36 (the same four fail as before).
+* `tests/run_adversarial.py`: 85/85 clean. New: `filter_turbulence_octaves`
+  (`numOctaves=1e9`, `seed=-1e30` on a 9 Mpx layer → `filter budget`, 0.03 s),
+  `filter_turbulence_budget` (two 1400² groups at the cap with a 1e30 frequency
+  and stitching, just under both budgets, 25 s, the most turbulence one render
+  may do).
+* `tests/run_tiles.py`: 36/36 byte-identical.
+* Timing: about 0.33 s per octave per Mpx; the corpus files take 10–25 ms at
+  width 100.
