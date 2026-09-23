@@ -60,9 +60,6 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import numpy as np
-from PIL import Image
-
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tests"))
 
@@ -74,6 +71,7 @@ from run_tests import (  # noqa: E402  (path must be set up first)
     resvg_font_args,
     write_composite,
 )
+import render_chrome  # noqa: E402  (path must be set up first)
 
 CORPORA_DIR = REPO / "tests" / "corpora"
 OUT_DIR = REPO / "tests" / "out" / "corpora"
@@ -109,6 +107,15 @@ WIDTHS = {}
 # timeout, size_mismatch, usvg_failed, ref_failed, unreadable_png) is a
 # non-pass and is what --failing-from re-selects.
 PASS_STATUS = "pass"
+
+# What `ours` is scored against. `resvg` (default) is live resvg on a copy
+# with external hrefs stripped, unchanged from before --ref existed. `chrome`
+# renders the same stripped copy with headless Chromium, one browser launch
+# per corpus/route batch (see `prerender_chrome_refs`). `suite` reads the
+# resvg-test-suite's own bundled PNG next to the SVG (resvg only; other
+# corpora have none), resizing it to the render width if it is not already
+# that size.
+REF_MODES = ("resvg", "chrome", "suite")
 
 # --compare reports a file as changed when within-8 moved by more than this
 # many percentage points.
@@ -189,8 +196,68 @@ def strip_external_refs(svg_path):
     return stripped, count[0]
 
 
+def prerender_chrome_refs(corpus, files, width, jobs):
+    """Render every file's Chromium reference once, up front, for `--ref chrome`.
+
+    Applies the same external-href stripping as the resvg reference path
+    (`strip_external_refs`), so Chromium never loads anything outside the SVG
+    either. One browser launch for the whole list (`render_chrome.render_batch`,
+    `jobs` pages pulling from a shared queue), not one per file.
+
+    Returns ({rel: {"png": Path|None, "note": str, "err": str}}, tmpdir); the
+    caller must rmtree tmpdir once every row referencing these PNGs is done
+    (render_one copies them out before returning).
+    """
+    root = CORPORA_DIR / CORPORA[corpus][0]
+    tmpdir = Path(tempfile.mkdtemp(prefix="chromeref_%s_" % corpus))
+    pairs = []
+    stem_meta = {}
+    for i, svg in enumerate(files):
+        rel = svg.relative_to(root).as_posix()
+        stem = "%06d" % i
+        src = svg
+        note = ""
+        stripped = strip_external_refs(svg)
+        if stripped is not None and stripped[1] > 0:
+            src = tmpdir / (stem + "_src.svg")
+            src.write_text(stripped[0], encoding="utf-8")
+            note = "external resource not loaded by design; reference rendered without it"
+        pairs.append((src, stem))
+        stem_meta[stem] = (rel, note)
+    rendered = render_chrome.render_batch(pairs, tmpdir / "out", width, jobs)
+    out = {}
+    for stem, (rel, note) in stem_meta.items():
+        png = rendered.get(stem)
+        out[rel] = {
+            "png": png,
+            "note": note,
+            "err": "" if png is not None else "chromium could not render this file",
+        }
+    return out, tmpdir
+
+
+def suite_ref_png(svg, width, dest):
+    """Write the resvg-test-suite's own PNG for `svg`, resized to `width` if
+    needed, to `dest`. Returns an error string, or None on success."""
+    suite_png = svg.with_suffix(".png")
+    if not suite_png.is_file():
+        return "no suite PNG next to this file"
+    img = load_rgba(suite_png)
+    if img is None:
+        return "suite PNG could not be read"
+    if img.shape[1] == width:
+        shutil.copy2(suite_png, dest)
+        return None
+    from PIL import Image  # local: only `suite` ref mode needs PIL's resize
+
+    height = max(1, round(img.shape[0] * width / img.shape[1]))
+    with Image.open(suite_png) as im:
+        im.convert("RGBA").resize((width, height), Image.LANCZOS).save(dest)
+    return None
+
+
 def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
-                keep_renders_dir=None, resvg_args=None):
+                keep_renders_dir=None, resvg_args=None, ref_mode="resvg", chrome_ref=None):
     """Render one file both ways and score it.
 
     Returns a row dict. When `keep` is true the loaded RGBA arrays and the
@@ -252,24 +319,49 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
                 path.unlink(missing_ok=True)
 
     # reference: resvg on the ORIGINAL file, for both routes -- except that
-    # external resources are removed first (see `strip_external_refs`)
-    ref_src = svg
-    stripped = strip_external_refs(svg)
-    if stripped is not None and stripped[1] > 0:
-        ref_src = tmpdir / ("%06d_noext.svg" % slot)
-        ref_src.write_text(stripped[0], encoding="utf-8")
-        scratch.append(ref_src)
-        row["note"] = "external resource not loaded by design; reference rendered without it"
-    rc_ref, ms_ref, err_ref, to_ref = run_cmd(
-        ["resvg"] + (resvg_args or []) + ["-w", str(width), str(ref_src), str(ref_png)]
-    )
-    row["ref_rc"] = "timeout" if to_ref else rc_ref
-    row["ref_err"] = first_line(err_ref)
-    row["ms_ref"] = "%.1f" % ms_ref
-    if to_ref or rc_ref != 0:
-        row["status"] = "ref_failed"
-        cleanup()
-        return row
+    # external resources are removed first (see `strip_external_refs`). Under
+    # `--ref chrome`/`--ref suite` a different reference is substituted below,
+    # but the external-resource policy still applies (chrome: stripped same as
+    # resvg, upstream in prerender_chrome_refs; suite: the suite PNG is itself
+    # already rendered without external resources, by the same suite policy).
+    if ref_mode == "resvg":
+        ref_src = svg
+        stripped = strip_external_refs(svg)
+        if stripped is not None and stripped[1] > 0:
+            ref_src = tmpdir / ("%06d_noext.svg" % slot)
+            ref_src.write_text(stripped[0], encoding="utf-8")
+            scratch.append(ref_src)
+            row["note"] = "external resource not loaded by design; reference rendered without it"
+        rc_ref, ms_ref, err_ref, to_ref = run_cmd(
+            ["resvg"] + (resvg_args or []) + ["-w", str(width), str(ref_src), str(ref_png)]
+        )
+        row["ref_rc"] = "timeout" if to_ref else rc_ref
+        row["ref_err"] = first_line(err_ref)
+        row["ms_ref"] = "%.1f" % ms_ref
+        if to_ref or rc_ref != 0:
+            row["status"] = "ref_failed"
+            cleanup()
+            return row
+    elif ref_mode == "chrome":
+        info = (chrome_ref or {}).get(rel)
+        if info is None or info.get("png") is None:
+            row["status"] = "ref_failed"
+            row["ref_err"] = (info or {}).get("err") or "no chromium render for this file"
+            cleanup()
+            return row
+        row["note"] = info.get("note", "")
+        shutil.copy2(info["png"], ref_png)
+        row["ref_rc"] = 0
+    elif ref_mode == "suite":
+        err = suite_ref_png(svg, width, ref_png)
+        if err is not None:
+            row["status"] = "ref_failed"
+            row["ref_err"] = err
+            cleanup()
+            return row
+        row["ref_rc"] = 0
+    else:
+        assert False, "unknown --ref mode %r" % ref_mode
 
     # input for lean-svg
     src = svg
@@ -311,103 +403,6 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
         return row
     row["size"] = "%dx%d" % ref_size
 
-    metrics, d = compare(ref, ours, tol)
-    row["exact"] = "%.6f" % metrics["exact"]
-    row["within"] = "%.6f" % metrics["within"]
-    row["within32"] = "%.6f" % metrics["within32"]
-    row["mean_abs"] = "%.4f" % metrics["mean_abs"]
-    row["max_d"] = metrics["max_d"]
-    row["status"] = "pass" if metrics["within"] >= threshold else "fail"
-    row["_within"] = metrics["within"]
-    row["_exact"] = metrics["exact"]
-    if keep:
-        row["_panels"] = [over_white(ref), over_white(ours), diff_panel(d)]
-    cleanup()
-    return row
-
-
-# `--ref suite`: score against the resvg-test-suite's own checked-in reference
-# PNG (svg.with_suffix(".png")) instead of live resvg. Only the resvg corpus
-# ships one of these per file.
-SUITE_REF_CORPUS = "resvg"
-
-
-def load_suite_ref(path, size):
-    """Suite reference PNG resampled (LANCZOS) to match our render's pixel
-    size -- the suite ships one fixed-resolution PNG per file (mostly
-    500x500), not one per render width."""
-    with Image.open(path) as img:
-        img = img.convert("RGBA")
-        if img.size != size:
-            img = img.resize(size, Image.LANCZOS)
-        return np.asarray(img, dtype=np.int16)
-
-
-def render_one_suite(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
-                      keep_renders_dir=None):
-    """Like render_one, but the reference is the suite's own PNG, not live resvg."""
-    root = CORPORA_DIR / CORPORA[corpus][0]
-    rel = svg.relative_to(root).as_posix()
-    row = {
-        "corpus": corpus, "route": route, "file": rel,
-        "dir": str(Path(rel).parent) if str(Path(rel).parent) != "." else "(root)",
-        "width": width, "status": "", "ours_rc": "", "ours_err": "",
-        "ref_rc": "", "ref_err": "", "usvg_rc": "", "usvg_err": "",
-        "size": "", "exact": "", "within": "", "within32": "", "mean_abs": "",
-        "max_d": "", "ms_ours": "", "ms_ref": "", "note": "suite reference",
-    }
-
-    ref_png = svg.with_suffix(".png")
-    if not ref_png.is_file():
-        row["status"] = "ref_failed"
-        row["ref_err"] = "no suite reference PNG"
-        return row
-
-    ours_png = tmpdir / ("%06d_ours.png" % slot)
-    mid_svg = tmpdir / ("%06d_usvg.svg" % slot)
-    scratch = [ours_png, mid_svg]
-    for stale in scratch:
-        stale.unlink(missing_ok=True)
-
-    def cleanup():
-        if keep_renders_dir is not None and ours_png.is_file():
-            dest = keep_renders_dir / corpus / (route + "_suite") / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ours_png, str(dest) + ".ours.png")
-        if not keep:
-            for path in scratch:
-                path.unlink(missing_ok=True)
-
-    src = svg
-    if route == "usvg":
-        rc_u, _, err_u, to_u = run_cmd(["usvg", str(svg), str(mid_svg)])
-        row["usvg_rc"] = "timeout" if to_u else rc_u
-        row["usvg_err"] = first_line(err_u)
-        if to_u or rc_u != 0 or not mid_svg.is_file():
-            row["status"] = "usvg_failed"
-            cleanup()
-            return row
-        src = mid_svg
-
-    rc_ours, ms_ours, err_ours, to_ours = run_cmd(
-        [str(binary), str(src), str(ours_png), "--width", str(width)]
-    )
-    row["ours_rc"] = "timeout" if to_ours else rc_ours
-    row["ours_err"] = first_line(err_ours)
-    row["ms_ours"] = "%.1f" % ms_ours
-    if to_ours or rc_ours != 0:
-        row["status"] = "timeout" if to_ours else "unsupported"
-        cleanup()
-        return row
-
-    ours = load_rgba(ours_png)
-    if ours is None:
-        row["status"] = "unreadable_png"
-        cleanup()
-        return row
-    ref = load_suite_ref(ref_png, (ours.shape[1], ours.shape[0]))
-
-    row["size"] = "%dx%d" % (ours.shape[1], ours.shape[0])
     metrics, d = compare(ref, ours, tol)
     row["exact"] = "%.6f" % metrics["exact"]
     row["within"] = "%.6f" % metrics["within"]
@@ -500,7 +495,7 @@ CSV_FIELDS = [
 
 
 def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_renders_dir=None,
-                     resvg_args=None, ref="resvg"):
+                     resvg_args=None, ref_mode="resvg", chrome_ref=None):
     width = width_for(corpus)
     tmpdir = Path(tempfile.mkdtemp(prefix="corpora_%s_%s_" % (corpus, route)))
     try:
@@ -511,15 +506,10 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
             # later indices catch up and clobber its scratch PNGs, which showed
             # up as spurious "unreadable_png" rows.  render_one deletes its own
             # scratch files, so unique slots cost nothing.
-            if ref == "suite":
-                return render_one_suite(
-                    svg, corpus, route, width, binary, tmpdir, i,
-                    tol, threshold, keep=False, keep_renders_dir=keep_renders_dir,
-                )
             return render_one(
                 svg, corpus, route, width, binary, tmpdir, i,
                 tol, threshold, keep=False, keep_renders_dir=keep_renders_dir,
-                resvg_args=resvg_args,
+                resvg_args=resvg_args, ref_mode=ref_mode, chrome_ref=chrome_ref,
             )
 
         start = time.perf_counter()
@@ -530,8 +520,7 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
         shutil.rmtree(tmpdir, ignore_errors=True)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = "" if ref == "resvg" else ("_%s" % ref)
-    csv_path = OUT_DIR / ("%s_%s%s.csv" % (corpus, route, suffix))
+    csv_path = OUT_DIR / ("%s_%s.csv" % (corpus, route))
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
@@ -541,7 +530,8 @@ def run_corpus_route(corpus, route, files, binary, tol, threshold, jobs, keep_re
 
 
 def write_worst_composites(
-    corpus, route, rows, binary, tol, threshold, jobs, resvg_args=None, ref="resvg"
+    corpus, route, rows, binary, tol, threshold, jobs, resvg_args=None,
+    ref_mode="resvg", chrome_ref=None,
 ):
     """Re-render the N worst scored files and write ref|ours|diff composites."""
     scored = [r for r in rows if "_within" in r]
@@ -556,22 +546,16 @@ def write_worst_composites(
         def task(pair):
             i, row = pair
             svg = root / row["file"]
-            if ref == "suite":
-                fresh = render_one_suite(
-                    svg, corpus, route, width, binary, tmpdir, i,
-                    tol, threshold, keep=True,
-                )
-            else:
-                fresh = render_one(
-                    svg, corpus, route, width, binary, tmpdir, i,
-                    tol, threshold, keep=True, resvg_args=resvg_args,
-                )
+            fresh = render_one(
+                svg, corpus, route, width, binary, tmpdir, i,
+                tol, threshold, keep=True, resvg_args=resvg_args,
+                ref_mode=ref_mode, chrome_ref=chrome_ref,
+            )
             panels = fresh.pop("_panels", None)
             if panels is None:
                 return None
             flat = row["file"].replace("/", "__").replace(".svg", "")
-            suffix = "" if ref == "resvg" else ("_%s" % ref)
-            out = WORST_DIR / ("%s_%s%s__%s_cmp.png" % (corpus, route, suffix, flat))
+            out = WORST_DIR / ("%s_%s__%s_cmp.png" % (corpus, route, flat))
             write_composite(out, panels)
             return out.name
 
@@ -846,10 +830,12 @@ def build_summary(all_runs, config):
     parts.append("# External corpora: lean-svg vs resvg\n")
     parts.append(
         "generated %s &middot; lean-svg `%s` &middot; commit `%s` &middot; "
-        "resvg/usvg %s &middot; tol %d &middot; threshold %.2f &middot; jobs %d\n"
+        "resvg/usvg %s &middot; tol %d &middot; threshold %.2f &middot; jobs %d "
+        "&middot; ref `%s`\n"
         % (
             time.strftime("%Y-%m-%d %H:%M:%S"), config["bin"], config["commit"],
             config["tool_version"], config["tol"], config["threshold"], config["jobs"],
+            config["ref"],
         )
     )
     parts.append(
@@ -862,19 +848,12 @@ def build_summary(all_runs, config):
         )
     )
     parts.append(
-        "\n`pass` = at least %.0f%% of pixels within %d of the reference "
+        "\n`pass` = at least %.0f%% of pixels within %d of the resvg reference "
         "(max abs channel difference). `pass%% (all)` divides by every file "
         "attempted, so unsupported files count against it; `pass%% (rendered)` "
         "divides by the files that produced a comparable image. "
-        "%s\n"
-        % (
-            config["threshold"] * 100.0, config["tol"],
-            "Reference is `resvg -w W` on the *original* file, for both routes."
-            if config["ref"] == "resvg" else
-            "Reference is the resvg-test-suite's own checked-in PNG next to "
-            "each SVG (`--ref suite`), resampled with LANCZOS to `-w W` "
-            "since the suite ships one fixed-resolution PNG per file.",
-        )
+        "Reference is always `resvg -w W` on the *original* file, for both routes.\n"
+        % (config["threshold"] * 100.0, config["tol"])
     )
     for corpus, note in config["sampling_notes"]:
         parts.append("\n- **%s**: %s" % (corpus, note))
@@ -1028,15 +1007,6 @@ def main():
              "first (default both, or the routes named by --failing-from's CSVs)",
     )
     parser.add_argument(
-        "--ref", default="resvg", choices=["resvg", "suite"],
-        help="reference image: live resvg -w WIDTH on the original file "
-             "(default), or the resvg-test-suite's own checked-in PNG next "
-             "to each SVG, resampled to WIDTH. Suite refs only exist for "
-             "--corpus resvg; other corpora are dropped from the run with a "
-             "warning. Output CSVs get a _suite suffix so the default-ref "
-             "CSVs are never overwritten.",
-    )
-    parser.add_argument(
         "--failing-from", nargs="+", metavar="CSV", default=None,
         help="re-run only the files that did not pass in these earlier CSVs "
              "(anything but status=pass: fail, unsupported, timeout, size "
@@ -1104,6 +1074,12 @@ def main():
              "set (falls back to whatever fonts resvg finds on the system)",
     )
     parser.add_argument(
+        "--ref", default="resvg", choices=list(REF_MODES),
+        help="what to score `ours` against: live resvg (default, unchanged "
+             "behaviour), headless Chromium (chrome), or the resvg-test-suite's "
+             "own bundled PNG (suite, resvg corpus only)",
+    )
+    parser.add_argument(
         "--keep-renders", metavar="DIR", default=None,
         help="save each file's reference and our render as PNGs under "
              "DIR/<corpus>/<route>/<relative path>.{ref,ours}.png, for a "
@@ -1143,20 +1119,6 @@ def main():
     route_explicit = args.route is not None
     routes = list(ROUTES) if (args.route or "both") == "both" else [args.route]
     corpora = list(CORPORA) if (args.corpus or "all") == "all" else [args.corpus]
-
-    if args.ref == "suite":
-        dropped = [c for c in corpora if c != SUITE_REF_CORPUS]
-        if dropped:
-            print(
-                "--ref suite: no suite reference PNGs for %s, dropping from "
-                "this run (only --corpus %s has them)"
-                % (", ".join(dropped), SUITE_REF_CORPUS),
-                file=sys.stderr,
-            )
-        corpora = [c for c in corpora if c == SUITE_REF_CORPUS]
-        if not corpora:
-            print("--ref suite: nothing left to run", file=sys.stderr)
-            return 2
 
     # ---- --failing-from: which files did not pass last time
     fail_sets = None
@@ -1267,30 +1229,47 @@ def main():
     grand_start = time.perf_counter()
     for (corpus, route), files in selected.items():
         print(
-            "== %s / %s: %d files at width %d, %d jobs"
-            % (corpus, route, len(files), width_for(corpus), args.jobs),
+            "== %s / %s: %d files at width %d, %d jobs, --ref %s"
+            % (corpus, route, len(files), width_for(corpus), args.jobs, args.ref),
             flush=True,
         )
-        rows, elapsed, csv_path = run_corpus_route(
-            corpus, route, files, binary, args.tol, args.threshold, args.jobs,
-            keep_renders_dir, resvg_args=resvg_args, ref=args.ref,
-        )
-        s = stats_for(rows)
-        print(
-            "   %.1fs  rendered %d/%d  unsupported %d  size-mism %d  "
-            "pass %d (%.1f%% of all, %.1f%% of rendered)"
-            % (
-                elapsed, s["rendered"], s["files"],
-                s["unsupported"] + s["timeout"], s["size_mismatch"],
-                s["pass"], s["pass_all"] * 100.0, s["pass_rendered"] * 100.0,
-            ),
-            flush=True,
-        )
-        if not args.no_worst:
-            write_worst_composites(
-                corpus, route, rows, binary, args.tol, args.threshold, args.jobs,
-                resvg_args=resvg_args, ref=args.ref,
+        chrome_ref, chrome_tmpdir = None, None
+        if args.ref == "chrome":
+            t0 = time.perf_counter()
+            chrome_ref, chrome_tmpdir = prerender_chrome_refs(
+                corpus, files, width_for(corpus), args.jobs
             )
+            n_ok = sum(1 for v in chrome_ref.values() if v["png"] is not None)
+            print(
+                "   chromium reference: %d/%d rendered in %.1fs"
+                % (n_ok, len(chrome_ref), time.perf_counter() - t0),
+                flush=True,
+            )
+        try:
+            rows, elapsed, csv_path = run_corpus_route(
+                corpus, route, files, binary, args.tol, args.threshold, args.jobs,
+                keep_renders_dir, resvg_args=resvg_args,
+                ref_mode=args.ref, chrome_ref=chrome_ref,
+            )
+            s = stats_for(rows)
+            print(
+                "   %.1fs  rendered %d/%d  unsupported %d  size-mism %d  "
+                "pass %d (%.1f%% of all, %.1f%% of rendered)"
+                % (
+                    elapsed, s["rendered"], s["files"],
+                    s["unsupported"] + s["timeout"], s["size_mismatch"],
+                    s["pass"], s["pass_all"] * 100.0, s["pass_rendered"] * 100.0,
+                ),
+                flush=True,
+            )
+            if not args.no_worst:
+                write_worst_composites(
+                    corpus, route, rows, binary, args.tol, args.threshold, args.jobs,
+                    resvg_args=resvg_args, ref_mode=args.ref, chrome_ref=chrome_ref,
+                )
+        finally:
+            if chrome_tmpdir is not None:
+                shutil.rmtree(chrome_tmpdir, ignore_errors=True)
         all_runs.append((corpus, route, rows, elapsed, csv_path))
 
     # ---- --compare: what moved against a baseline run
