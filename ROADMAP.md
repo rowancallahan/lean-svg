@@ -419,8 +419,8 @@ Features rank below all of these unless the goal changes.
   as the embedded Noto Sans subsets (check each font's licence permits it;
   OFL does). Keep binary size in mind. **Done in T91** for Greek, Cyrillic,
   Japanese, Chinese, Korean, Thai, Armenian, Georgian and Ethiopic (19 MB of
-  fonts, `LeanSvg/Fonts/README.md`); Arabic, Hebrew and Indic scripts wait on
-  shaping and bidi.
+  fonts, `LeanSvg/Fonts/README.md`); Arabic, Hebrew and Devanagari followed
+  with T93's shaper and bidi (`LeanSvg/{Shape,ShapeRun,ShapeText,Bidi}.lean`).
 - Longer term: rethink how text reaches the renderer, e.g. fonts as outline
   paths the document can carry, or a different handling of the `<text>`
   element. Design discussion first; no change yet.

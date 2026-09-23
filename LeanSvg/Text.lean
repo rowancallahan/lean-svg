@@ -21,10 +21,12 @@ whitespace, `crates/usvg/src/parser/text.rs` for character positions and
 chunking, `crates/usvg/src/text/layout.rs` for advances, spacing and
 anchoring), simplified to what one Latin face per span can do:
 
-* one glyph per character (no ligatures, no complex-script shaping, no BiDi
-  reordering — every run is left to right);
-* kerning from `Font.kern` (GPOS pairs, or a legacy `kern` table) between
-  adjacent characters of the same chunk.
+* one glyph per character, kerning from `Font.kern` (GPOS pairs, or a
+  legacy `kern` table) between adjacent characters of the same chunk;
+* except (T93) a chunk with right-to-left text or drawn with a font that
+  carries GSUB/GPOS (Amiri, Noto Sans Hebrew/Devanagari): it is shaped by
+  `LeanSvg/ShapeText.lean` (bidi runs, OpenType shaping, font fallback) into
+  clusters of positioned glyphs (`Cluster.glyphs`).
 
 `dominant-baseline`, `alignment-baseline` and `baseline-shift` (T54,
 `LeanSvg/Baseline.lean`) shift each glyph vertically off the alphabetic

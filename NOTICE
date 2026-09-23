@@ -29,6 +29,26 @@ Embedded fonts — all SIL Open Font License 1.1, subsetted (and variable fonts
     georgian,ethiopic}. Copyright 2022 The Noto Project Authors
     (https://github.com/notofonts/{thai,armenian,georgian,ethiopic}).
     LeanSvg/Fonts/LICENSE-OFL-NotoScripts.txt.
+  Noto Sans Hebrew 3.001 (https://github.com/google/fonts/tree/main/ofl/
+    notosanshebrew) and Noto Sans Devanagari 2.003 (the resvg test suite's
+    copy) — Copyright 2022 The Noto Project Authors
+    (https://github.com/notofonts/{hebrew,devanagari}).
+    LeanSvg/Fonts/LICENSE-OFL-NotoScripts.txt.
+  Amiri 000.109 (the resvg test suite's copy) — Copyright (c) 2010-2016,
+    Khaled Hosny; portions copyright (c) 2010, Sebastian Kosch. No Reserved
+    Font Name. LeanSvg/Fonts/LICENSE-OFL-Amiri.txt.
+
+Unicode and shaping tables (T93) — generated data, not code:
+  harfrust 0.12.0 — https://github.com/harfbuzz/harfrust. MIT, Copyright (c)
+    HarfBuzz developers. LeanSvg/ShapeData.lean (general category, combining
+    class, script, Arabic joining type, Indic category, decompositions) and
+    the mirroring table in LeanSvg/Bidi.lean. LeanSvg/LICENSE-harfrust.txt.
+    harfrust's tables are themselves derived from the Unicode Character
+    Database (Unicode License v3).
+  unicode-bidi 0.3.18 — https://github.com/servo/unicode-bidi. MIT OR
+    Apache-2.0, Copyright (c) 2015 The Rust Project Developers. The Bidi_Class
+    and bracket-pair tables in LeanSvg/Bidi.lean.
+    LeanSvg/LICENSE-unicode-bidi.txt.
 
 Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
   README.md. Apache-2.0, authored for this project.
@@ -43,6 +63,15 @@ tiny-skia — https://github.com/linebender/tiny-skia
   layer-compositing pipeline and gradient evaluation in
   LeanSvg/{Raster,Geom,Canvas,Shader}.lean are fixed-point Lean
   re-implementations of its algorithms. No Rust or C++ source is included.
+
+HarfBuzz / harfrust — https://github.com/harfbuzz/harfrust
+  MIT. The OpenType layout engine, normaliser and Arabic/Hebrew/Indic
+  shapers in LeanSvg/{Shape,ShapeRun}.lean are Lean re-implementations of
+  harfrust 0.12.0's algorithms (itself a port of HarfBuzz). No Rust or C++
+  source is included.
+
+unicode-bidi — https://github.com/servo/unicode-bidi
+  MIT OR Apache-2.0. LeanSvg/Bidi.lean re-implements its UAX #9 algorithm.
 
 BEHAVIOURAL REFERENCES
 

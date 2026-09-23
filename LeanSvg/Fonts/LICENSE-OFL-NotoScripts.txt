@@ -2,6 +2,8 @@ Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai)
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/armenian)
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/georgian)
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ethiopic)
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
