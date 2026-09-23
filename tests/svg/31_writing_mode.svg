@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" font-family="Noto Sans">
+  <rect width="320" height="320" fill="#fdfdfb"/>
+  <!-- plain top-to-bottom column: the pen advances downward, glyphs turn sideways -->
+  <text x="30" y="20" font-size="26" writing-mode="tb" fill="#1d3557">Vertical</text>
+  <!-- `vertical-rl`/`vertical-lr`/`tb-rl` are all the same TopToBottom mode as `tb` -->
+  <text x="90" y="20" font-size="26" writing-mode="vertical-rl" fill="#1d3557">Column</text>
+  <!-- `lr`/`rl`/anything else is not one of the vertical keywords: no effect -->
+  <text x="150" y="30" font-size="18" writing-mode="lr" fill="#e63946">not vertical (lr)</text>
+  <!-- inherited from an ancestor `g`, and only the `<text>` element's own
+       resolved writing-mode counts: a `writing-mode` on a `tspan` (below) does not -->
+  <g writing-mode="tb">
+    <text x="150" y="60" font-size="22" fill="#2a9d8f">Group</text>
+    <text x="150" y="180" font-size="18" text-anchor="middle" fill="#2a9d8f">Mid</text>
+    <text x="190" y="240" font-size="18">
+      <tspan writing-mode="lr" fill="#e76f51">stays vertical</tspan>
+    </text>
+  </g>
+  <!-- per-character dx/dy: in vertical mode `dx` shifts across the column, `dy`
+       shifts along it (the two axes swap relative to horizontal text) -->
+  <text x="230" y="20" font-size="22" writing-mode="tb-rl" dx="0 4 8 4 0" dy="0 -3 0 3 0"
+        fill="#6a4c93">ZIG</text>
+  <!-- a `tspan` chain: the second run has its own `dx`, so it starts a new chunk
+       whose fallback position (no `x` of its own) exercises the chunk-to-chunk
+       carry, which swaps rather than rotates the running pen -->
+  <text x="270" y="30" font-size="20" writing-mode="vertical-lr" fill="#1d3557">A<tspan
+      dx="-30" y="120">B</tspan></text>
+</svg>

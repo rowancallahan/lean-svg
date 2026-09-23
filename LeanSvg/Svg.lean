@@ -128,6 +128,17 @@ structure Style where
   /-- `font-kerning: none`, or SVG 1.1 `kerning="0"`, turns pair kerning off. -/
   textKerning : Bool := true
   textAnchor : Text.Anchor := .start
+  /-- `writing-mode` (T56): usvg resolves this once per `<text>` element from
+  its own attribute or the nearest ancestor that has one (`lr-tb`/`lr`/
+  `rl-tb`/`rl`/`horizontal-tb`/anything unrecognised is `LeftToRight`; only
+  `tb`/`tb-rl`/`vertical-rl`/`vertical-lr` are `TopToBottom` — usvg 0.48.1
+  does not distinguish `vertical-lr` from `vertical-rl`, or `tb` from
+  `tb-rl`, so neither do we).  Inherited like the other text properties, but
+  `Svg.textShapes` reads it only once, off the `<text>` element's own
+  resolved `Style`, so a `writing-mode` on a `tspan` has no effect (matches
+  usvg: it searches the `<text>` node's ancestors, which does not include its
+  own descendants). -/
+  writingMode : Bool := false
   /-- `xml:space="preserve"`. -/
   spacePreserve : Bool := false
   /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
@@ -1677,6 +1688,13 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     if eqAscii t "middle" then { st with textAnchor := .middle }
     else if eqAscii t "end" then { st with textAnchor := .atEnd }
     else if eqAscii t "start" then { st with textAnchor := .start } else st
+  -- `convert_writing_mode`: any value at all (including one this renderer
+  -- does not recognise) resets the flag — a nearer ancestor's explicit
+  -- `lr`/`lr-tb`/junk overrides a farther ancestor's `tb`.
+  | "writing-mode" =>
+    let t := trim v
+    { st with writingMode :=
+        eqAscii t "tb" || eqAscii t "tb-rl" || eqAscii t "vertical-rl" || eqAscii t "vertical-lr" }
   -- `get_xmlspace`: `preserve` turns collapsing off, any *other* value turns
   -- it back on, and an absent attribute inherits (which is what not matching
   -- here does).
@@ -2241,7 +2259,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             -- size), not inherited: `<text font-size="0"><tspan
             -- font-size="40">` still draws the tspan.
             ((rendStack.back?.getD true) && st.fontSize > 0))
-  let (placed, used) := Text.layout evs textStyle.spacePreserve budget
+  let (placed, used) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
   let mut out : Array Shape := #[]
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
