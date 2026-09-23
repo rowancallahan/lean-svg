@@ -83,3 +83,58 @@ into a scratch dir; `crates/usvg/src/parser/*` and `crates/resvg/src/*`).
 
 
 **Corpus gate for any code change:** `python3 tests/run_corpora.py --corpus resvg --route direct --out /tmp/after --no-worst --compare <baseline csv>` (make the baseline first without your change) and `python3 tests/score_known.py /tmp/after/resvg_direct.csv`; plus `lake build`, `bash scripts/check-theorems.sh`, `tests/run_tests.py`, `tests/run_adversarial.py`, `tests/run_tiles.py`.
+
+## Report
+
+**Deliverables:** `docs/resvg-wrong/R3-lighting.md` (per-file findings,
+summary table, questions for Rowan) and `docs/resvg-wrong/R3-lighting.png`
+(176 KB, resvg | suite PNG | Chromium | ours, one row per file).
+
+**Classification:** 2 files (a) shallow fix, done; 3 files (b) need the
+same large filter-region-under-rotation/skew redesign (not lighting-
+specific — a resvg-wide, upstream-acknowledged limitation, see the doc);
+1 file (c) nothing to fix (the SVG has no `feDisplacementMap` element at
+all — a documentation stub — and we already match the suite's reference
+PNG to antialiasing noise); 1 file (d) needs a decision from Rowan
+(`limitingConeAngle` anti-aliasing: spec leaves the technique unspecified
+and real UAs disagree on it).
+
+**Shallow fixes applied and pushed** (commit `61dd783`,
+`LeanSvg/Filter/Lighting.lean` + `LeanSvg/Filter.lean`): `fePointLight`/
+`feSpotLight`'s `x/y/z`/`pointsAtX/Y/Z` now scale by
+`primitiveUnits="objectBoundingBox"` (axis coordinates by the bbox
+origin+size, `z` by the bbox diagonal `sqrt((w²+h²)/2)`, per spec) —
+resvg 0.48.1 (and current `main`, confirmed by fetching the file) applies
+no such scaling at all. Fixes exactly the two
+`primitiveUnits=objectBoundingBox.svg` files; identity for the default
+`userSpaceOnUse` case (exact `f32` no-op), and grepping the whole test
+corpus confirms no other file combines `objectBoundingBox` with a light
+source, so no other output changes.
+
+**Before/after (native 200 px, mean abs diff /255):**
+
+| file | vs suite PNG, before | vs suite PNG, after | vs Chromium, after |
+|---|---|---|---|
+| `fePointLight/primitiveUnits=objectBoundingBox.svg` | 71.8 | 3.2 | 0.40 |
+| `feSpotLight/primitiveUnits=objectBoundingBox.svg` | 49.8 | 2.0 | 0.36 |
+
+**Corpus gate:** `run_corpora.py --compare <pre-fix baseline>`: exactly
+the 2 files above move pass→fail (intended — they now diverge from
+resvg's own bug), 0 files elsewhere change (1677 unchanged out of 1679).
+`score_known.py`: "resvg correct" unchanged 1400/1522 (92.0%); "resvg
+known wrong" 86/96 → 84/96 (the two fixed files). `lake build`: clean, no
+new warnings. `check-theorems.sh`: all theorems/invariants hold.
+`run_tests.py`: 46/50, same 4 failures (`12_badge`,
+`14_flower_transforms`, `15_spiral_stroke`, `16_stress_2000`) confirmed
+pre-existing and unrelated (re-ran against a stashed pre-fix build,
+identical result). `run_adversarial.py`: 116/116 clean.
+`run_tiles.py`: 50/50 byte-identical tile stitching.
+
+**Could not do / left for follow-up:** the (b) and (d) items above are
+documented but not implemented, per the task's own scope ("this task is
+mainly information gathering and review") and the shallow-fix gate
+("only when the suite PNG and Chromium agree ... and it's a few lines" —
+neither held for the filter-region-transform bug, which is a
+multi-primitive architecture change, nor cleanly for the cone
+anti-aliasing, which has no single well-evidenced target). See "Questions
+for Rowan" in the doc for how to proceed on both.

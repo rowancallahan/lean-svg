@@ -56,21 +56,64 @@ deriving Inhabited
 /-- `PositiveF32::new`: strictly positive (and finite, which every `F32` is). -/
 def isPos (v : F32) : Bool := v != 0 && !F32.isNeg v
 
+/-- `std::f32::consts::SQRT_2`, bit-exact. -/
+def sqrt2F : F32 := F32.ofRat 11863283 8388608
+
+/-- `⌊√n⌋` for `n < 2^63` by Newton's method from `2^⌈bits/2⌉` (an upper
+bound), which decreases to the floor root in at most eight steps for these
+sizes; the loop is bounded at twelve. -/
+def isqrt (n : Nat) : Nat := Id.run do
+  if n < 2 then return n
+  let mut x := F32.p2 ((F32.bitLen n + 1) / 2)
+  for _ in [0:12] do
+    let y := (x + n / x) / 2
+    if y ≥ x then break
+    x := y
+  return x
+
+/-- `f32::sqrt`, correctly rounded: `F32.sqrt` with a 51-bit radicand instead
+of a 76-bit one, so it stays in scalar arithmetic.  The root has 25 or 26 bits,
+enough for `F32.norm` to round from, with the remainder as the sticky bit. -/
+def sqrtF (a : F32) : F32 :=
+  if a == 0 || F32.isNeg a then 0
+  else
+    let pRaw := F32.expo a + (F32.pbias - F32.bias)
+    let odd := pRaw % 2 == 1
+    let m := if odd then F32.mant a * 2 else F32.mant a
+    let p0 := if odd then pRaw - 1 else pRaw
+    let big := m * 67108864
+    let r := isqrt big
+    F32.norm false r ((p0 + F32.pbias - 26) / 2) (r * r != big)
+
+/-- `bbox_transform` for a light source coordinate under
+`primitiveUnits="objectBoundingBox"`: `x`/`y` scale per axis and shift by the
+bbox origin, `z` (not axis-specific) scales by the bbox diagonal,
+`sqrt((w² + h²) / 2)` (SVG 2 "normalized diagonal"). Usvg 0.48.1 does not
+apply this at all (`convert_light_source` reads `x`/`y`/`z` raw), which is a
+confirmed upstream bug still present on `main`; identity when
+`bbx = bby = 0, scx = scy = 1`, i.e. `userSpaceOnUse`. -/
+def obbXY (b o : F32) (sc : F32) : F32 := F32.add b (F32.mul o sc)
+def obbZ (o diag : F32) : F32 := F32.mul o diag
+
 /-- `convert_light_source`: the first `feDistantLight`/`fePointLight`/
 `feSpotLight` child; `none` without one. `num as n` reads attribute `n` of
-`as` as an `f32`. -/
+`as` as an `f32`. `bbx bby scx scy` is the `primitiveUnits` bbox (identity for
+`userSpaceOnUse`), applied to `x`/`y`/`z` and `pointsAt*` per `obbXY`/`obbZ`. -/
 def lightOf (num : Array Xml.Attr → String → Option F32)
-    (children : Array (String × Array Xml.Attr)) : Option Light :=
+    (children : Array (String × Array Xml.Attr)) (bbx bby scx scy : F32) : Option Light :=
   let isLight := fun (n : String) => n == "feDistantLight" || n == "fePointLight" || n == "feSpotLight"
   match children.find? (fun c => isLight c.1) with
   | none => none
   | some (n, as) =>
     let g := fun (a : String) => (num as a).getD 0
+    let diag := F32.div (sqrtF (F32.add (F32.mul scx scx) (F32.mul scy scy))) sqrt2F
     if n == "feDistantLight" then some (.distant (g "azimuth") (g "elevation"))
-    else if n == "fePointLight" then some (.point (g "x") (g "y") (g "z"))
+    else if n == "fePointLight" then
+      some (.point (obbXY bbx (g "x") scx) (obbXY bby (g "y") scy) (obbZ (g "z") diag))
     else
       let se := (num as "specularExponent").getD F32.one
-      some (.spot (g "x") (g "y") (g "z") (g "pointsAtX") (g "pointsAtY") (g "pointsAtZ")
+      some (.spot (obbXY bbx (g "x") scx) (obbXY bby (g "y") scy) (obbZ (g "z") diag)
+        (obbXY bbx (g "pointsAtX") scx) (obbXY bby (g "pointsAtY") scy) (obbZ (g "pointsAtZ") diag)
         (if isPos se then se else F32.one) (num as "limitingConeAngle"))
 
 /-- `convert_diffuse_lighting` / `convert_specular_lighting`.  `none` is usvg's
@@ -83,8 +126,8 @@ absent one; the colour's alpha is dropped.  `inherit` is read as absent. -/
 def convert (specular : Bool) (num : Array Xml.Attr → String → Option F32)
     (attrs : Array Xml.Attr) (lightingColor : Option ByteArray)
     (children : Array (String × Array Xml.Attr)) (color : Rgba)
-    (parseColor : ByteArray → Option Rgba) : Option Params := do
-  let light ← lightOf num children
+    (parseColor : ByteArray → Option Rgba) (bbx bby scx scy : F32) : Option Params := do
+  let light ← lightOf num children bbx bby scx scy
   let se := (num attrs "specularExponent").getD F32.one
   let c128 := F32.ofNat 128
   if specular && (F32.lt se F32.one || F32.lt c128 se) then none
@@ -108,9 +151,8 @@ def fInt (v : Int) : F32 := if v < 0 then F32.neg (F32.ofNat (-v).toNat) else F3
 def fFix (v : Int) (den : Nat) : F32 :=
   if v < 0 then F32.neg (F32.ofRat (-v).toNat den) else F32.ofRat v.toNat den
 
-/-- `std::f32::consts::PI` and `SQRT_2`, bit-exact. -/
+/-- `std::f32::consts::PI`, bit-exact. -/
 def piF : F32 := F32.ofRat 13176795 4194304
-def sqrt2F : F32 := F32.ofRat 11863283 8388608
 
 /-- `f32::to_radians`: `x * (PI / 180.0)`, the constant folded in `f32`. -/
 def toRad (deg : F32) : F32 := F32.mul deg (F32.div piF (F32.ofNat 180))
@@ -143,32 +185,6 @@ def compute (c : Nat) (factor : Option F32) : Nat :=
 /-- `approx_eq_ulps(&1.0, 4)`. -/
 def nearOne (v : F32) : Bool :=
   F32.le (F32.ofRat 16777212 16777216) v && F32.le v (F32.ofRat 8388612 8388608)
-
-/-- `⌊√n⌋` for `n < 2^63` by Newton's method from `2^⌈bits/2⌉` (an upper
-bound), which decreases to the floor root in at most eight steps for these
-sizes; the loop is bounded at twelve. -/
-def isqrt (n : Nat) : Nat := Id.run do
-  if n < 2 then return n
-  let mut x := F32.p2 ((F32.bitLen n + 1) / 2)
-  for _ in [0:12] do
-    let y := (x + n / x) / 2
-    if y ≥ x then break
-    x := y
-  return x
-
-/-- `f32::sqrt`, correctly rounded: `F32.sqrt` with a 51-bit radicand instead
-of a 76-bit one, so it stays in scalar arithmetic.  The root has 25 or 26 bits,
-enough for `F32.norm` to round from, with the remainder as the sticky bit. -/
-def sqrtF (a : F32) : F32 :=
-  if a == 0 || F32.isNeg a then 0
-  else
-    let pRaw := F32.expo a + (F32.pbias - F32.bias)
-    let odd := pRaw % 2 == 1
-    let m := if odd then F32.mant a * 2 else F32.mant a
-    let p0 := if odd then pRaw - 1 else pRaw
-    let big := m * 67108864
-    let r := isqrt big
-    F32.norm false r ((p0 + F32.pbias - 26) / 2) (r * r != big)
 
 structure V3 where
   x : F32

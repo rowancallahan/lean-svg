@@ -746,7 +746,7 @@ def convertConvolveMatrix (inp : Input) (a : Array Xml.Attr) : Kind :=
 
 /-- One primitive element to a `Kind`, given the names of the results before
 it and the `primitiveUnits` scale.  `none` = unsupported. -/
-def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx) :
+def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (bx by' scx scy : Fx) :
     Option Kind :=
   let a := p.attrs
   let inp := resolveInput names (attr a "in")
@@ -798,7 +798,9 @@ def convertPrim (P : Parsers) (p : RawPrim) (names : Array String) (scx scy : Fx
       (fs.getD 2 .identity) (fs.getD 3 .identity))
   | "feDiffuseLighting" | "feSpecularLighting" =>
     some <| (Lighting.convert (p.name == "feSpecularLighting") (fun as n => (attr as n).bind f32All) a
-      (prop a "lighting-color") p.children p.color P.color).elim (.flood 0 0 0 0) (.lighting inp)
+      (prop a "lighting-color") p.children p.color P.color
+      (Lighting.fFix bx 256) (Lighting.fFix by' 256) (Lighting.fFix scx 256) (Lighting.fFix scy 256)
+      ).elim (.flood 0 0 0 0) (.lighting inp)
   | "feTile" => some (.tile inp)
   | "feDisplacementMap" =>
     let chanOf := fun (v : Option ByteArray) => match v.map trim with
@@ -905,11 +907,15 @@ def convertUrl (P : Parsers) (tab : Table) (fi : Nat) (cx : ElemCtx) : UrlRes :=
   let some si := src | return .error
   let raw := (tab.filters.getD si default).prims
   if raw.size > maxPrims then return .unsupported
+  let mut bx : Fx := 0
+  let mut by' : Fx := 0
   let mut scx : Fx := 256
   let mut scy : Fx := 256
   if pobb then
     match cx.bbox with
     | some b =>
+      bx := b.x
+      by' := b.y
       scx := b.w
       scy := b.h
     | none => return .error
@@ -920,7 +926,7 @@ def convertUrl (P : Parsers) (tab : Table) (fi : Nat) (cx : ElemCtx) : UrlRes :=
     if !isPrimitive p.name then continue
     if isKnownUnsupported p.name then return .unsupported
     let some sub := primRegion p pobb cx.bbox region cx.vbW cx.vbH cx.fontSize | break
-    let some kind := convertPrim P p names scx scy | return .unsupported
+    let some kind := convertPrim P p names bx by' scx scy | return .unsupported
     -- `gen_result`: an explicit name, or the next free `resultN`.
     let mut name := ""
     match attr p.attrs "result" with
