@@ -29,6 +29,121 @@ Python only; no renderer changes. Use the existing pass criterion (≥99% of
 pixels within 8 levels) unless there is a strong reason; say if Chromium
 needs a looser one (anti-aliasing differs) and measure it.
 
+## Report
+
+**Files (Python only, no `LeanSvg/*.lean` touched):**
+
+- `tests/make_criteria.py` (new) — builds `tests/criteria.csv` from
+  `tests/corpora/resvg-test-suite/results.csv` (rule in order: resvg `1`
+  &rarr; `resvg`; else chrome `1` &rarr; `chrome`; else `human`) plus one
+  `resvg` row per `tests/svg/*.svg`.
+- `tests/criteria.csv` (new, generated) — 1745 rows: 1522 `resvg`, 45
+  `chrome`, 112 `human` (resvg-test-suite, 1679 files) + 66 `resvg` (local
+  `tests/svg/*.svg`).
+- `tests/human_verdicts.csv` (new) — header only (`file,verdict,note`), no
+  rows yet; Rowan fills it by hand.
+- `tests/make_human_review.py` (new) — renders ours / suite PNG / Chromium
+  for every unreviewed `human` row (skips files already in
+  `human_verdicts.csv`) and writes a static `tests/out/human_review/
+  index.html`. Smoke-tested with `--limit 3` (see below).
+- `tests/score_criteria.py` (new) — scores `tests/criteria.csv` against a
+  `run_corpora.py --ref resvg` CSV, a `--ref chrome` CSV, an optional
+  `run_tests.py results.json` (for the local `resvg`-reference rows), and
+  `tests/human_verdicts.csv`; prints per-reference-kind and overall pass
+  counts and a failure list; `--strict` exits 1 if anything scored fails
+  (an unreviewed `human` row never trips it).
+- `DESIGN.md` — new short §6 "Per-file pass criteria (T100)" documenting
+  the above and the Chromium-tolerance finding.
+
+**Verification (all before writing tooling, all still pass after — no
+renderer code changed):**
+
+```
+lake build                        # clean, no new warnings
+bash scripts/check-theorems.sh    # theorems ok
+python3 tests/run_tests.py        # 57/66 (pre-existing local failures, unrelated to this task)
+python3 tests/run_adversarial.py  # 142/142 clean
+python3 tests/run_tiles.py        # 66/66 byte-identical
+```
+
+No `tests/svg/<n>_<feature>.svg` was added: this task adds scoring
+tooling, not a renderer feature, so there is nothing new to exercise in
+the fidelity corpus.
+
+**Chromium tolerance measurement** (the 45 `chrome`-reference files, width
+200, tol 8, threshold 0.99 — same knobs as the resvg reference):
+
+| criterion | pass |
+|---|---|
+| within-8, &ge;99% (current, unchanged) | 18/44 |
+| within-32, &ge;99% | 23/44 |
+| within-8, &ge;95% | 31/44 |
+| within-8, &ge;90% | 37/44 |
+
+(44 scored + 1 `size_mismatch`, `structure/svg/not-UTF-8-encoding.svg`.)
+Loosening tolerance alone barely moves it; most failures are text
+(RTL/bidi, emoji, `font-weight: 650`, `tspan` + filter/mask/opacity) where
+Chromium's own font substitution/hinting/subpixel AA differs from
+resvg/lean-svg's, not a few stray seam pixels — so a blanket looser number
+would forgive real bugs about as often as it forgives noise. Left the
+criterion unchanged; this is exactly what the `human` bucket is for.
+
+**First full numbers** (`python3 tests/score_criteria.py --resvg-csv
+<full resvg-suite --ref resvg CSV, width 200> --chrome-csv <chrome+human
+target files --ref chrome CSV, width 200> --local-json tests/out/
+results.json`):
+
+```
+== per reference kind ==
+  resvg   1588 file(s)  pass 1517  fail  71  missing   0  unreviewed   0  (pass rate of scored: 95.5%)
+  chrome    45 file(s)  pass   18  fail  27  missing   0  unreviewed   0  (pass rate of scored: 40.0%)
+  human    112 file(s)  pass    0  fail   0  missing   0  unreviewed 112  (pass rate of scored: -)
+
+== overall ==
+  total 1745  pass 1535  fail 98  missing 0  unreviewed 112  (pass rate of scored: 94.0%)
+```
+
+(`resvg` bucket = 1522 resvg-suite + 66 local; the resvg-suite-only slice
+is 1460/1522 = 95.9% by itself, local is 57/66 — both pre-existing, no
+renderer change here.) `human`'s 112 files are all `unreviewed`:
+`tests/human_verdicts.csv` starts empty by design (Rowan fills it with
+`tests/make_human_review.py`'s page), so this run reports 0 pass/0 fail
+for that bucket rather than guessing.
+
+Under the old "always resvg" scoring, the 157 chrome+human files would
+either be scored against a resvg that is itself rated wrong/unrated for
+them (misleading) or not scored at all. Under T100's rule they get a
+better reference where one exists (chrome, 45 files) and an honest
+"needs a human" bucket where none does (112 files), instead of being
+silently folded into the overall resvg pass rate either way.
+
+Reproduce:
+```
+python3 tests/make_criteria.py > tests/criteria.csv
+python3 tests/run_corpora.py --corpus resvg --route direct --ref resvg \
+    --out /tmp/crit_resvg --no-worst
+python3 -c "
+import csv
+rows = [r for r in csv.DictReader(open('tests/criteria.csv'))
+        if r['corpus']=='resvg-suite' and r['reference'] in ('chrome','human')]
+with open('/tmp/chrome_human_target.csv','w',newline='') as fh:
+    w = csv.DictWriter(fh, fieldnames=['corpus','route','file','status'])
+    w.writeheader()
+    for r in rows:
+        w.writerow({'corpus':'resvg','route':'direct','file':r['file'],'status':'fail'})
+"
+python3 tests/run_corpora.py --ref chrome \
+    --failing-from /tmp/chrome_human_target.csv --out /tmp/crit_chrome --no-worst
+python3 tests/run_tests.py   # writes tests/out/results.json
+python3 tests/score_criteria.py --resvg-csv /tmp/crit_resvg/resvg_direct.csv \
+    --chrome-csv /tmp/crit_chrome/resvg_direct.csv --local-json tests/out/results.json
+```
+
+**Not done / left for Rowan:** the 112 `human` rows are unreviewed —
+`tests/human_verdicts.csv` is intentionally empty. Run
+`python3 tests/make_human_review.py` (needs the lean-svg binary built) and
+fill `tests/human_verdicts.csv` by hand from the generated page.
+
 ---
 
 ## Common rules (every lean-svg agent)
