@@ -162,7 +162,7 @@ hours; partial but regression-free beats complete but risky.
 
 ## Report
 
-All changes are in `LeanSvg/Svg.lean`. New test: `tests/svg/28_shape_tail.svg`
+All changes are in `LeanSvg/Svg.lean`. New test: `tests/svg/38_shape_tail.svg`
 (99.990% within-8, PASS), exercising percent geometry, `rx`-only/`ry`-only
 auto-resolution, a negative `rx`, percent `line` coordinates, `<a>` as a
 plain container, `style=""` comment stripping, and a shape's own (unrendered)
@@ -176,7 +176,7 @@ Verification (all commands from "Verification before you push"):
   **18 newly passing, 0 newly failing**, 1661 unchanged.
 - `python3 tests/run_tests.py`: 24/27 pre-existing local-corpus files unchanged
   (23/27 pass, same 4 pre-existing failures as baseline, no score regressed),
-  plus the new `28_shape_tail` at 99.990% (PASS) — 24/28 overall.
+  plus the new `38_shape_tail` at 99.990% (PASS) — 24/28 overall.
 - `python3 tests/run_adversarial.py`: 62/62 clean (was 61/61; +1 for the new
   test file's generated variants).
 - `python3 tests/run_tiles.py`: 28/28 byte-identical (was 27/27).

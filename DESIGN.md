@@ -374,9 +374,20 @@ per render (`maxFilterTotal`), and a `<filter>` has at most `Filter.maxPrims`
 primitives.
 
 Primitives usvg knows but this renderer does not implement (lighting,
-turbulence, morphology, convolution, tile, image, displacement, a `gamma`
+turbulence, morphology, convolution, tile, displacement, a `gamma`
 transfer function) make the whole `filter` value resolve to "no filter": the
 element renders exactly as before T51.
+
+`feImage` (T67, `LeanSvg/Filter/Image.lean`, `Filter/ImageRender.lean`): a
+link to an element is rendered, at `groupEnd` just before the filter runs, by
+`renderNodes` on `fuel - 1` over a *sub-document* — the input events with the
+root's children moved into a `<defs>`, then the target under `<g>` wrappers
+that keep only its ancestors' inherited properties — with resvg's
+`[sx 0 0 sy subregion.x subregion.y]` onto a region-sized canvas.
+`Svg.interpret` applies usvg's `fix_recursive_fe_image` first and keeps the
+events in `Doc.events`.  Each link costs `1 + events/4096` of
+`maxMaskRenders`.  `data:` images go through one stub (`FeImage.dataCanvas`)
+until the decoders land; everything else is usvg's dummy primitive.
 
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
@@ -425,6 +436,8 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/Clip.lean` | `clipPath` → device masks, cache, coverage and layer application |
 | `LeanSvg/Filter.lean` | filter model, `<filter>` pre-pass, usvg's `filter` resolution |
 | `LeanSvg/FilterApply.lean` | filter primitives on pixels (resvg `filter/`) |
+| `LeanSvg/Filter/Image.lean` | `feImage` spec, `fix_recursive_fe_image`, link sub-documents |
+| `LeanSvg/Filter/ImageRender.lean` | `feImage` jobs and geometry for `Render` |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |

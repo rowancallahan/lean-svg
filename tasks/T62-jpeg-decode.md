@@ -184,7 +184,7 @@ not linked into `lean-svg`) and `tests/jpeg_ref` (Rust: `jref` = resvg's
 `decode_jpeg` on zune-jpeg =0.5.15; `jgen` = jpeg-encoder, for sampling
 layouts Pillow can't write). It compares on a generated corpus and then
 fuzzes. Needs `cargo` (crates.io access for the first build).
-`tests/svg/34_jpeg_image.svg`: three embedded JPEGs (4:2:0 baseline,
+`tests/svg/39_jpeg_image.svg`: three embedded JPEGs (4:2:0 baseline,
 progressive gray, 4:4:4 with RST), drawn once T63 lands.
 
 ## Report
@@ -192,7 +192,7 @@ progressive gray, 4:4:4 with RST), drawn once T63 lands.
 Files: `LeanSvg/JpegDecode.lean` (stub replaced), `LeanSvg/Jpeg/Huffman.lean`,
 `LeanSvg/Jpeg/Idct.lean` (new), `proofs/JpegDecode.lean`, `JpegDump.lean` +
 `jpegdump` target in `lakefile.toml`, `tests/check_jpeg_decode.py`,
-`tests/jpeg_ref/`, `tests/svg/34_jpeg_image.svg`. `Svg.lean`, `Render.lean`,
+`tests/jpeg_ref/`, `tests/svg/39_jpeg_image.svg`. `Svg.lean`, `Render.lean`,
 `Image.lean` and `Effect.lean` are untouched.
 
 Decoder vs zune (`python3 tests/check_jpeg_decode.py`):
@@ -219,7 +219,7 @@ Verification:
   it in), so the two `structure/image/embedded-jpeg-*` files do not change
   until then.
 - `tests/run_tests.py`: 30/34 → 30/35. No existing file's score changed. The
-  new `34_jpeg_image` fails (55.7%) until T63 draws `<image>`.
+  new `39_jpeg_image` fails (55.7%) until T63 draws `<image>`.
 - `tests/run_adversarial.py`: 78/78 clean. `tests/run_tiles.py`: 35/35
   byte-identical.
 
