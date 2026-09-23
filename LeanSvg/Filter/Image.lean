@@ -2,6 +2,7 @@ import LeanSvg.Canvas
 import LeanSvg.Xml
 import LeanSvg.Viewport
 import LeanSvg.Use
+import LeanSvg.Image
 
 /-!
 # `feImage` (T67): the parts that run before rendering
@@ -47,6 +48,9 @@ deriving Inhabited
 structure Spec where
   href : Href
   aspect : Viewport.AspectRatio
+  /-- `image-rendering`, resolved the way usvg's `find_attribute` reads it for
+  `feImage`: the element's own attribute, or bicubic (`auto`) when absent. -/
+  quality : Image.Quality := .bicubic
   /-- Filled in by `Render` just before the filter runs: the element or image,
   rendered onto the filter region's pixels.  `none` is the dummy primitive. -/
   pre : Option Canvas := none
@@ -58,23 +62,68 @@ def attr (attrs : Array Xml.Attr) (name : String) : Option ByteArray :=
 /-- `href` with SVG 2's precedence (an unprefixed `href` wins). -/
 def parse (attrs : Array Xml.Attr) : Spec :=
   let aspect := ((attr attrs "preserveAspectRatio").map Viewport.parseAspectRatio).getD {}
+  let quality := ((attr attrs "image-rendering").map Image.parseRendering).getD .bicubic
   let href : Href := match Use.hrefId attrs with
     | some id => .elem id
     | none =>
       match (attr attrs "href").orElse (fun _ => attr attrs "xlink:href") with
       | some v => if startsWith (trim v) 0 "data:" then .data (trim v) else .other
       | none => .other
-  { href, aspect }
+  { href, aspect, quality }
 
-/-- **The one `data:` call site** (for the integrator, once T63's decoders
-land): decode `uri`, draw it into the subregion `(sx, sy, sw, sh)` (layer
-pixels) of an `rw × rh` transparent canvas under `aspect`, as usvg's
-`image::convert_inner` with `filter_subregion.translate_to(0, 0)` and resvg's
-image rendering do.  `none` is what usvg does with an image it cannot decode:
-the dummy primitive. -/
-def dataCanvas (_uri : ByteArray) (_aspect : Viewport.AspectRatio) (_rw _rh : Nat)
-    (_sx _sy _sw _sh : Int) : Option Canvas :=
-  none
+/-- Intersect a mask with an axis-aligned rectangle (device pixels): usvg's
+"Image slice acts like a rectangular clip" for a `slice` `preserveAspectRatio`.
+`Render.clipMask`'s logic, kept local since this module is one of `Render`'s
+own dependencies and cannot import it back. -/
+def clipToRect (m : Raster.Mask) (x0 y0 x1 y1 : Nat) : Option Raster.Mask :=
+  if x0 ≤ m.x0 && y0 ≤ m.y0 && m.x0 + m.w ≤ x1 && m.y0 + m.h ≤ y1 then some m
+  else
+    let cx0 := Nat.max m.x0 x0
+    let cy0 := Nat.max m.y0 y0
+    let cx1 := Nat.min (m.x0 + m.w) x1
+    let cy1 := Nat.min (m.y0 + m.h) y1
+    if cx1 ≤ cx0 || cy1 ≤ cy0 then none
+    else Id.run do
+      let w := cx1 - cx0
+      let h := cy1 - cy0
+      let mut cov : Array Nat := Array.replicate (w * h) 0
+      for j in [0:h] do
+        let src := (cy0 - m.y0 + j) * m.w + (cx0 - m.x0)
+        let dst := j * w
+        for i in [0:w] do
+          cov := cov.setIfInBounds (dst + i) (m.cov.getD (src + i) 0)
+      return some ⟨cx0, cy0, w, h, cov⟩
+
+/-- **The `data:` call site**, wired to T63's `LeanSvg.Image`: decode `uri`
+and fit it (`preserveAspectRatio`) into the subregion, whose own size in user
+units is `(uw, uh)` (usvg's `image::convert_inner` with
+`filter_subregion.translate_to(0, 0)`), then place that onto the `rw × rh`
+region canvas through `mat` — the same `[sx 0 0 sy subregion.x subregion.y]`
+transform (`Job.mat`) the `href="#id"` link case renders with, i.e. resvg's
+`apply_image`.  `none` — the dummy primitive — for an undecodable image, an
+empty viewport, or a singular `mat`. -/
+def dataCanvas (uri : ByteArray) (aspect : Viewport.AspectRatio) (quality : Image.Quality)
+    (rw rh : Nat) (uw uh : Fx) (mat : Mat) : Option Canvas :=
+  match Image.load uri with
+  | none => none
+  | some pix =>
+    match Image.place pix 0 0 (some uw) (some uh) aspect quality with
+    | none => none
+    | some (cmds, placed, clip?) =>
+      let dev := (flatten mat cmds).map fun p => p.pts.map mat.apply
+      match Raster.rasterize rw rh dev false with
+      | none => none
+      | some m0 =>
+        let clipped : Option Raster.Mask := match clip? with
+          | none => some m0
+          | some (cx, cy, cw, ch) =>
+            let p0 := mat.apply ⟨cx, cy⟩
+            let p1 := mat.apply ⟨cx + cw, cy + ch⟩
+            clipToRect m0 (Fx.floor p0.x).toNat (Fx.floor p0.y).toNat
+              (Fx.ceil p1.x).toNat (Fx.ceil p1.y).toNat
+        match clipped, Image.build placed mat 0 0 with
+        | some m, some sh => some (Canvas.fillMaskImage (Canvas.new rw rh none) m sh)
+        | _, _ => none
 
 /-! ## The event rewrites -/
 

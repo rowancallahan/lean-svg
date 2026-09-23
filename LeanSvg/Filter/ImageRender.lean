@@ -23,6 +23,12 @@ structure Job where
   sy : Int
   sw : Int
   sh : Int
+  /-- The subregion's own width/height in *user* units (`p.sub`, before `ts`):
+  what a `data:` href is fit into by `preserveAspectRatio`, matching usvg's
+  `filter_subregion` (`sw`/`sh` are its already-scaled device pixels, whose
+  aspect ratio can differ from this one under a non-uniform `ts`). -/
+  uw : Fx
+  uh : Fx
 
 /-- The `feImage`s of `f` on a `w × h` layer whose pixels `ts` maps the filter's
 user space to, with `FilterApply.run`'s region (`fit_to_rect`); none when the
@@ -39,7 +45,7 @@ def jobs (f : Filter.Resolved) (ts : Mat) (w h : Nat) : Array Job := Id.run do
     let p := f.prims.getD i default
     match p.kind, FilterApply.devRect ts p.sub with
     | .image s, some (sx, sy, sw, sh) =>
-      out := out.push ⟨i, s, (x1 - x0).toNat, (y1 - y0).toNat, sx, sy, sw, sh⟩
+      out := out.push ⟨i, s, (x1 - x0).toNat, (y1 - y0).toNat, sx, sy, sw, sh, p.sub.w, p.sub.h⟩
     | _, _ => pure ()
   return out
 
