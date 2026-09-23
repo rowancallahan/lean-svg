@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="2048">
+  <!-- T66: lighting on a 4 Mpx layer with the expensive parameters: every
+       pixel takes two non-integer powf's, the spot light's with its base within
+       5e-7 of 1 and a 1.2e6 exponent (the regime where the fast powf cannot
+       certify and the exact fallback is budgeted).  Cost is linear in area;
+       at 4096x4096 (16 Mpx, the most maxFilterPixels allows) it took ~50 s. -->
+  <filter id="f" x="0" y="0" width="2048" height="2048" filterUnits="userSpaceOnUse">
+    <feSpecularLighting surfaceScale="3" specularConstant="2" specularExponent="127.3">
+      <feSpotLight x="1024" y="1024" z="1e6" pointsAtX="1024" pointsAtY="1024" pointsAtZ="0"
+                   specularExponent="1234567.5" limitingConeAngle="89"/>
+    </feSpecularLighting>
+  </filter>
+  <g filter="url(#f)">
+    <rect x="663" y="308" width="424" height="69" fill-opacity="0.2"/>
+    <rect x="1681" y="1097" width="116" height="394" fill-opacity="0.1"/>
+    <rect x="1863" y="1039" width="239" height="58" fill-opacity="0.2"/>
+    <rect x="888" y="856" width="91" height="266" fill-opacity="0.2"/>
+    <rect x="1128" y="869" width="80" height="599" fill-opacity="0.2"/>
+    <rect x="457" y="1291" width="83" height="426" fill-opacity="0.1"/>
+    <rect x="452" y="95" width="590" height="156" fill-opacity="0.5"/>
+    <rect x="858" y="295" width="573" height="140" fill-opacity="0.5"/>
+    <rect x="1147" y="1671" width="205" height="125" fill-opacity="0.4"/>
+    <rect x="762" y="199" width="580" height="84" fill-opacity="0.1"/>
+    <rect x="1267" y="421" width="528" height="564" fill-opacity="0.7"/>
+    <rect x="1591" y="643" width="496" height="484" fill-opacity="0.6"/>
+    <rect x="613" y="508" width="204" height="269" fill-opacity="0.2"/>
+    <rect x="1176" y="614" width="557" height="526" fill-opacity="0.6"/>
+    <rect x="1493" y="919" width="314" height="94" fill-opacity="0.2"/>
+    <rect x="1048" y="856" width="188" height="370" fill-opacity="0.3"/>
+    <rect x="1001" y="863" width="60" height="99" fill-opacity="0.9"/>
+    <rect x="1173" y="1616" width="341" height="368" fill-opacity="0.6"/>
+    <rect x="1217" y="1017" width="487" height="90" fill-opacity="0.2"/>
+    <rect x="552" y="970" width="86" height="82" fill-opacity="0.5"/>
+    <rect x="1325" y="1183" width="476" height="311" fill-opacity="0.7"/>
+    <rect x="1816" y="1369" width="375" height="43" fill-opacity="0.8"/>
+    <rect x="727" y="344" width="139" height="525" fill-opacity="0.1"/>
+    <rect x="446" y="1573" width="314" height="152" fill-opacity="0.4"/>
+  </g>
+</svg>
