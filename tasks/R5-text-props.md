@@ -90,3 +90,64 @@ into a scratch dir; `crates/usvg/src/parser/*` and `crates/resvg/src/*`).
 
 
 **Corpus gate for any code change:** `python3 tests/run_corpora.py --corpus resvg --route direct --out /tmp/after --no-worst --compare <baseline csv>` (make the baseline first without your change) and `python3 tests/score_known.py /tmp/after/resvg_direct.csv`; plus `lake build`, `bash scripts/check-theorems.sh`, `tests/run_tests.py`, `tests/run_adversarial.py`, `tests/run_tiles.py`.
+
+## Report
+
+**Files changed:**
+- `LeanSvg/Svg.lean` — `parseFontWeight` now falls back to `parseNumberAll`
+  (clamped to CSS Fonts 4's `[1, 1000]`) for a numeric weight that isn't one
+  of the recognized keywords/decade literals, instead of silently keeping
+  the inherited weight. Fixes `text/font-weight/650.svg`.
+- `LeanSvg/Text.lean` — `layout` now tracks a second accumulator (`adv`)
+  that mirrors the pen's advance but never receives the anchor shift `x0`,
+  and uses it for `lastX`/`lastY` (the fallback position handed to a later
+  chunk with no explicit `x`/`y`). Fixes `text/text-anchor/coordinates-
+  list.svg`.
+- `docs/resvg-wrong/R5-text-props.md`, `docs/resvg-wrong/R5-text-props.png`
+  — the required deliverables: per-file research/classification for all 14
+  files, and the 14-row comparison sheet.
+
+**Research summary (14 files):** 2 classified (a) and fixed (see above); 6
+classified (c) deliberately not supported (`alignment-baseline/hanging-on-
+vertical`, `glyph-orientation-horizontal/simple-case`, `kerning/10percent`,
+`text-rendering/geometricPrecision`, `tref/link-to-an-external-file-
+element`, `writing-mode/tb-and-punctuation` — mostly blocked on the
+single-embedded-Latin-font policy, the no-second-file safety invariant, or
+a documented resvg-parity non-goal already matching every maintained
+renderer); 4 classified (b) needing real feature work of varying size
+(`font-size-adjust/simple-case`, `font/simple-case`, `text-decoration/
+style-resolving-4`, plus `direction/rtl` which is (b)/(d)); 3 need a
+decision from Rowan (`glyph-orientation-vertical/simple-case`,
+`unicode-bidi/bidi-override` which is (c)/(b)/(d), and `direction/rtl`
+shared with the (b) list) — full detail, evidence and the six numbered
+questions are in `docs/resvg-wrong/R5-text-props.md`.
+
+**Before/after numbers (corpus gate, `tests/run_corpora.py --corpus resvg
+--route direct`, 1679 files):**
+- Baseline (before either fix): 1542/1679 pass overall (91.8%);
+  `score_known.py`: resvg-correct 1400/1522 (92.0%), resvg-known-wrong
+  86/96 (89.6%).
+- After both fixes: 1541/1679 pass overall (91.8%); resvg-correct
+  **1400/1522 (92.0%, unchanged — 0 regressions)**, resvg-known-wrong
+  85/96 (88.5% — the intended -1, from `font-weight/650.svg` now
+  correctly diverging from resvg). Only the two fixed files themselves
+  moved in the per-file diff; 1677 files unchanged.
+- `text-anchor/coordinates-list.svg`'s "ext" ink-box center moved from
+  x=106 (matching resvg's bug) to x=112 (matching the suite reference's
+  measured 112.2 and Chrome's 113).
+- `font-weight/650.svg` line 1 (`font-weight="650"`) now renders bold,
+  matching six independent renderers and the suite reference; previously
+  matched resvg's non-bold mistake.
+- Full verification suite run after both fixes: `lake build` clean, no new
+  warnings; `bash scripts/check-theorems.sh` all theorems/invariants hold;
+  `tests/run_tests.py` 46/50 (the same 4 pre-existing failures —
+  `12_badge`, `14_flower_transforms`, `15_spiral_stroke`, `16_stress_2000`
+  — reproduce identically on the commit before these changes, confirmed by
+  reverting and re-running); `tests/run_adversarial.py` 116/116 clean;
+  `tests/run_tiles.py` 50/50 byte-identical.
+
+**Could not do / left for Rowan:** the two shallow fixes above are the only
+code changes made; every other file is blocked on either a real feature, a
+resvg-parity-vs-spec policy decision, or the project's no-second-file
+safety invariant, per the classifications and six questions in
+`docs/resvg-wrong/R5-text-props.md`.
