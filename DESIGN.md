@@ -508,3 +508,53 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |
+
+## 6. Per-file pass criteria (T100)
+
+Judging every file against resvg conflates two different questions: "does
+lean-svg match resvg" and "is lean-svg correct". resvg-test-suite's own
+`results.csv` rates the seven big renderers against the SVG spec per file
+(`1` correct, `2` known wrong, `0` unrated); 96 files resvg itself gets
+wrong and 61 are unrated, so scoring those against resvg would just reward
+copying resvg's bugs (`tests/score_known.py` already reported this split;
+T100 turns it into an actual scoring policy).
+
+`tests/make_criteria.py` writes `tests/criteria.csv` (one row per
+resvg-test-suite file, plus every `tests/svg/*.svg` regression file), giving
+each file a `reference`:
+
+1. resvg rated correct (`resvg` column `1`) &rarr; **resvg**.
+2. Else Chromium rated correct (`chrome` column `1`) &rarr; **chrome**
+   (`tests/render_chrome.py`; `tests/run_corpora.py --ref chrome`).
+3. Else &rarr; **human**: no known-correct oracle exists, so the file needs
+   a person to look at it. `tests/svg/*.svg` files have no `results.csv`
+   row and are always scored against resvg (unchanged from before T100).
+
+Of 1679 suite files: 1522 resvg, 45 chrome, 112 human.
+
+`tests/make_human_review.py` renders ours / the suite's own bundled PNG /
+Chromium for every `human` row that has no verdict yet in
+`tests/human_verdicts.csv`, and writes a static `index.html` (three panels
+per file) so Rowan can decide and add `file,pass|fail,note` rows by hand.
+
+`tests/score_criteria.py` takes a `run_corpora.py --ref resvg` CSV, a
+`--ref chrome` CSV, and `tests/human_verdicts.csv`, and reports pass counts
+per reference kind and overall using the *same* criterion as everywhere
+else — &ge;99% of pixels within 8 levels — plus a list of failures.
+`--strict` exits non-zero if any scored file fails (an unreviewed `human`
+row is neither a pass nor a fail, and never trips `--strict`).
+
+**Does Chromium need a looser tolerance?** Measured on the 45 `chrome`
+files at the standard width-200 render: within-8/&ge;99% passes 18/44
+scored (one `size_mismatch`). Loosening only the tolerance barely moves
+it (within-32/&ge;99%: 23/44); loosening only the threshold moves it more
+(within-8/&ge;95%: 31/44; &ge;90%: 37/44). Most of the failures are text
+(RTL, bidi, emoji, font-weight, tspan-with-filter/mask/opacity) where
+Chromium's font substitution, hinting and subpixel AA genuinely differ
+from resvg/lean-svg's, not a handful of stray seam pixels — a blanket
+looser number would hide real bugs as often as it forgives AA noise. Kept
+the criterion unchanged; ambiguous chrome-reference files are exactly what
+the `human` bucket and `make_human_review.py` are for.
+
+First full numbers (width 200, tol 8, threshold 0.99): see
+`tasks/T100-criteria.md`'s `## Report`.
