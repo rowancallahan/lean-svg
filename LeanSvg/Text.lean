@@ -365,8 +365,49 @@ deriving Inhabited
 `budget` caps how many characters the whole document may lay out; the returned
 `Nat` is how many this element used, so the caller can keep the running total
 bounded (T36's 100 000 character cap).  Characters past the budget are dropped
-before any position or chunk is resolved, so the work really is bounded. -/
-def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed × Nat :=
+before any position or chunk is resolved, so the work really is bounded.
+
+`vertical` is the `<text>` element's resolved `writing-mode` (T56: `true` for
+`tb`/`tb-rl`/`vertical-rl`/`vertical-lr`, `false` otherwise — see
+`usvg::WritingMode`).  usvg lays a `TopToBottom` chunk out exactly like a
+horizontal one — same anchor, same per-character `dx`/`dy`/`rotate` model,
+same running pen — in a *local* frame where the pen still advances along
+`x`, then rotates the whole chunk 90° about the chunk's own anchor point
+(`crates/usvg/src/text/layout.rs`, `layout_text`'s `text_ts.pre_rotate_at
+(90.0, x, y)`).  We reproduce that net rotation directly at the point each
+glyph's final position and angle are computed, rather than building and then
+rotating an intermediate transform, since `glyphCmds` already takes a single
+rotation angle and a single pen position:
+
+* the incoming `dx`/`dy` swap axes (`y -= dx; x += dy`, usvg's
+  `resolve_clusters_positions_horizontal`), because usvg's local `x` is
+  always the advance axis and local `y` always the perpendicular one,
+  whichever screen axis they end up on;
+* a glyph's own outline additionally rotates 90° (`apply_writing_mode`'s
+  per-cluster rotation composes with the chunk's), which for us means adding
+  90° to the explicit `rotate` value fed to `glyphCmds`;
+* usvg also centers each glyph on the column by shifting it a
+  `(ascent + descent) / 2` along local `y` before the rotation
+  (`apply_writing_mode`'s "could not find a spec that explains this" shift,
+  applied to every "Rotated" — i.e. not `Vertical_Orientation=Upright` —
+  character); Noto Sans is Latin-only and every codepoint outside the ranges
+  `unicode-vo` lists as `Upright` defaults to `Rotated` (all of Basic Latin
+  is: the table's lowest entry is U+00A7), so every glyph this renderer can
+  ever place in vertical text takes this branch and the `Upright` branch
+  (which counter-rotates a CJK-style glyph back to standing upright) is not
+  implemented — it would be dead code with no character able to reach it;
+* the local-space point `(x, y)` a glyph would sit at in the horizontal
+  layout maps to final position `(chunkX - y, chunkY + x)`, i.e. `(x, y)`
+  rotated 90° about the origin (usvg: `rotate(90)` is `x' = -y, y' = x`)
+  then translated by the chunk's real anchor;
+* the running `(x, y)` that seeds the *next* chunk's default position when
+  it has no explicit `x`/`y` of its own carries over as `(y, x)` — swapped
+  but *not* rotated (usvg's `layout_text` does a plain
+  `std::mem::swap(&mut curr_pos.0, &mut curr_pos.1)` on the chunk's final pen
+  position, not the same 90° rotation every glyph gets — `tb-with-dx-on-
+  second-tspan.svg` exercises exactly this fallback). -/
+def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool) :
+    Array Placed × Nat :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
   let mut texts : Array (Array Nat) := #[]
@@ -547,12 +588,25 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
       -- while chunk starts and `x`/`y` use the position among *all*
       -- characters.  `rotate-and-display-none.svg` pins this down.
       let p := pos.getD (a + q) {}
-      x := x + p.dx * 256
-      y := y + p.dy * 256
+      if vertical then
+        y := y - p.dx * 256
+        x := x + p.dy * 256
+      else
+        x := x + p.dx * 256
+        y := y + p.dy * 256
       if !c.dropped then
         match faces.get c.props.face with
         | some f =>
-          let cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size p.rot (chunkX + x) (chunkY + y)
+          let (rot, ox, oy) :=
+            if vertical then
+              let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+              -- centers the (rotated-sideways) glyph on the column, usvg's
+              -- `apply_writing_mode` shift, before the 90° chunk rotation
+              let half : Int := Int.ediv ((f.ascender + f.descender) * (c.props.size * 256))
+                (2 * upem)
+              (p.rot + Fx.ofNat 90, chunkX - (y + half), chunkY + x)
+            else (p.rot, chunkX + x, chunkY + y)
+          let cmds := glyphCmds f (Font.glyphId f c.cp) c.props.size rot ox oy
           if cmds.size > 0 then
             if curStyle == some c.styleIdx then curCmds := curCmds ++ cmds
             else
@@ -563,8 +617,10 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) : Array Placed 
               curCmds := cmds
         | none => pure ()
       x := x + c.adv
-    lastX := chunkX + x
-    lastY := chunkY + y
+    -- usvg swaps (not rotates) the chunk's final pen position for the next
+    -- chunk's fallback anchor; see the `layout` docstring.
+    lastX := chunkX + (if vertical then y else x)
+    lastY := chunkY + (if vertical then x else y)
     a := b
   match curStyle with
   | some s => if curCmds.size > 0 then placed := placed.push ⟨s, curCmds⟩
