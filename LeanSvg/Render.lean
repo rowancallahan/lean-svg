@@ -108,15 +108,7 @@ def canvasSetup (root : RootInfo) (opts : Options) :
     | none => throw "cannot determine image size: need width and height, or a viewBox"
   if wFx ≤ 0 || hFx ≤ 0 then throw "image size must be positive"
   let vbMat : Mat := match root.viewBox with
-    | some (vx, vy, vw, vh) =>
-      if vw > 0 && vh > 0 then
-        let sx := Int.ediv (wFx * 65536) vw
-        let sy := Int.ediv (hFx * 65536) vh
-        let s := if sx ≤ sy then sx else sy
-        let tx := Int.ediv (wFx - Int.ediv (vw * s) 65536) 2 - Int.ediv (vx * s) 65536
-        let ty := Int.ediv (hFx - Int.ediv (vh * s) 65536) 2 - Int.ediv (vy * s) 65536
-        Mat.mk' s 0 0 s tx ty
-      else Mat.identity
+    | some vb => (Viewport.viewBoxTransform vb root.aspect wFx hFx).getD Mat.identity
     | none => Mat.identity
   let baseW := Nat.max 1 (Fx.round wFx).toNat
   let baseH := Nat.max 1 (Fx.round hFx).toNat

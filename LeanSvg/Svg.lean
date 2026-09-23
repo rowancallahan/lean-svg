@@ -3,6 +3,7 @@ import LeanSvg.Css
 import LeanSvg.Shader
 import LeanSvg.Canvas
 import LeanSvg.Text
+import LeanSvg.Viewport
 import Std.Data.HashMap
 
 /-!
@@ -88,14 +89,13 @@ structure Style where
   /-- Whether `pctRefW`/`pctRefH` have been established yet.  False only for
   the literal `default : Style` that `interpret` passes as the parent of the
   root `<svg>` element itself; every other `Style` inherits `true` and the
-  values below unchanged, since this renderer has no nested `<svg>`/`<symbol>`
-  to rescope them. -/
+  values below, which only a nested `<svg>` rescopes (T48). -/
   pctRefSet : Bool := false
   /-- The rect `transform-origin` percentages resolve against: usvg's
-  per-element `state.view_box`, which is the same constant rect (the root's
-  `viewBox`, or else its own resolved size) for every element in a document
-  with no nested `<svg>`. Set once in `applyEffective`, from the root's own
-  attrs. -/
+  per-element `state.view_box`: the root's `viewBox`, or else its own
+  resolved size, set in `applyEffective` from the root's own attrs; a nested
+  `<svg>` replaces it for its subtree (T48).  Shape percentages (`shapeCmds`)
+  resolve against it too. -/
   pctRefW : Fx := 0
   pctRefH : Fx := 0
   /-- `transform-origin`'s resolved offset, *not* inherited: every element
@@ -257,6 +257,8 @@ structure RootInfo where
   width : Option (Fx × Bool) := none
   height : Option (Fx × Bool) := none
   viewBox : Option (Fx × Fx × Fx × Fx) := none
+  /-- `preserveAspectRatio` (T48). -/
+  aspect : Viewport.AspectRatio := {}
 deriving Inhabited
 
 /-- What a container (or a lone shape) that becomes a compositing *layer*
@@ -1155,7 +1157,8 @@ def parseRoot (attrs : Array Xml.Attr) : RootInfo :=
     | none => none
   { width := (attr attrs "width").bind parseLengthOrPercent,
     height := (attr attrs "height").bind parseLengthOrPercent,
-    viewBox := vb }
+    viewBox := vb,
+    aspect := ((attr attrs "preserveAspectRatio").map Viewport.parseAspectRatio).getD {} }
 
 /-! ## `transform-origin` -/
 
@@ -1685,7 +1688,19 @@ def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
     | none => false
   a || s
 
-def shapeCmds (name : String) (attrs : Array Xml.Attr) : Option (Array PathCmd) :=
+def shapeCmds (name : String) (attrs : Array Xml.Attr) (refW refH : Fx := 0) : Option (Array PathCmd) :=
+  -- T48: percentages resolve against the current viewport (usvg's
+  -- `convert_user_length`): x-ish against its width, y-ish against its
+  -- height, `r` against `viewportDiag`.  `0` refs make every `%` zero.
+  let lengthAttr := fun (attrs : Array Xml.Attr) (n : String) (dflt : Fx) =>
+    let ref := if n == "r" then viewportDiag refW refH
+      else if n == "y" || n == "cy" || n == "height" || n == "ry" || n == "y1" || n == "y2" then refH
+      else refW
+    match (attr attrs n).bind parseLengthOrPercent with
+    | some l => resolvePct l ref
+    | none => dflt
+  let parseLenOpt := fun (n : String) => ((attr attrs n).bind parseLengthOrPercent).map fun l =>
+    resolvePct l (if n == "ry" then refH else refW)
   match name with
   | "path" => (attr attrs "d").map parsePathData
   | "rect" =>
@@ -1693,8 +1708,8 @@ def shapeCmds (name : String) (attrs : Array Xml.Attr) : Option (Array PathCmd) 
     let h := lengthAttr attrs "height" 0
     if w ≤ 0 || h ≤ 0 then none
     else
-      let rxo := attr attrs "rx" |>.bind parseLengthAll
-      let ryo := attr attrs "ry" |>.bind parseLengthAll
+      let rxo := parseLenOpt "rx"
+      let ryo := parseLenOpt "ry"
       let (rx, ry) := match rxo, ryo with
         | some rx, some ry => (rx, ry)
         | some rx, none => (rx, rx)
@@ -2226,12 +2241,10 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
   let scan := defsScan events
   let gradTable := Grad.Defs.build scan.grads scan.pctRef
   let applyEffective := fun (parent : Style) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo) =>
-    -- `transform-origin` percentages resolve against the same rect for every
-    -- element (this renderer has no nested `<svg>`/`<symbol>` to rescope it,
-    -- so usvg's per-element `state.view_box` is one constant for the whole
-    -- document): the root's `viewBox` if it has one, else the root's own
-    -- resolved size (`resolveRootSize`).  Established once, from the root
-    -- `<svg>`'s own attrs, and inherited unchanged from then on.
+    -- `transform-origin` percentages resolve against usvg's per-element
+    -- `state.view_box`: the root's `viewBox` if it has one, else the root's
+    -- own resolved size (`resolveRootSize`).  Established here from the root
+    -- `<svg>`'s own attrs and inherited; only a nested `<svg>` rescopes it.
     -- `parent.pctRefSet` is false only for the literal `default : Style`
     -- passed as the parent of the root element itself -- the one call where
     -- `attrs` *are* the root's own `width`/`height`/`viewBox`.
@@ -2386,6 +2399,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
         let mut frame : Frame := {}
         let mut renders : Bool := false
         let mut container : Bool := false
+        -- T48: a nested `<svg>`'s viewport clip use, which rides the layer
+        -- beside (outside) the element's own `clip-path`.
+        let mut viewportClip : Option Nat := none
         match root with
         | none =>
           if name != "svg" then throw s!"root element must be <svg>, found <{name}>"
@@ -2496,6 +2512,60 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
               renders := pf.mode.isRender
               container := true
+          else if name == "svg" then
+            -- T48: a nested viewport, as usvg's `use_node::convert_svg`: the
+            -- element's own `transform`, then (unless `overflow` is
+            -- visible/auto, or `width`/`height` is missing) a clip to
+            -- `x y width height`, then `translate(x, y)` and the `viewBox`
+            -- map.  Percentages resolve against the parent viewport, and
+            -- the children's against the new one.
+            if isDisplayNone attrs || !passesConditions attrs then skip := 1
+            else
+              let st0 := applyEffective parent attrs chain
+              let len := fun (n : String) (ref dflt : Fx) =>
+                match (attr attrs n).bind parseLengthOrPercent with
+                | some l => resolvePct l ref
+                | none => dflt
+              let pw := parent.pctRefW
+              let ph := parent.pctRefH
+              let x := len "x" pw 0
+              let y := len "y" ph 0
+              let w := len "width" pw pw
+              let h := len "height" ph ph
+              let r := parseRoot attrs
+              let vbT := r.viewBox.bind fun vb => Viewport.viewBoxTransform vb r.aspect w h
+              let newTs := match vbT with
+                | some m => (Mat.translate x y).mul m
+                | none => Mat.translate x y
+              let (refW, refH) := match r.viewBox with
+                | some (_, _, vw, vh) => if vw > 0 && vh > 0 then (vw, vh) else (pw, ph)
+                | none => if w > 0 && h > 0 then (w, h) else (pw, ph)
+              let visibleOverflow := match attrOrStyle attrs "overflow" with
+                | some v => eqAscii (trim v) "visible" || eqAscii (trim v) "auto"
+                | none => false
+              let clipped := pf.mode.isRender && !visibleOverflow
+                && (attr attrs "width").isSome && (attr attrs "height").isSome && w > 0 && h > 0
+              -- The viewport clip is a synthetic one-rect `clipPath` in the
+              -- space after the element's own `transform` (usvg's
+              -- `clip_element`); its use is appended to the chain exactly
+              -- like a `clip-path` one, and the bottom hands it to the layer.
+              let mut st0 := st0
+              if clipped then
+                let child : ClipChild := ⟨rectPath x y w h 0 0, false, Mat.identity, true, #[], false⟩
+                clipTable := clipTable.push
+                  { id := "", transform := Mat.identity, transformValid := true, objectBBox := false,
+                    selfClipId := none, selfClip := none, children := #[child] }
+                uses := uses.push ⟨"", some (clipTable.size - 1), st0.ctm, none⟩
+                st0 := { st0 with clips := st0.clips.push (uses.size - 1) }
+                viewportClip := some (uses.size - 1)
+              let st1 := { st0 with ctm := st0.ctm.mul newTs, ownMat := st0.ownMat.mul newTs,
+                                    pctRefW := refW, pctRefH := refH }
+              let (st, uses', slot) := addClipUse st1 uses
+              uses := uses'
+              enter := some st
+              frame := { mode := pf.mode.inner, useSlot := slot, want := slot.isSome || pf.want }
+              renders := pf.mode.isRender
+              container := true
           else if name == "text" then
             -- T36: one branch.  `textShapes` walks the whole subtree itself
             -- (layout is not per-element) and the main loop skips it, so this
@@ -2560,7 +2630,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
-              let cmds := shapeCmds name attrs
+              let cmds := shapeCmds name attrs st.pctRefW st.pctRefH
               match pf.mode with
               | .render =>
                 match cmds with
@@ -2608,7 +2678,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           -- shape has nothing to overlap with, so its own `clip-path` keeps
           -- T20's cheaper per-coverage multiply unless the element is getting
           -- a layer anyway, in which case the clip rides it.
-          let clipLayer := container && st.clipRef.isSome
+          let clipLayer := container && (st.clipRef.isSome || viewportClip.isSome)
           let needs := renders &&
             (st.ownOpacity != opacityOne || st.blend != .normal || st.isolate || clipLayer)
           -- Past `maxLayerDepth` the layer is dropped: the opacity is folded
@@ -2624,6 +2694,12 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
           let layerClips : Array Nat :=
             if layered then (match frame.useSlot with | some k => #[k] | none => #[]) else #[]
           let st := if layered && frame.useSlot.isSome then { st with clips := st.clips.pop } else st
+          -- T48: the viewport clip sits under the own use on the chain, and is
+          -- the outer of the two (applied last, like usvg's outer group).
+          let layerClips := match viewportClip with
+            | some k => if layered then #[k] ++ layerClips else layerClips
+            | none => layerClips
+          let st := if layered && viewportClip.isSome then { st with clips := st.clips.pop } else st
           if layered then
             nodes := nodes.push (.groupBegin ⟨st.ownOpacity, st.blend, st.isolate, layerClips⟩)
             layerDepth := layerDepth + 1
@@ -2645,7 +2721,9 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
       if e.filled then m := m.insert e.id i
     return m
   let clipsResolved := clipTable.map fun e => { e with selfClip := e.selfClipId.bind idMap.get? }
-  let usesResolved := uses.map fun u => { u with entry := idMap.get? u.id }
+  -- A use that already has its entry (T48's viewport clips) keeps it.
+  let usesResolved := uses.map fun u =>
+    { u with entry := match u.entry with | some k => some k | none => idMap.get? u.id }
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved⟩

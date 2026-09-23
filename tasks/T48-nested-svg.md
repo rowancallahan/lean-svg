@@ -74,3 +74,61 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+- **`LeanSvg/Viewport.lean`** (new, standalone, for T47 to share):
+  `parseAspectRatio` (svgtypes grammar `[defer] <align> [meet|slice]`,
+  anything else → `xMidYMid meet`) and `viewBoxTransform vb ar w h : Option Mat`
+  (usvg `ViewBox::to_transform`; `none` on a non-positive side). For
+  `xMidYMid meet` it is operation-for-operation the old root formula, so
+  existing output is byte-identical.
+- **Root**: `RootInfo.aspect`; `Render.canvasSetup` uses `viewBoxTransform`, so
+  every `preserveAspectRatio` on the root works.
+- **Nested `<svg>`** (`Svg.interpret`, new branch), as usvg `convert_svg`:
+  own `transform` → optional viewport clip → `translate(x, y)` → viewBox map.
+  `x`/`width` resolve percentages against the parent viewport's width,
+  `y`/`height` against its height; `width`/`height` default to 100%. The
+  children's percentage reference becomes the `viewBox` (or `x y w h` when
+  there is none). The clip is emitted unless `overflow` (attribute or
+  `style=""`) is `visible`/`auto`, or `width`/`height` is missing, or either
+  is ≤ 0 (`get_clip_rect`). It is a synthetic one-rect `ClipEntry` + `ClipUse`
+  (pre-resolved `entry`, id `""`, never in the id map) that rides the element's
+  layer beside its own `clip-path`; opacity/blend/`clip-path` on the nested svg
+  apply in the inner space as in usvg. Past `maxLayerDepth` the clip degrades
+  to per-shape clipping, like any other clip. No new depth caps needed.
+- **Shape percentages** (fell out; needed by the nested-percent tests):
+  `shapeCmds` takes the current viewport refs; `x cx width rx x1 x2` →
+  width, `y cy height ry y1 y2` → height, `r` → `viewportDiag`.
+
+## Skipped
+
+- `painting/overflow/*` (5): all are `overflow` on `<marker>` → T52.
+- `structure/svg`: ENTITY files (DTD rejected by design), `invalid-id-*` (`use`,
+  T47), `xmlns-validation`/`mixed-namespaces` (namespaces), `no-size`
+  (bbox refit), 3 files where resvg itself fails.
+- `overflow` from a `<style>` sheet (only attribute and `style=""` are read).
+- `<use>` → `<svg>` sizing (`state.use_size`) — T47's side.
+
+## Report
+
+`run_corpora.py --fast --corpus resvg --route direct` (width 100):
+
+| dir | before | after |
+|---|---|---|
+| structure/svg | 9/42 | 30/42 |
+| painting/overflow | 1/5 | 1/5 |
+| structure/style | 16/16 | 16/16 |
+| structure/transform-origin | 17/23 | 17/23 |
+| shapes/rect | 31/38 | 33/38 |
+| shapes/ellipse | 6/12 | 7/12 |
+| shapes/line | 9/10 | 10/10 |
+| **whole suite** | **835/1679** | **860/1679** |
+
+25 newly passing, 0 newly failing, no file's within-8 score dropped
+(`structure/use/xlink-to-svg-element-with-x-y-on-use` also 73.8 → 86.9%).
+`run_tests.py`: no score changes on 01–27; new `28_nested_svg` 99.90% PASS.
+`run_adversarial.py` 62/62 clean; `run_tiles.py` 28/28 byte-identical;
+`check-theorems.sh` ok; `lake build` no warnings.
