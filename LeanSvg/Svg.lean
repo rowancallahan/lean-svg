@@ -1688,15 +1688,23 @@ def applyFontUnit (rest : ByteArray) (n ref : Fx) : Option Fx :=
   else if eqAscii rest "in" then some (n * 96)
   else none
 
+/-- T92: the units `applyFontUnit` lacks (`rem` and `Units.parseAt`'s), for a
+whole value `n` + `t[j:]`; font units measure against `ref`. -/
+def applyNewUnit (t : ByteArray) (j : Nat) (n ref : Fx) (ctx : Units.RootLen) : Option Fx :=
+  if eqAscii (t.extract j t.size) "rem" then some (Fx.mul n ctx.size)
+  else match Units.parseAt t j n ref ctx with
+    | some (v, k) => if k == t.size then some v else none
+    | none => none
+
 /-- `font-size`: a length relative to the inherited size, or a keyword. -/
-def parseFontSize (parent : Fx) (bs : ByteArray) : Fx :=
+def parseFontSize (parent : Fx) (bs : ByteArray) (ctx : Units.RootLen) : Fx :=
   let t := trim bs
   match parseNumber t 0 with
   | none => namedFontSize t parent
   | some (n, j) =>
     match applyFontUnit (t.extract j t.size) n parent with
     | some v => v
-    | none => namedFontSize t parent
+    | none => (applyNewUnit t j n parent ctx).getD (namedFontSize t parent)
 
 /-- The length a percentage resolves against on an attribute that names
 neither axis (`letter-spacing`, `word-spacing`): usvg's
@@ -1706,7 +1714,7 @@ def viewportDiag (w h : Fx) : Fx := Fx.scale16 (Fx.hypot w h) 46341
 
 /-- `letter-spacing` / `word-spacing`.  `normal` is zero; a percentage
 resolves against `viewportDiag`, as `convert_length`'s catch-all arm does. -/
-def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) (ctx : Units.RootLen) : Option Fx :=
   let t := trim bs
   if eqAscii t "normal" then some 0
   else match parseNumber t 0 with
@@ -1714,7 +1722,9 @@ def parseSpacing (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
     | some (n, j) =>
       let rest := t.extract j t.size
       if eqAscii rest "%" then some (Int.ediv (Fx.mul n refLen) 100)
-      else applyFontUnit rest n fontSize
+      else match applyFontUnit rest n fontSize with
+        | some v => some v
+        | none => applyNewUnit t j n fontSize ctx
 
 /-- `font-weight`, as usvg resolves it: the keywords map to numbers, and
 `bolder`/`lighter` step from the inherited value by 300/200 at 400 and by 100
@@ -2130,7 +2140,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     else st
   -- T36: text properties.  Inherited like every other property here; only
   -- `Svg.textShapes` ever reads them.
-  | "font-size" => { st with fontSize := parseFontSize st.fontSize v }
+  | "font-size" => { st with fontSize := parseFontSize st.fontSize v st.rootFontSize }
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
   | "font-family" => { st with fontAvailable := resolveFontFamily v }
   -- `find_decoration`: space-separated tokens of this element's own raw
@@ -2148,10 +2158,10 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     if eqAscii t "italic" || eqAscii t "oblique" then { st with fontItalic := true }
     else if eqAscii t "normal" then { st with fontItalic := false } else st
   | "letter-spacing" =>
-    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v st.rootFontSize with
     | some s => { st with letterSpacing := s } | none => st
   | "word-spacing" =>
-    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    match parseSpacing st.fontSize (viewportDiag st.pctRefW st.pctRefH) v st.rootFontSize with
     | some s => { st with wordSpacing := s } | none => st
   | "font-kerning" =>
     let t := trim v
