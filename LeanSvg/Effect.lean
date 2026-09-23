@@ -215,7 +215,9 @@ def execIO (inp out : System.FilePath) : Prog α → IO α
     let e ← out.pathExists
     execIO inp out (k e)
   | .step (.writeOutput b) k => do
-    IO.FS.writeBinFile out b
+    -- `writeNew` creates exclusively (O_EXCL): a file that appeared after the
+    -- `outputExists` check makes this fail rather than be overwritten.
+    IO.FS.withFile out .writeNew (·.write b)
     execIO inp out (k ())
 
 end Prog
