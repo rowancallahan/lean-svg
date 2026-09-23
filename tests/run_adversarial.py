@@ -329,6 +329,44 @@ def generate_cases():
         '<text x="%s" y="50" font-size="12">hi</text>\n</svg>\n' % x_list,
     )
 
+    # ---- T52: marker instancing -------------------------------------------
+
+    # A path with half a million vertices, each with `marker-start`/`-mid`/
+    # `-end` pointing at a marker with several children: naively
+    # 500_000 x 3 x 10 = 15,000,000 `Node`s, the "10^6 vertices with a heavy
+    # marker" case `Marker.maxMarkerNodes` exists to cap.
+    marker_zigzag = "".join(
+        " L %d %d" % (i % 200, 10 if i % 2 else 190) for i in range(500_000)
+    )
+    marker_children = "".join(
+        '<rect x="0" y="0" width="2" height="2" fill="#%02x%02x%02x"/>'
+        % (i * 7 % 256, i * 13 % 256, i * 19 % 256)
+        for i in range(10)
+    )
+    write_text(
+        "marker_huge_path.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n'
+        '<marker id="m" markerWidth="4" markerHeight="4" refX="2" refY="2">'
+        + marker_children + "</marker>\n"
+        '<path d="M 0 0%s" fill="none" stroke="#000" '
+        'marker-start="url(#m)" marker-mid="url(#m)" marker-end="url(#m)"/>\n</svg>\n'
+        % marker_zigzag,
+    )
+
+    # Two markers whose content each reference the other (never a shape
+    # referencing itself directly, so this is only caught by tracking every
+    # marker currently being expanded, not just the innermost one).
+    write_text(
+        "marker_mutual_cycle.svg",
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n'
+        '<marker id="ma" markerWidth="10" markerHeight="10" refX="5" refY="5">'
+        '<path d="M 0 0 L 10 10" marker-start="url(#mb)" marker-end="url(#mb)"/></marker>\n'
+        '<marker id="mb" markerWidth="10" markerHeight="10" refX="5" refY="5">'
+        '<path d="M 0 0 L 10 10" marker-start="url(#ma)" marker-end="url(#ma)"/></marker>\n'
+        '<path d="M 10 10 L 190 190" fill="none" stroke="#000" '
+        'marker-start="url(#ma)" marker-mid="url(#ma)" marker-end="url(#ma)"/>\n</svg>\n',
+    )
+
     return sorted(GEN_DIR.iterdir())
 
 
