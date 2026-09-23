@@ -36,23 +36,24 @@ namespace LeanSvg
 namespace FontSet
 
 /-- One embedded font: the `font-family` name that selects it (the three Noto
-Sans faces share one), its bytes, and its packed cmap coverage. -/
+Sans faces share one), the font (`Font.parseEmbedded`: parsed on first use,
+glyphs decoded as they are drawn, T94), and its packed cmap coverage. -/
 structure Entry where
   family : String
-  bytes : Unit → ByteArray
+  font : Unit → Option Font
   coverage : String
 
 def entries : Array Entry := #[
-  ⟨"Noto Sans", Fonts.NotoSans.bytes, Fonts.NotoSans.coverage⟩,
-  ⟨"Noto Sans", Fonts.NotoSansBold.bytes, Fonts.NotoSansBold.coverage⟩,
-  ⟨"Noto Sans", Fonts.NotoSansItalic.bytes, Fonts.NotoSansItalic.coverage⟩,
-  ⟨"Mplus 1p", Fonts.Mplus1p.bytes, Fonts.Mplus1p.coverage⟩,
-  ⟨"Noto Sans SC", Fonts.NotoSansSC.bytes, Fonts.NotoSansSC.coverage⟩,
-  ⟨"Noto Sans KR", Fonts.NotoSansKR.bytes, Fonts.NotoSansKR.coverage⟩,
-  ⟨"Noto Sans Thai", Fonts.NotoSansThai.bytes, Fonts.NotoSansThai.coverage⟩,
-  ⟨"Noto Sans Armenian", Fonts.NotoSansArmenian.bytes, Fonts.NotoSansArmenian.coverage⟩,
-  ⟨"Noto Sans Georgian", Fonts.NotoSansGeorgian.bytes, Fonts.NotoSansGeorgian.coverage⟩,
-  ⟨"Noto Sans Ethiopic", Fonts.NotoSansEthiopic.bytes, Fonts.NotoSansEthiopic.coverage⟩
+  ⟨"Noto Sans", Fonts.NotoSans.font, Fonts.NotoSans.coverage⟩,
+  ⟨"Noto Sans", Fonts.NotoSansBold.font, Fonts.NotoSansBold.coverage⟩,
+  ⟨"Noto Sans", Fonts.NotoSansItalic.font, Fonts.NotoSansItalic.coverage⟩,
+  ⟨"Mplus 1p", Fonts.Mplus1p.font, Fonts.Mplus1p.coverage⟩,
+  ⟨"Noto Sans SC", Fonts.NotoSansSC.font, Fonts.NotoSansSC.coverage⟩,
+  ⟨"Noto Sans KR", Fonts.NotoSansKR.font, Fonts.NotoSansKR.coverage⟩,
+  ⟨"Noto Sans Thai", Fonts.NotoSansThai.font, Fonts.NotoSansThai.coverage⟩,
+  ⟨"Noto Sans Armenian", Fonts.NotoSansArmenian.font, Fonts.NotoSansArmenian.coverage⟩,
+  ⟨"Noto Sans Georgian", Fonts.NotoSansGeorgian.font, Fonts.NotoSansGeorgian.coverage⟩,
+  ⟨"Noto Sans Ethiopic", Fonts.NotoSansEthiopic.font, Fonts.NotoSansEthiopic.coverage⟩
 ]
 
 /-- The number of embedded fonts. -/
@@ -67,13 +68,13 @@ def familyIndex (name : ByteArray) : Option Nat := Id.run do
     | none => pure ()
   return none
 
-/-- The embedded font whose `LeanSvg.Fonts` module name is `name` (for `fontdump
---embedded`). -/
-def byModule (name : String) : Option ByteArray :=
+/-- The embedded font whose `LeanSvg.Fonts` module name is `name`, exactly as
+the renderer loads it (for `fontdump --embedded`). -/
+def byModule (name : String) : Option Font :=
   let names := #["NotoSans", "NotoSansBold", "NotoSansItalic", "Mplus1p", "NotoSansSC",
     "NotoSansKR", "NotoSansThai", "NotoSansArmenian", "NotoSansGeorgian", "NotoSansEthiopic"]
   match names.findIdx? (· == name) with
-  | some i => (entries[i]?).map (fun e => e.bytes ())
+  | some i => (entries[i]?).bind (fun e => e.font ())
   | none => none
 
 end FontSet

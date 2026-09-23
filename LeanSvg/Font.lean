@@ -98,6 +98,12 @@ structure Font where
   exercised by the three embedded faces (all three carry a real `OS/2`). -/
   strikeoutPosition : Int
   data : ByteArray
+  /-- T94: an embedded font's `glyf` table as base64 chunks of
+  `glyfChunkBytes` bytes each, decoded one glyph record at a time
+  (`parseEmbedded`); then `data` stops where `glyf` starts. `#[]` for a font
+  parsed from a whole file, whose `glyf` is in `data`. -/
+  glyfChunks : Array String := #[]
+  glyfChunkBytes : Nat := 0
 
 namespace Font
 
@@ -482,14 +488,57 @@ def advance (f : Font) (gid : Nat) : Nat :=
   else if gid < f.numberOfHMetrics then u16 f.data (f.hmtxOff + 4 * gid)
   else u16 f.data (f.hmtxOff + 4 * (f.numberOfHMetrics - 1))
 
+/-! ## Base64 (T91/T94): the embedded fonts' encoding -/
+
+/-- Value of a base64 digit (RFC 4648 standard alphabet), or 64 for any
+other byte.  A plain `UInt32` rather than an `Option`: this runs once per
+character of ~25 MB of embedded fonts, and an `Option` allocates. -/
+@[inline] def b64Digit (c : UInt8) : UInt32 :=
+  if 65 ≤ c && c ≤ 90 then c.toUInt32 - 65
+  else if 97 ≤ c && c ≤ 122 then c.toUInt32 - 71
+  else if 48 ≤ c && c ≤ 57 then c.toUInt32 + 4
+  else if c == 43 then 62
+  else if c == 47 then 63
+  else 64
+
+/-- The value of the base64 digit at byte `i` of `s`, or 64 past its end. -/
+@[inline] def b64At (s : String) (i : Nat) : UInt32 :=
+  if h : (⟨i⟩ : String.Pos.Raw) < s.rawEndPos then b64Digit (s.getUTF8Byte ⟨i⟩ h) else 64
+
+/-- Bytes `[start, start + len)` of the data that base64 `chunks` encode, each
+chunk encoding `per` bytes (a multiple of 3, so every chunk starts on a quad):
+byte `n` is in chunk `n / per`, in the quad at character `4 * (n % per / 3)`.
+Reads the chunk strings in place, so a glyph costs its own bytes, not its
+chunk's (T94).  Past the end of the data the bytes are garbage (`=` padding)
+or zero; callers stay within the length they were generated with. -/
+def base64Range (chunks : Array String) (per start len : Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity len
+  for k in [0:len] do
+    let n := start + k
+    let s := chunks.getD (n / per) ""
+    let j := n % per
+    let i := 4 * (j / 3)
+    let r := j % 3
+    let v : UInt32 :=
+      if r == 0 then b64At s i <<< 2 ||| b64At s (i + 1) >>> 4
+      else if r == 1 then (b64At s (i + 1) &&& 15) <<< 4 ||| b64At s (i + 2) >>> 2
+      else (b64At s (i + 2) &&& 3) <<< 6 ||| b64At s (i + 3)
+    out := out.push v.toUInt8
+  return out
+
 /-! ## `loca` / `glyf`: locating a glyph's own bytes -/
+
+/-- The font's size in bytes: `data`, plus the `glyf` table when that is kept
+apart as base64 chunks (T94). -/
+def extent (f : Font) : Nat :=
+  if f.glyfChunks.isEmpty then f.data.size else f.data.size + f.glyfLen
 
 def locaOffset (f : Font) (i : Nat) : Nat :=
   if f.indexToLocFormat == 1 then u32 f.data (f.locaOff + 4 * i)
   else 2 * u16 f.data (f.locaOff + 2 * i)
 
 /-- The `(absoluteOffset, length)` of glyph `gid`'s own record in `glyf`,
-clamped to the table's own extent and to `f.data.size`. `none` for an
+clamped to the table's own extent and to `f.extent`. `none` for an
 out-of-range glyph id or non-monotonic `loca` entries (corrupt font); `some
 (_, 0)` for a glyph with an empty outline (e.g. space), which is a normal,
 valid case. -/
@@ -501,9 +550,9 @@ def glyphSpan (f : Font) (gid : Nat) : Option (Nat × Nat) :=
     if o1 < o0 then none
     else
       let off := f.glyfOff + o0
-      if off > f.data.size then none
+      if off > f.extent then none
       else
-        let tableEnd := Nat.min f.data.size (f.glyfOff + f.glyfLen)
+        let tableEnd := Nat.min f.extent (f.glyfOff + f.glyfLen)
         let len := if off > tableEnd then 0 else Nat.min (o1 - o0) (tableEnd - off)
         some (off, len)
 
@@ -604,6 +653,16 @@ def compositeBudget : Nat := 256
 (T91): 4× the per-simple-glyph cap. -/
 def compositePointCap : Nat := 40000
 
+/-- The bytes holding the glyph record at `(off, len)` (from `glyphSpan`) and
+the record's offset within them: `data` itself for a font parsed from a whole
+file, or, for an embedded font (T94), just those `len` bytes decoded from
+`glyfChunks`.  A corrupt record that claims more bytes than `len` would read
+the following glyph's bytes in the first case and zeros in the second; every
+embedded glyph is well-formed (`tests/check_font.py --all --via-embedded`). -/
+def glyphRecord (f : Font) (off len : Nat) : ByteArray × Nat :=
+  if f.glyfChunks.isEmpty then (f.data, off)
+  else (base64Range f.glyfChunks f.glyfChunkBytes (off - f.glyfOff) len, 0)
+
 /-- Resolve glyph `gid`'s contours to `(x, y, onCurve)` points in font units,
 following composite references with `fuel` levels of recursion left (each
 component uses one). `fuel = 0` stops and yields `#[]` for whatever
@@ -625,12 +684,13 @@ def resolvedContours (f : Font) (gid : Nat) :
   | fuel + 1, budget =>
     match glyphSpan f gid with
     | none => (#[], budget)
-    | some (off, len) =>
+    | some (off0, len) =>
       if len < 10 then (#[], budget)
       else
-        let numberOfContours := i16 f.data off
+        let (bs, off) := glyphRecord f off0 len
+        let numberOfContours := i16 bs off
         if numberOfContours ≥ 0 then
-          (parseSimpleGlyph f.data off len numberOfContours.toNat f.maxPointsCap, budget)
+          (parseSimpleGlyph bs off len numberOfContours.toNat f.maxPointsCap, budget)
         else Id.run do
           -- composite: a sequence of component records, capped at 64 components.
           let mut out : Array (Array (Int × Int × Bool)) := #[]
@@ -642,8 +702,8 @@ def resolvedContours (f : Font) (gid : Nat) :
             if budget == 0 || points > compositePointCap then break
             budget := budget - 1
             if p + 4 ≤ endOff then
-              let flags := u16 f.data p
-              let glyphIndex := u16 f.data (p + 2)
+              let flags := u16 bs p
+              let glyphIndex := u16 bs (p + 2)
               let wordArgs := flags &&& 0x0001 != 0
               let xyValues := flags &&& 0x0002 != 0
               let mut q := p + 4
@@ -651,11 +711,11 @@ def resolvedContours (f : Font) (gid : Nat) :
               let mut dy : Int := 0
               if xyValues then
                 if wordArgs then
-                  dx := i16 f.data q
-                  dy := i16 f.data (q + 2)
+                  dx := i16 bs q
+                  dy := i16 bs (q + 2)
                 else
-                  dx := i8 f.data q
-                  dy := i8 f.data (q + 1)
+                  dx := i8 bs q
+                  dy := i8 bs (q + 1)
               -- else: point-matching args (ARGS_ARE_XY_VALUES clear); treated as
               -- offset (0, 0), noted as a limitation in the task's Report.
               q := q + (if wordArgs then 4 else 2)
@@ -664,18 +724,18 @@ def resolvedContours (f : Font) (gid : Nat) :
               let mut c : Int := 0
               let mut d : Int := 16384
               if flags &&& 0x0008 != 0 then           -- WE_HAVE_A_SCALE
-                a := i16 f.data q
+                a := i16 bs q
                 d := a
                 q := q + 2
               else if flags &&& 0x0040 != 0 then       -- WE_HAVE_AN_X_AND_Y_SCALE
-                a := i16 f.data q
-                d := i16 f.data (q + 2)
+                a := i16 bs q
+                d := i16 bs (q + 2)
                 q := q + 4
               else if flags &&& 0x0080 != 0 then       -- WE_HAVE_A_TWO_BY_TWO
-                a := i16 f.data q
-                b := i16 f.data (q + 2)
-                c := i16 f.data (q + 4)
-                d := i16 f.data (q + 6)
+                a := i16 bs q
+                b := i16 bs (q + 2)
+                c := i16 bs (q + 4)
+                d := i16 bs (q + 6)
                 q := q + 8
               let (sub, rest) := resolvedContours f glyphIndex fuel budget
               budget := rest
@@ -945,17 +1005,6 @@ def hexDecodeChunks (chunks : Array String) : ByteArray := Id.run do
     out := out.append (hexDecode c)
   return out
 
-/-- Value of a base64 digit (RFC 4648 standard alphabet), or 64 for any
-other byte.  A plain `UInt32` rather than an `Option`: this runs once per
-character of ~25 MB of embedded fonts, and an `Option` allocates. -/
-@[inline] def b64Digit (c : UInt8) : UInt32 :=
-  if 65 ≤ c && c ≤ 90 then c.toUInt32 - 65
-  else if 97 ≤ c && c ≤ 122 then c.toUInt32 - 71
-  else if 48 ≤ c && c ≤ 57 then c.toUInt32 + 4
-  else if c == 43 then 62
-  else if c == 47 then 63
-  else 64
-
 /-- Decode padded base64 into bytes, four characters (three bytes) at a time.
 Total: a quad with an invalid character stops decoding, and `=` padding in the
 third/fourth place emits only the bytes that precede it (T91: the embedded
@@ -983,6 +1032,22 @@ def base64DecodeChunks (chunks : Array String) : ByteArray := Id.run do
   for c in chunks do
     out := out.append (base64Decode c)
   return out
+
+/-- An embedded font (T94): `front` is base64 of every byte before its `glyf`
+table, which the generator places last, and `glyf` is that table as base64
+chunks of `per` bytes, `glyfLen` bytes in all.  Only `front` is decoded here;
+glyph records are decoded from `glyf` as `outline`/`rawContours` ask for them.
+`none`, like `parse`, for anything inconsistent: `front` does not parse, its
+`glyf` does not start exactly where `front` ends, or `glyfLen` does not fit
+the chunk count. -/
+def parseEmbedded (front glyf : Array String) (per glyfLen : Nat) : Option Font :=
+  let bs := base64DecodeChunks front
+  match parse bs with
+  | none => none
+  | some f =>
+    if f.glyfOff != bs.size || f.glyfLen != 0 || per == 0 || per % 3 != 0 ||
+        glyfLen > glyf.size * per || glyfLen + per ≤ glyf.size * per then none
+    else some { f with glyfLen := glyfLen, glyfChunks := glyf, glyfChunkBytes := per }
 
 /-- A font's codepoint coverage as sorted, disjoint, inclusive ranges, decoded
 from the generator's packed form: 6 bytes per range (24-bit big-endian first,

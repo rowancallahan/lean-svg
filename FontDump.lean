@@ -33,7 +33,9 @@ def usage : String :=
   "       fontdump --metrics <font.ttf>\n" ++
   "       fontdump --metrics --embedded <module in LeanSvg/Fonts>\n"
 
-def embeddedBytes (name : String) : Option ByteArray := LeanSvg.FontSet.byModule name
+/-- The embedded font as the renderer loads it (`Font.parseEmbedded`, T94), so
+`tests/check_font.py --via-embedded` checks that path. -/
+def embeddedFont (name : String) : Option Font := LeanSvg.FontSet.byModule name
 
 /-! ## Minimal JSON writer (no library dependency) -/
 
@@ -101,8 +103,8 @@ def dumpChars (f : Font) (text : String) : String := Id.run do
     parts := parts.push (charObj f c next?)
   return "[" ++ String.intercalate "," parts.toList ++ "]"
 
-def runOn (bytes : ByteArray) (text : String) : IO UInt32 := do
-  match LeanSvg.Font.parse bytes with
+def runOn (font : Option Font) (text : String) : IO UInt32 := do
+  match font with
   | some f =>
     IO.println (dumpChars f text)
     return 0
@@ -123,8 +125,8 @@ def metricsObj (f : Font) : String :=
     "\"superscriptOffset\":" ++ toString f.superscriptOffset ++
   "}"
 
-def runMetricsOn (bytes : ByteArray) : IO UInt32 := do
-  match LeanSvg.Font.parse bytes with
+def runMetricsOn (font : Option Font) : IO UInt32 := do
+  match font with
   | some f =>
     IO.println (metricsObj f)
     return 0
@@ -135,23 +137,23 @@ def runMetricsOn (bytes : ByteArray) : IO UInt32 := do
 def main (args : List String) : IO UInt32 := do
   match args with
   | ["--metrics", "--embedded", name] =>
-    match embeddedBytes name with
-    | some bytes => runMetricsOn bytes
+    match embeddedFont name with
+    | some f => runMetricsOn (some f)
     | none =>
-      IO.eprintln s!"fontdump: unknown embedded font {name}"
+      IO.eprintln s!"fontdump: unknown or unparsable embedded font {name}"
       return 2
   | ["--metrics", path] =>
     let bytes ← IO.FS.readBinFile path
-    runMetricsOn bytes
+    runMetricsOn (LeanSvg.Font.parse bytes)
   | ["--embedded", name, text] =>
-    match embeddedBytes name with
-    | some bytes => runOn bytes text
+    match embeddedFont name with
+    | some f => runOn (some f) text
     | none =>
-      IO.eprintln s!"fontdump: unknown embedded font {name}"
+      IO.eprintln s!"fontdump: unknown or unparsable embedded font {name}"
       return 2
   | [path, text] =>
     let bytes ← IO.FS.readBinFile path
-    runOn bytes text
+    runOn (LeanSvg.Font.parse bytes) text
   | _ =>
     IO.eprintln usage
     return 2

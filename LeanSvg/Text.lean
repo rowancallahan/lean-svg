@@ -784,7 +784,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     let fis : Array Nat := (List.range (b - a)).toArray.map (fun q => (asgOf q).getD q (bases.getD q 0))
     for k in fis ++ bases do
       if !loaded.getD k true then
-        fonts := fonts.setIfInBounds k ((FontSet.entries[k]?).bind (fun e => Font.parse (e.bytes ())))
+        fonts := fonts.setIfInBounds k ((FontSet.entries[k]?).bind (fun e => e.font ()))
         loaded := loaded.setIfInBounds k true
     -- advances, with kerning: the pair is the next character as this
     -- character's own base font's shaping pass saw it, kerned only when that
