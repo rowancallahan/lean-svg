@@ -164,3 +164,139 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## Report
+
+Branch `claude/feat-classb`, five commits (one per root cause, the last
+bundles four small ones).
+
+### What changed
+
+1. **Filter regions under rotation/skew** — new `LeanSvg/FilterFrame.lean`,
+   wired into `Render.lean`'s filter layer (`Layer.back`).  When the device
+   matrix of the filter's user space has `b ≠ 0 || c ≠ 0`, the layer is a
+   local frame `S · user − (x0, y0)` with `S` the matrix's column lengths;
+   the filters run there unchanged (`fts` is an axis-aligned scale, their
+   ordinary case) and the result is resampled bilinearly (transparent
+   outside) back through `D · S⁻¹`.  `D` is taken in whole-frame coordinates
+   (the parent's `vx/vy` added back), so tiles and bands stay byte-identical
+   (`run_tiles.py` 60/60, `--threads 4` identical on the new test).
+   *Gated*: the local frame is used only when the result depends on
+   orientation (`FilterFrame.sensitive`: an anisotropic blur/morphology, a
+   non-zero offset/drop-shadow, anything that fills its region — flood,
+   turbulence, image, tile, lighting, displacement, convolve — or an explicit
+   subregion) or when the filter region cuts the content (`nodeBox` of the
+   content in the local frame reaches past the region).  An isotropic blur on a
+   rotated shape keeps resvg's path: resampling there only adds low-alpha
+   colour noise that the straight-RGBA metric punishes
+   (`filter/transform-on-shape.svg`, `with-multiple-transforms-1.svg`, both
+   resvg=1, went pass→fail without the gate).  Budgets: the local layer is
+   charged to `maxFilterWork`/`maxLayerPixels` like the ordinary one; past
+   `maxFilterPixels` it falls back to the ordinary (resvg) layer.
+   Also: `feFlood` with `primitiveUnits="objectBoundingBox"` defaults a
+   missing `x/y/width/height` to the filter region (spec, suite, Chromium),
+   not usvg's `0 0 1 1` of the bbox (`Filter.primRegion`).
+2. **Layers on `tspan`/`textPath`** — `Svg.textShapes` records which spans
+   carry `opacity`/blend/isolation/`clip-path`/`mask`/`filter`
+   (`SpanLayers`), `Text.layout` returns a font-metric box per run style, and
+   the `<text>` branch brackets each span's runs in `groupBegin`/`groupEnd`
+   with its own clip use, mask use and resolved filter (object bounding box =
+   the span's metric box).  Nesting is bounded by `maxLayerDepth` (past it the
+   span renders without its layer).  Pattern content ignores span layers.
+3. **`textPath`** — SVG 2 `path` attribute (inline path in the `<text>`'s user
+   space, wins over `href`, falls back to it when it does not parse);
+   `side="right"` (`TextPath.Table.reverse`: the path traversed backwards); a
+   `href` without `#` is taken as an id (only textPath; only
+   `with-invalid-path-and-xlink-href.svg` in the corpus has one).
+4. **The rest**
+   - `font-size-adjust` (number form): used size × adjust / (xHeight/upem) of
+     the chosen face, applied in `Text.layout` once faces are loaded.
+   - `font` shorthand, both as attribute and in `style`/CSS (usvg: CSS only),
+     resetting style/weight/kerning/size-adjust like usvg's CSS expansion.
+     Bold-italic still renders bold (no bold-italic face; T91's scope).
+   - text-decoration offset/thickness use the font size of the declaring
+     element (`SpanProps.underlineSize` etc.).
+   - `marker-mid` is not placed at the joins where `arcPath` splits an arc into
+     cubics (`Style.arcJoins`, set on `path` shapes only).  This was the real
+     difference in `on-ArcTo.svg`: the suite/Chromium draw 2 markers, we and
+     resvg drew 3.
+   - `mask` with `color-interpolation="linearRGB"`: luminance on the
+     demultiplied colour through resvg's sRGB→linear table
+     (`Mask.maskValueLinear`).
+   - `stroke-dasharray/n-0.svg`: nothing to do — already matches the suite PNG
+     exactly (within-8 1.000 at 500 px) before this task.
+
+### Skipped
+
+- `textPath method="stretch"` / `spacing="auto"`: the suite PNG is the
+  default layout (no visible stretch), which we already produce (0.983 vs
+  suite, same as plain textPath files — font AA).  No change.
+- feTurbulence under skew (0.864 vs suite): at parity with the *upright*
+  turbulence files (0.82–0.92 vs suite), so the remainder is noise sampling,
+  not the frame.
+- Remaining filter gaps are root cause B (box blur vs Gaussian) and
+  spot-light cone anti-aliasing, both also present on upright files.
+
+### Metric artefacts (not fixable in the renderer)
+
+Several suite PNGs store transparent pixels as `(255,255,255,0)` or have an
+opaque white background, so the raw straight-RGBA within-8 cannot pass even
+when the picture matches.  Composited over white at the PNG's own 500 px, ours
+now scores: feImage/with-subregion-5 0.965, textPath/with-path (and the two
+siblings) 0.988, side=right 0.991, font-size-adjust 0.988, marker/on-ArcTo
+0.997, mask linearRGB 1.000.
+
+### Target files: within-8, before → after
+
+| file | suite | chrome |
+|---|---|---|
+| feFlood/complex-transform | 0.760 → **0.997 pass** | 0.755 → **0.991 pass** |
+| feGaussianBlur/complex-transform | 0.773 → 0.964 | 0.765 → 0.961 |
+| feImage/link-on-an-element-with-complex-transform | 0.709 → **0.997 pass** | 0.704 → **0.992 pass** |
+| feImage/with-subregion-5 | 0.062 → 0.171 (0.965 over white) | 0.783 → **0.994 pass** |
+| feMerge/complex-transform | 0.894 → 0.976 | 0.889 → 0.961 |
+| feOffset/complex-transform | 0.945 → **0.997 pass** | 0.939 → 0.989 |
+| feTurbulence/complex-transform | 0.546 → 0.864 | 0.539 → 0.761 |
+| filter/transform-on-shape-with-filter-region | 0.837 → 0.958 | 0.867 → 0.940 |
+| feDiffuseLighting/complex-transform | 0.747 → **0.997 pass** | 0.732 → 0.901 |
+| fePointLight/complex-transform | 0.696 → **0.994 pass** | 0.695 → 0.981 |
+| feSpotLight/complex-transform | 0.570 → 0.968 | 0.580 → 0.954 |
+| tspan/with-opacity | 0.985 → 0.989 | 0.971 → 0.971 |
+| tspan/with-clip-path | 0.971 → **0.992 pass** | 0.948 → 0.970 |
+| tspan/with-mask | 0.952 → 0.989 | 0.935 → 0.946 |
+| tspan/with-filter | 0.852 → 0.976 | 0.867 → 0.869 |
+| textPath/with-filter | 0.879 → 0.957 | 0.870 → 0.885 |
+| textPath/with-path | 0.010 → 0.026 (0.988 over white) | 0.999 → 0.970 (Chromium has no `path`) |
+| textPath/with-path-and-xlink-href | 0.010 → 0.026 (0.988 over white) | 0.999 → 0.970 (same) |
+| textPath/with-invalid-path-and-xlink-href | 0.010 → 0.026 (0.988 over white) | 0.999 → 0.970 (same) |
+| textPath/side=right | 0.906 → 0.933 (0.991 over white) | 0.959 → 0.948 (Chromium has no `side`) |
+| textPath/method=stretch | 0.983 → 0.983 | 0.959 → 0.959 |
+| textPath/spacing=auto | 0.983 → 0.983 | 0.959 → 0.959 |
+| font-size-adjust/simple-case | 0.012 → 0.016 (0.988 over white) | 0.946 → 0.956 |
+| font/simple-case | 0.912 → 0.945 | 0.996 → 0.925 (Chromium used a substitute font, R5) |
+| text-decoration/style-resolving-4 | 0.955 → 0.984 | 0.921 → 0.895 |
+| marker/on-ArcTo | 0.033 → 0.033 (0.997 over white) | 0.987 → **0.991 pass** |
+| stroke-dasharray/n-0 | 1.000 → 1.000 | 1.000 → 1.000 |
+| mask/color-interpolation=linearRGB | 0.458 → 0.879 (1.000 over white) | 0.458 → 0.878 |
+
+### Whole suite
+
+- vs suite PNG: 1190 → **1197** pass; 0 pass→fail; fail→pass: the five
+  filter files above, tspan/with-clip-path, and `text/font/font-shorthand.svg`.
+- vs Chromium: 1011 → 1011 pass; fail→pass feFlood, feImage ×2,
+  marker/on-ArcTo; pass→fail the three `textPath path=` files and
+  font/simple-case, all features Chromium does not implement / renders with a
+  substitute font (R4, R5).
+- vs resvg (gate): 100 px 1553 → 1530, 200 px 1578 → 1555.  Every pass→fail
+  is a file resvg renders wrong (`results.csv` resvg=2), i.e. the target list
+  (23 files), plus `filters/feTile/complex-transform.svg`, which no renderer
+  is rated on (all 0) and which moved towards the suite (0.796 → 0.820).
+  One fail→pass: `text/font/font-shorthand.svg` (resvg=1).  **Zero pass→fail
+  on resvg=1 files at 100 and 200 px.**
+- `run_tests.py`: 55/59 → 53/60.  `40_feimage` (99.80 → 97.36) and
+  `44_turbulence` (98.21 → 73.15) drop because each contains a rotated
+  feImage/feTurbulence, which now follows the element as the spec requires
+  and no longer matches resvg; the new `90_filter_rotate.svg` fails vs resvg
+  by design.  No other file moved.
+- `run_adversarial.py` 136/136 clean; `run_tiles.py` 60/60 byte-identical;
+  `check-theorems.sh` theorems ok; `lake build` no warnings.
