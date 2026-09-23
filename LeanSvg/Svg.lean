@@ -1087,11 +1087,6 @@ def polyPath (pts : Array Fx) (closed : Bool) : Array PathCmd := Id.run do
 def attr (attrs : Array Xml.Attr) (name : String) : Option ByteArray :=
   (attrs.find? (fun a => a.name == name)).map (·.value)
 
-def lengthAttr (attrs : Array Xml.Attr) (name : String) (dflt : Fx) : Fx :=
-  match attr attrs name with
-  | some v => (parseLengthAll v).getD dflt
-  | none => dflt
-
 /-- A length or percentage at a byte offset -- like `parseLength` (which this
 wraps for every non-percent unit), except it also accepts `%`: there is no
 reference to resolve it against here, so the raw `N` of `N%` is returned
@@ -1399,6 +1394,18 @@ def parseTextLen (fontSize refLen : Fx) (bs : ByteArray) (i : Nat) : Option (Fx 
     else if at' bs j == 37 then some (Int.ediv (Fx.mul v refLen) 100, j + 1)
     else some (v, j)
 
+/-- Parse a whole attribute value as a single `parseTextLen` length: usvg's
+`convert_user_length`, which every non-text geometry attribute
+(`x`/`y`/`width`/`height`/`cx`/`cy`/`r`/`rx`/`ry`/`x1`/`y1`/`x2`/`y2`) goes
+through as well as text's own `x`/`y`/`dx`/`dy` -- the same em/ex-against-
+font-size and percentage-against-viewport-axis resolution, just for a single
+value instead of a list. -/
+def parseTextLenAll (fontSize refLen : Fx) (bs : ByteArray) : Option Fx :=
+  let t := trim bs
+  match parseTextLen fontSize refLen t 0 with
+  | some (v, j) => if j == t.size then some v else none
+  | none => none
+
 /-- A whitespace/comma separated list of such lengths.  Stops at the first
 item it cannot read, like `parseNumberList`. -/
 def parseTextLenList (fontSize refLen : Fx) (bs : ByteArray) : Array Fx := Id.run do
@@ -1670,7 +1677,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
 
 /-- Parse a `style="a:b; c:d"` attribute into (name, value) pairs. -/
 def parseStyleDecls (v : ByteArray) : Array (String × ByteArray) :=
-  (splitTrim v 59).filterMap fun decl =>
+  (splitTrim (Css.stripComments v) 59).filterMap fun decl =>
     let k := findByte decl 0 58
     if k ≥ decl.size then none
     else some (toStr (lower (trim (decl.extract 0 k))), trim (decl.extract (k + 1) decl.size))
@@ -1685,33 +1692,51 @@ def isDisplayNone (attrs : Array Xml.Attr) : Bool :=
     | none => false
   a || s
 
-def shapeCmds (name : String) (attrs : Array Xml.Attr) : Option (Array PathCmd) :=
+/-- `rx`/`ry` for `rect` and `ellipse` (usvg's `resolve_rx_ry`,
+`crates/usvg/src/parser/shapes.rs`, shared between the two elements): a
+negative value is dropped as if absent -- checked here on the *resolved*
+length rather than usvg's raw pre-unit-conversion number, which agrees for
+every unit this parses since none of their factors are negative; if exactly
+one of the two is present, its value is mirrored onto the other axis; if
+neither is, both are 0 (a later `≤ 0` check then drops the shape, same as an
+explicit 0). -/
+def resolveRxRy (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH : Fx) : Fx × Fx :=
+  let rxo := ((attr attrs "rx").bind (parseTextLenAll fontSize pctRefW)).filter (· ≥ 0)
+  let ryo := ((attr attrs "ry").bind (parseTextLenAll fontSize pctRefH)).filter (· ≥ 0)
+  match rxo, ryo with
+  | some rx, some ry => (rx, ry)
+  | some rx, none => (rx, rx)
+  | none, some ry => (ry, ry)
+  | none, none => (0, 0)
+
+/-- Every shape's geometry attributes go through usvg's `convert_user_length`
+(`parseTextLenAll`): `em`/`ex` against the element's own font size, `%`
+against the viewport axis the attribute names (`x`-like → `pctRefW`, `y`-like
+→ `pctRefH`), same as text's `x`/`y`/`dx`/`dy`.  `r` (`circle`'s only length
+that names neither axis) instead falls to `convert_length`'s catch-all,
+`viewportDiag`, exactly like `letter-spacing`. -/
+def shapeCmds (name : String) (attrs : Array Xml.Attr) (fontSize pctRefW pctRefH : Fx) :
+    Option (Array PathCmd) :=
+  let lx := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefW)).getD dflt
+  let ly := fun (n : String) (dflt : Fx) => ((attr attrs n).bind (parseTextLenAll fontSize pctRefH)).getD dflt
   match name with
   | "path" => (attr attrs "d").map parsePathData
   | "rect" =>
-    let w := lengthAttr attrs "width" 0
-    let h := lengthAttr attrs "height" 0
+    let w := lx "width" 0
+    let h := ly "height" 0
     if w ≤ 0 || h ≤ 0 then none
     else
-      let rxo := attr attrs "rx" |>.bind parseLengthAll
-      let ryo := attr attrs "ry" |>.bind parseLengthAll
-      let (rx, ry) := match rxo, ryo with
-        | some rx, some ry => (rx, ry)
-        | some rx, none => (rx, rx)
-        | none, some ry => (ry, ry)
-        | none, none => (0, 0)
-      some (rectPath (lengthAttr attrs "x" 0) (lengthAttr attrs "y" 0) w h rx ry)
+      let (rx, ry) := resolveRxRy attrs fontSize pctRefW pctRefH
+      some (rectPath (lx "x" 0) (ly "y" 0) w h rx ry)
   | "circle" =>
-    let r := lengthAttr attrs "r" 0
-    if r ≤ 0 then none else some (ellipsePath (lengthAttr attrs "cx" 0) (lengthAttr attrs "cy" 0) r r)
+    let r := ((attr attrs "r").bind (parseTextLenAll fontSize (viewportDiag pctRefW pctRefH))).getD 0
+    if r ≤ 0 then none else some (ellipsePath (lx "cx" 0) (ly "cy" 0) r r)
   | "ellipse" =>
-    let rx := lengthAttr attrs "rx" 0
-    let ry := lengthAttr attrs "ry" 0
+    let (rx, ry) := resolveRxRy attrs fontSize pctRefW pctRefH
     if rx ≤ 0 || ry ≤ 0 then none
-    else some (ellipsePath (lengthAttr attrs "cx" 0) (lengthAttr attrs "cy" 0) rx ry)
+    else some (ellipsePath (lx "cx" 0) (ly "cy" 0) rx ry)
   | "line" =>
-    some #[.moveTo ⟨lengthAttr attrs "x1" 0, lengthAttr attrs "y1" 0⟩,
-           .lineTo ⟨lengthAttr attrs "x2" 0, lengthAttr attrs "y2" 0⟩]
+    some #[.moveTo ⟨lx "x1" 0, ly "y1" 0⟩, .lineTo ⟨lx "x2" 0, ly "y2" 0⟩]
   | "polygon" => (attr attrs "points").map fun v => polyPath (parseNumberList v) true
   | "polyline" => (attr attrs "points").map fun v => polyPath (parseNumberList v) false
   | _ => none
@@ -2170,6 +2195,13 @@ structure Frame where
   /-- Whether a box is wanted at all: this element or an ancestor has a
   `clip-path`.  Everything else skips the flattening the box costs. -/
   want : Bool := false
+  /-- Set on a shape element's own frame: usvg's `convert_element_impl` never
+  recurses into a `rect`/`circle`/.../`path`'s children (only `g`/`svg`/
+  `switch` call `convert_children`), so any XML children of a shape are not
+  part of the render tree at all, not even as siblings drawn on top of it.
+  Checked at the very top of the next `.open_`, before any other branch, so
+  such a child is dropped exactly like a `switch`'s non-selected child. -/
+  isShapeLeaf : Bool := false
 deriving Inhabited
 
 /-- Walk the event stream with a style stack.
@@ -2409,6 +2441,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             | some none => false
             | some (some target) => idx == target
           if !allowed then skip := 1
+          else if pf.isShapeLeaf then skip := 1
           else if name == "clipPath" then
             -- T20: collect the clip wherever it appears.  Its contents live in
             -- the user space of the element that will reference it, so the
@@ -2441,7 +2474,11 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             -- collected.
             enter := some (applyEffective parent attrs chain)
             frame := { mode := .defs }
-          else if name == "g" then
+          else if name == "g" || name == "a" then
+            -- usvg's tree builder rewrites `<a>`'s tag name to `EId::G` before
+            -- conversion ever sees it (`svgtree/parse.rs`): a link has no
+            -- rendering behaviour of its own, only its `<g>`-identical
+            -- properties and children.
             if isDisplayNone attrs || !passesConditions attrs then skip := 1
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
@@ -2560,7 +2597,7 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
             else
               let (st, uses', slot) := addClipUse (applyEffective parent attrs chain) uses
               uses := uses'
-              let cmds := shapeCmds name attrs
+              let cmds := shapeCmds name attrs st.fontSize st.pctRefW st.pctRefH
               match pf.mode with
               | .render =>
                 match cmds with
@@ -2587,7 +2624,8 @@ def interpret (events : Array Xml.Event) : Except String Doc := do
               let want := slot.isSome || pf.want
               enter := some st
               frame := { mode := pf.mode, useSlot := slot, want,
-                         bbox := if want then cmds.bind cmdsBox else none }
+                         bbox := if want then cmds.bind cmdsBox else none,
+                         isShapeLeaf := true }
               renders := pf.mode.isRender
           else
             skip := 1
