@@ -32,10 +32,17 @@ SOURCES = {
 }
 
 
-def run(cmd: list[str], repeats: int = 5) -> float:
-    """Run a command `repeats` times, return the median wall time in ms."""
+def run(cmd: list[str], repeats: int = 5, out_path: Path | None = None) -> float:
+    """Run a command `repeats` times, return the median wall time in ms.
+
+    `out_path`, if given, is deleted before every run: lean-svg refuses to
+    overwrite an existing output file, and this repeats into the same path
+    on purpose.
+    """
     times = []
     for _ in range(repeats):
+        if out_path is not None:
+            out_path.unlink(missing_ok=True)
         t0 = time.perf_counter()
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         times.append((time.perf_counter() - t0) * 1000.0)
@@ -57,13 +64,13 @@ def main() -> int:
         ours_p, ref_p, diff_p = (HERE / f"{name}-{k}.png" for k in ("ours", "resvg", "diff"))
 
         ms_ours = run([str(BIN), str(src), str(ours_p),
-                       "--width", str(WIDTH), "--background", "white"])
+                       "--width", str(WIDTH), "--background", "white"], out_path=ours_p)
         raw_bytes = ours_p.stat().st_size
 
         ref_cmd = ["resvg", "-w", str(WIDTH), "--background", "white"]
         if FONTS.is_dir():
             ref_cmd += ["--skip-system-fonts", "--use-fonts-dir", str(FONTS)]
-        ms_ref = run(ref_cmd + [str(src), str(ref_p)])
+        ms_ref = run(ref_cmd + [str(src), str(ref_p)], out_path=ref_p)
 
         a = Image.open(ours_p).convert("RGB")
         b = Image.open(ref_p).convert("RGB")

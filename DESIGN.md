@@ -5,18 +5,22 @@
 **Claimed and machine-checked** (see `LeanSvg/Effect.lean`):
 
 - The top-level program is a value of `Prog (Except String Unit)`. `Prog` is a
-  free monad with exactly two operations, `readInput` and `writeOutput`.
-  There is no constructor for any other effect, so the type checker rejects a
-  program that tries to do anything else.
-- Against a model file system `FS := String → ByteArray`:
+  free monad with exactly three operations, `readInput`, `outputExists` and
+  `writeOutput`. There is no constructor for any other effect, so the type
+  checker rejects a program that tries to do anything else.
+- Against a model file system `FS := String → Option ByteArray` (`none` means
+  the path is absent):
   - `runFS_frame`: running any `Prog` leaves every path except the output
     path unchanged.
-  - `runFS_input_only`: the result depends only on the input path's contents.
+  - `runFS_input_only`: the result depends only on the input path's contents
+    and on whether the output path is present.
   - `renderProgram_spec`: the renderer program's run equals
-    `match render input with | ok png => (ok, fs[out ↦ png]) | error e => (error e, fs)`.
-  - Corollaries: on error nothing is written; on success the output path holds
-    exactly `render input`.
-- `#print axioms` on all of these: `propext` only. No `sorry`, no `Classical`.
+    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok png => (ok, fs[out ↦ png]) | error e => (error e, fs)`.
+  - `renderProgram_no_clobber`: if the output path already holds something,
+    running the program changes the file system not at all.
+  - Corollaries (each additionally given `fs out = none`): on error nothing is
+    written; on success the output path holds exactly `some (render input)`.
+- `#print axioms` on all seven of these: `propext` only. No `sorry`, no `Classical`.
 
 **Claimed by construction** (enforced by the language, checked by grep):
 
@@ -26,15 +30,18 @@
 - Memory safety: no FFI, no `@[extern]`, no `panic!`, no `!`-indexing. All
   array access is `getD` / `setIfInBounds` or proof-carrying.
 - No floats anywhere.
-- Bounded resources: output canvas ≤ 16384 px per side and ≤ 2^24 px; every
-  parsed number clamped to ±2^22 px; XML depth ≤ 64; elements ≤ 10^6.
+- Bounded resources: output canvas ≤ 16384 px per side and ≤ 2^24 px; input
+  size ≤ 64 MiB, rejected before parsing (`render_rejects_large`,
+  `proofs/SizeBound.lean`); every parsed number clamped to ±2^22 px; XML depth
+  ≤ 64; elements ≤ 10^6.
 
 **Not claimed:** pixel-level correctness. SVG has no formal rendering
 semantics. Fidelity is measured against resvg (`tests/run_tests.py`).
 
 **Trusted:** the Lean compiler and runtime (C), the C compiler, the OS,
-`Prog.execIO` (6 lines mapping the two ops to `IO.FS.readBinFile` /
-`writeBinFile`), and `Main.lean` (argument parsing, stderr message).
+`Prog.execIO` (eleven lines mapping the three ops to
+`System.FilePath.pathExists` / `IO.FS.readBinFile` / `writeBinFile`), and
+`Main.lean` (argument parsing, stderr message).
 
 ## 2. Threat model
 
@@ -51,6 +58,8 @@ An attacker controls the input file completely. Goals we defend against:
 | CPU exhaustion via numbers (`1e999999999`, megabytes of digits) | number parsing, big-int math | 18 significant digits kept, exponent saturates at 10^5 and clamps at ±60, result clamped |
 | Malformed input crashes | parser | every read past the end returns 0; every array op is bounds-checked |
 | Writing somewhere unexpected | I/O layer | `runFS_frame` |
+| Overwriting an existing file at the output path | I/O layer | `Op.outputExists` checked before any write; `renderProgram_no_clobber` |
+| Memory exhaustion via input file size | file read | input capped at 64 MiB, checked before parsing; `render_rejects_large` |
 
 Remaining cost bound, not a vulnerability: rendering is O(shapes × visible
 area of each shape). A file with 10^6 full-canvas shapes at 16 Mpx is slow.

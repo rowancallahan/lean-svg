@@ -477,6 +477,91 @@ def run_case(path, binary, label):
     return result
 
 
+def check_no_clobber(binary):
+    """No-clobber: a second render to an existing output must be refused,
+    leaving that file exactly as it was."""
+    result = {
+        "name": "no_clobber",
+        "rc": None,
+        "ms": None,
+        "output": False,
+        "stderr": "",
+        "violations": [],
+    }
+    tmpdir = Path(tempfile.mkdtemp(prefix="lean-svg_adv_"))
+    svg = sorted(SVG_DIR.glob("*.svg"))[0]
+    out_png = tmpdir / "out.png"
+    try:
+        first = subprocess.run(
+            [str(binary), str(svg), str(out_png)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=RENDER_TIMEOUT,
+        )
+        if first.returncode != 0 or not out_png.is_file():
+            result["violations"].append(
+                "setup render failed: rc=%s %s"
+                % (first.returncode, first.stderr.decode("utf-8", "replace").strip())
+            )
+            return result
+        before = out_png.read_bytes()
+
+        start = time.perf_counter()
+        second = subprocess.run(
+            [str(binary), str(svg), str(out_png)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=RENDER_TIMEOUT,
+        )
+        result["ms"] = (time.perf_counter() - start) * 1000.0
+        result["rc"] = second.returncode
+        result["stderr"] = second.stderr.decode("utf-8", "replace").strip()
+        result["output"] = out_png.is_file()
+
+        if second.returncode == 0:
+            result["violations"].append("second render into an existing file succeeded")
+        after = out_png.read_bytes()
+        if after != before:
+            result["violations"].append("existing output was modified despite the refusal")
+        strays = sorted(p.name for p in tmpdir.iterdir() if p.name != "out.png")
+        if strays:
+            result["violations"].append(
+                "stray files in the output directory: %s" % ", ".join(strays)
+            )
+    except subprocess.TimeoutExpired:
+        result["violations"].append("timed out after %ds" % RENDER_TIMEOUT)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return result
+
+
+def check_max_input_size(binary):
+    """A file over the input size limit (64 MiB) must be rejected cleanly,
+    like every other hostile input: rc 1, no output, no hang."""
+    result = {
+        "name": "oversized_input",
+        "rc": None,
+        "ms": None,
+        "output": False,
+        "stderr": "",
+        "violations": [],
+    }
+    tmpdir = Path(tempfile.mkdtemp(prefix="lean-svg_adv_"))
+    max_input = 64 * 1024 * 1024
+    svg = tmpdir / "oversized.svg"
+    try:
+        with open(svg, "wb") as f:
+            f.write(b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><!--')
+            f.write(b"A" * (max_input + 1))
+        run_case_result = run_case(svg, binary, "oversized_input")
+        result.update(run_case_result)
+        if result["rc"] == 0:
+            result["violations"].append("an over-limit input was accepted")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return result
+
+
 # --------------------------------------------------------------------------
 # reporting
 # --------------------------------------------------------------------------
@@ -564,12 +649,17 @@ def main():
     cases += [(p, "gen/" + p.name) for p in generated]
     if args.filter:
         cases = [c for c in cases if args.filter in c[1]]
-    if not cases:
+
+    extra_checks = {"no_clobber": check_no_clobber, "oversized_input": check_max_input_size}
+    extra_names = [n for n in extra_checks if not args.filter or args.filter in n]
+    if not cases and not extra_names:
         print("no adversarial cases to run", file=sys.stderr)
         return 2
 
-    print("running %d cases (timeout %ds each)\n" % (len(cases), RENDER_TIMEOUT))
+    print("running %d cases (timeout %ds each)\n" % (len(cases) + len(extra_names), RENDER_TIMEOUT))
     results = [run_case(path, binary, label) for path, label in cases]
+    results += [extra_checks[name](binary) for name in extra_names]
+
     print_table(results)
 
     violations = [r for r in results if r["violations"]]

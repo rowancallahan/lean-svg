@@ -10,6 +10,7 @@ import LeanSvg
 #print axioms LeanSvg.Prog.runFS_frame
 #print axioms LeanSvg.Prog.runFS_input_only
 #print axioms LeanSvg.Prog.renderProgram_spec
+#print axioms LeanSvg.Prog.renderProgram_no_clobber
 #print axioms LeanSvg.Prog.renderProgram_error_no_write
 #print axioms LeanSvg.Prog.renderProgram_ok_output
 #print axioms LeanSvg.Prog.renderProgram_ok_frame

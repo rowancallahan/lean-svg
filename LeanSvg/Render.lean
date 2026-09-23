@@ -38,6 +38,8 @@ deriving Inhabited
 def maxDim : Nat := 16384
 /-- Largest output area, in pixels (16 Mpx → 128 MB of canvas). -/
 def maxPixels : Nat := 16777216
+/-- Largest accepted input file, in bytes (64 MiB). Checked before parsing. -/
+def maxInput : Nat := 64 * 1024 * 1024
 
 namespace Render
 
@@ -693,6 +695,7 @@ With `opts.threads ≥ 2` the canvas is cut into bands of rows that are rendered
 in parallel and concatenated; the bytes are the same either way (see
 `Render.renderBands`).  The PNG encoding stays serial: Adler-32 is sequential. -/
 def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
+  if input.size > maxInput then throw s!"input {input.size} bytes exceeds the {maxInput} byte limit"
   let events ← Xml.parse input
   let doc ← Svg.interpret events
   let (w, h, _, _) ← Render.canvasSetup doc.root opts

@@ -10,7 +10,9 @@ fragment iteration. It needs no assumption about the input RGBA array length:
 
 Public bounds:
 * `Png.encode`: at most `5 * max(w, h)^2 + 132` bytes, without hypotheses.
-* `render`: on success, at most `67452996` bytes under its current limits.
+* `render`: rejects any input over `maxInput` (64 MiB) before parsing
+  (`render_rejects_large`); on success, at most `67452996` bytes under its
+  current limits.
 
 Check with `lake env lean proofs/SizeBound.lean`.
 -/
@@ -251,6 +253,18 @@ end LeanSvg.Png.SizeBound
 
 namespace LeanSvg
 
+/-- **Max input size.** `render` rejects an oversized input before parsing.
+This is the whole theorem: the check is the first line of `render`, so
+nothing about the XML/SVG pipeline is involved. -/
+theorem render_rejects_large (opts : Options) (input : ByteArray) (h : input.size > maxInput) :
+    ∃ e, render opts input = .error e := by
+  refine ⟨s!"input {input.size} bytes exceeds the {maxInput} byte limit", ?_⟩
+  unfold render
+  simp only [bind, Except.bind, pure, Except.pure]
+  split
+  · rfl
+  · omega
+
 /-- Every successful render returns a byte array bounded by its checked canvas.
 The witnesses are the dimensions passed to the encoder, including for tiles
 and parallel renders. No filesystem behavior is part of this statement. -/
@@ -261,6 +275,8 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
       png.size ≤ 5 * (max w h) * (max w h) + 132 := by
   unfold render at hr
   simp only [bind, Except.bind, pure, Except.pure] at hr
+  split at hr
+  · simp at hr
   cases hp : Xml.parse input with
   | error e => simp [hp] at hr
   | ok events =>
@@ -314,5 +330,6 @@ end LeanSvg
 
 -- Public theorem audit: only standard Lean axioms, never `sorryAx`.
 #print axioms LeanSvg.Png.SizeBound.encode_size_le_square
+#print axioms LeanSvg.render_rejects_large
 #print axioms LeanSvg.render_output_size_bound
 #print axioms LeanSvg.render_size_le_const
