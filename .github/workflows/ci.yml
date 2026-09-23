@@ -1,8 +1,13 @@
 name: CI
 
+# Pushes to main and pull requests only: many agent branches are pushed
+# while work is fanned out, and each one is gated locally before merging.
+# Run any other branch by hand from the Actions tab (workflow_dispatch).
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # No secrets are used anywhere in this workflow, but a fork PR still can't
 # run privileged steps, so keep the guard for the day one is added.
