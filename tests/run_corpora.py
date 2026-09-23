@@ -156,6 +156,36 @@ def first_line(text, limit=160):
 # --------------------------------------------------------------------------
 
 
+# Rowan's policy: lean-svg never loads anything outside the SVG itself (no file
+# paths, no URLs). For a file that references an external resource, the right
+# output is the file rendered *without* it, so the reference is resvg on a copy
+# with every such `href`/`xlink:href` removed. Only same-document (`#id`) and
+# `data:` hrefs are kept. The row carries a note saying so.
+EXTERNAL_HREF = re.compile(r"""\s(?:xlink:)?href\s*=\s*(["'])(?!\s*#|\s*data:)[^"']*\1""")
+
+TAG_OPEN = re.compile(r"<([A-Za-z][\w:.-]*)((?:[^>\"']|\"[^\"]*\"|'[^']*')*)")
+
+
+def strip_external_refs(svg_path):
+    """(text without external hrefs, number removed); None if unreadable."""
+    try:
+        text = svg_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    count = [0]
+
+    def strip_tag(m):
+        # `<a href>` is a hyperlink, not a resource: nothing is loaded for it
+        if m.group(1) == "a":
+            return m.group(0)
+        attrs, n = EXTERNAL_HREF.subn("", m.group(2))
+        count[0] += n
+        return "<" + m.group(1) + attrs
+
+    stripped = TAG_OPEN.sub(strip_tag, text)
+    return stripped, count[0]
+
+
 def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, keep,
                 keep_renders_dir=None, resvg_args=None):
     """Render one file both ways and score it.
@@ -192,6 +222,7 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
         "max_d": "",
         "ms_ours": "",
         "ms_ref": "",
+        "note": "",
     }
 
     ref_png = tmpdir / ("%06d_ref.png" % slot)
@@ -217,9 +248,17 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
             for path in scratch:
                 path.unlink(missing_ok=True)
 
-    # reference: resvg on the ORIGINAL file, for both routes
+    # reference: resvg on the ORIGINAL file, for both routes -- except that
+    # external resources are removed first (see `strip_external_refs`)
+    ref_src = svg
+    stripped = strip_external_refs(svg)
+    if stripped is not None and stripped[1] > 0:
+        ref_src = tmpdir / ("%06d_noext.svg" % slot)
+        ref_src.write_text(stripped[0], encoding="utf-8")
+        scratch.append(ref_src)
+        row["note"] = "external resource not loaded by design; reference rendered without it"
     rc_ref, ms_ref, err_ref, to_ref = run_cmd(
-        ["resvg"] + (resvg_args or []) + ["-w", str(width), str(svg), str(ref_png)]
+        ["resvg"] + (resvg_args or []) + ["-w", str(width), str(ref_src), str(ref_png)]
     )
     row["ref_rc"] = "timeout" if to_ref else rc_ref
     row["ref_err"] = first_line(err_ref)
@@ -356,7 +395,7 @@ CSV_FIELDS = [
     "corpus", "route", "file", "dir", "width", "status",
     "ours_rc", "ours_err", "ref_rc", "ref_err", "usvg_rc", "usvg_err",
     "size", "exact", "within", "within32", "mean_abs", "max_d",
-    "ms_ours", "ms_ref",
+    "ms_ours", "ms_ref", "note",
 ]
 
 
