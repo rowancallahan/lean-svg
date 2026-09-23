@@ -127,7 +127,10 @@ as if the property weren't there.
 resvg has the identical bug (usvg does not isolate a `tspan`/`textPath`
 either — `results.csv` marks it wrong on all five), which is why our score
 against resvg is high (0.994–0.9998) despite being visibly wrong against the
-suite PNG and Chromium, which agree with each other on all five.
+suite PNG and Chromium, which agree with each other on all five. This is not
+a guess: resvg's own [`docs/svg2-changelog.md`](https://github.com/linebender/resvg/blob/main/docs/svg2-changelog.md#L157)
+lists it, unchecked, as a tracked SVG 2 gap: *"`filter`, `clip-path`, `mask`
+and `opacity` properties can be set on `tspan` and `textPath` elements."*
 
 **Not a shallow fix**: making a `tspan`/`textPath` run promotable to a layer
 needs `textShapes` (or its caller around Svg.lean:3868) to detect a
@@ -193,8 +196,13 @@ is no code path that reads a `path` attribute on `textPath` at all. resvg
 (usvg 0.48.1) doesn't implement it either — confirmed by usvg's own stderr
 warnings during these renders ("Failed to parse href value: 'path1'" /
 `'path2'`, because those `xlink:href` values are missing the leading `#`
-that would make them local IRI references — see per-file notes below) and by
-`results.csv` marking resvg wrong on all three.
+that would make them local IRI references — see per-file notes below), by
+`results.csv` marking resvg wrong on all three, and directly by resvg's own
+[`docs/svg2-changelog.md`](https://github.com/linebender/resvg/blob/main/docs/svg2-changelog.md#L112):
+*"A `path` property to `textPath`."*, unchecked. (The changelog does list
+one related, already-shipped improvement — *"`textPath` can reference basic
+shapes now"*, checked — which is why `xlink:href` to a `<path>`/`<rect>`/etc.
+works at all; it's specifically the inline `path` attribute that's missing.)
 
 **Chromium doesn't implement `path` either** — it renders no text in all
 three cases, same as resvg and ours. Per `results.csv`, only Firefox is
@@ -255,7 +263,10 @@ across the path's tangent, "upside-down" for a path this shape). Suite PNG:
 text is flipped/mirrored below the path, reading right-to-left along it.
 resvg, Chromium and ours all render it identically to the default
 `side="left"` case — `side` has no effect. `results.csv`: chrome=2,
-safari=2, firefox=1, resvg=2 — again only Firefox is correct.
+safari=2, firefox=1, resvg=2 — again only Firefox is correct. Also a
+tracked, unchecked gap in resvg's own
+[`docs/svg2-changelog.md`](https://github.com/linebender/resvg/blob/main/docs/svg2-changelog.md#L113):
+*"A `side` property to `textPath`."*
 
 Implementing `side="right"` itself would be small (negate the offset along
 the path normal and reverse the per-glyph rotation sign in
@@ -279,6 +290,12 @@ may adjust spacing slightly for better fit). We only implement the default
 pair (`align`/`auto`-as-`exact`, effectively); `method="stretch"` and an
 explicit `spacing="auto"` are both accepted as attributes but have no effect
 on layout beyond what the defaults already do.
+
+Unlike Groups B/C/D, resvg's `docs/svg2-changelog.md` has no entry at all for
+`method`/`spacing` (both are SVG 1.1, not SVG 2, so wouldn't be there anyway)
+— there's no upstream acknowledgement one way or the other that resvg's
+handling is incomplete here, which is consistent with what the pixels show:
+this isn't a clean "feature missing" the way Groups B–D are.
 
 For both files, **resvg, the suite PNG and ours are visually close** (a
 pixel diff between resvg's own render and the suite PNG at natural size —
@@ -352,20 +369,23 @@ rule. The corpus gate was not run because no code changed.
 
 2. **Groups C and D (`path` attribute, `side="right"`).** Both are real SVG
    2 features where **Firefox is the only renderer in the whole comparison
-   set that gets it right** — not resvg, not Chromium, not Safari. Matching
-   resvg/usvg is our stated reference behaviour (DESIGN.md §"Reference
-   behaviour"), and implementing these would be a deliberate, permanent
-   divergence from that reference for four files' worth of benefit, in
-   exchange for matching a spec reading that only one browser bothers with.
-   Worth doing, or worth leaving as documented known gaps?
+   set that gets it right** — not resvg, not Chromium, not Safari — and both
+   are open items on resvg's own SVG 2 changelog (unchecked, no PR attached
+   as of 0.48.1). Matching resvg/usvg is our stated reference behaviour
+   (DESIGN.md §"Reference behaviour"), and implementing these would be a
+   deliberate, permanent divergence from that reference for four files'
+   worth of benefit, in exchange for matching a spec reading that only one
+   browser bothers with. Worth doing, or worth leaving as documented known
+   gaps (perhaps to revisit if/when resvg itself ships them)?
 
 3. **Group B (layers for `tspan`/`textPath`).** This is the one place in
    this batch with a clean, uncontested correct answer (suite and Chromium
-   agree on all five files) and a clear, if not tiny, path to a fix (reuse
-   the existing `groupBegin`/`groupEnd` layer machinery from inside
-   `textShapes`, per Svg.lean:3006-3015 and the three existing call sites at
-   Svg.lean:3050/3854/4107 that do the equivalent check for ordinary
-   elements). Worth scheduling as a real task (fix-R4 or similar) even
+   agree on all five files), a tracked upstream admission that resvg is
+   wrong here too (`svg2-changelog.md` line 157), and a clear, if not tiny,
+   path to a fix (reuse the existing `groupBegin`/`groupEnd` layer machinery
+   from inside `textShapes`, per Svg.lean:3006-3015 and the three existing
+   call sites at Svg.lean:3050/3854/4107 that do the equivalent check for
+   ordinary elements). Worth scheduling as a real task (fix-R4 or similar) even
    though it isn't a "few lines"?
 
 4. **`with-invalid-path-and-xlink-href.svg`'s `href` values lack the leading
