@@ -527,6 +527,13 @@ structure Cluster where
   dropped : Bool := false
 deriving Inhabited
 
+/-- `a[i] := Box.cover a[i] p`, growing `a` with `none` up to `i` (T90). -/
+def coverAt (a : Array (Option Box)) (i : Nat) (p : Pt) : Array (Option Box) := Id.run do
+  let mut a := a
+  for _ in [a.size : i + 1] do
+    a := a.push none
+  return a.modify i (Box.cover · p)
+
 /-- Lay out one `<text>` element.
 
 `budget` caps how many characters the whole document may lay out; the returned
@@ -574,7 +581,7 @@ rotation angle and a single pen position:
   position, not the same 90° rotation every glyph gets — `tb-with-dx-on-
   second-tspan.svg` exercises exactly this fallback). -/
 def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool) :
-    Array Placed × Nat × Option Box :=
+    Array Placed × Nat × Option Box × Array (Option Box) :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
   let mut texts : Array (Array Nat) := #[]
@@ -632,7 +639,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       ts := ts.setIfInBounds i (t.extract 0 (budget - used))
       used := budget
     else used := used + t.size
-  if used == 0 then return (#[], 0, none)
+  if used == 0 then return (#[], 0, none, #[])
   -- ---- 4. flatten to characters
   let mut chars : Array Nat := Array.emptyWithCapacity used
   let mut cStyle : Array Nat := Array.emptyWithCapacity used
@@ -716,7 +723,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   for i in [0:total] do
     if cRend.getD i true then rend := rend.push i
   let rn := rend.size
-  if rn == 0 then return (#[], used, none)
+  if rn == 0 then return (#[], used, none, #[])
   -- ---- 8. chunk by chunk
   -- A decoration rectangle breaks more often than a glyph-outline run: usvg
   -- starts a new one not only where the style changes but at *any* character
@@ -733,6 +740,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   -- T81: the metric-box union, in the same `<text>` user space as `placed`'s
   -- outlines -- see "Text bounding box" above.
   let mut mbox : Option Box := none
+  -- T90: the same union per run style (`Placed.styleIdx`), for a layer on a
+  -- `tspan`/`textPath` that sizes against its own glyphs.
+  let mut sbox : Array (Option Box) := #[]
   let mut lastX : Int := 0
   let mut lastY : Int := 0
   let mut a : Nat := 0
@@ -928,6 +938,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
               let (top16, bot16) := metricTopBot f c.props.size
               for pt in metricCorners la lb lc la tox toy adv16 top16 bot16 do
                 mbox := Box.cover mbox pt
+                sbox := coverAt sbox c.styleIdx pt
             | none => pure ()
       else
         if vertical then
@@ -965,6 +976,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             let (top16, bot16) := metricTopBot f c.props.size
             for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
               mbox := Box.cover mbox pt
+              sbox := coverAt sbox c.styleIdx pt
           | none => pure ()
         x := x + c.adv
         adv := adv + c.adv
@@ -1029,7 +1041,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       lastX := chunkX + (if vertical then y else adv)
       lastY := chunkY + (if vertical then adv else y)
     a := b
-  return (placed, used, mbox)
+  return (placed, used, mbox, sbox)
 
 end Text
 end LeanSvg

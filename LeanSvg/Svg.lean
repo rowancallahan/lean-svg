@@ -2898,6 +2898,31 @@ def collectText (events : Array Xml.Event) (openIdx : Nat) : ByteArray := Id.run
     | .text bs => out := out.append bs
   return out
 
+/-- T90: the SVG 2 layers of a `<text>`'s spans.  `clip-path`, `mask`,
+`filter`, `opacity` (and a blend mode or isolation) on a `tspan`/`textPath`
+make it a group of its own, like any other element (`should_isolate`); usvg
+does not (resvg's `svg2-changelog.md` lists it as a gap). -/
+structure SpanLayers where
+  /-- Each layer-owning span's style and its runs' font-metric box. -/
+  owners : Array (Style × Option Box) := #[]
+  /-- Per output shape, the owners it sits in, outermost first. -/
+  chains : Array (Array Nat) := #[]
+deriving Inhabited
+
+def spanNeedsLayer (st : Style) : Bool :=
+  st.ownOpacity != opacityOne || st.blend != .normal || st.isolate
+    || st.clipRef.isSome || st.maskRef.isSome
+    || match st.filterRaw with
+      | some v => !(eqAscii (trim v) "none")
+      | none => false
+
+/-- Give every style index below `n` a chain, `c` for the new ones. -/
+def padChains (a : Array (Array Nat)) (n : Nat) (c : Array Nat) : Array (Array Nat) := Id.run do
+  let mut a := a
+  for _ in [a.size : n] do
+    a := a.push c
+  return a
+
 /-- Turn the `<text>` element opened at `events[idx]` into shapes.
 
 The subtree is walked here rather than by `interpret`'s main loop because text
@@ -2929,7 +2954,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     (events : Array Xml.Event) (idx : Nat) (textStyle : Style)
     (chain : Array Css.ElemInfo) (budget : Nat)
     (paths : Std.HashMap String TextPath.Table) (ancestors : Array Style) :
-    Array Shape × Nat × Option Box := Id.run do
+    Array Shape × Nat × Option Box × SpanLayers := Id.run do
   let textAttrs := match events.getD idx default with
     | .open_ _ a => a
     | _ => #[]
@@ -2993,6 +3018,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           if throughActive && throughIdx.isNone && (s.ownLineThrough || atText) then
             styles := styles.push s; throughIdx := some (styles.size - 1)
     return (styles, underlineIdx, overlineIdx, throughIdx)
+  -- T90: the spans that need a layer of their own (`SpanLayers`), the chain
+  -- of them open at each nesting level, and each run style's chain.
+  let mut owners : Array Style := #[]
+  let mut layStack : Array (Array Nat) := #[#[]]
+  let mut chainOf : Array (Array Nat) := #[]
   let mut skip : Nat := 0
   let mut depth : Nat := 1
   for j in [idx + 1 : events.size] do
@@ -3003,6 +3033,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       if skip > 0 then skip := skip - 1
       else
         evs := evs.push .close
+        layStack := layStack.pop
         stStack := stStack.pop
         chStack := chStack.pop
         ccStack := ccStack.pop
@@ -3022,6 +3053,11 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         stStack := stStack.push st
         chStack := chStack.push ch
         ccStack := ccStack.push 0
+        let lc := layStack.back?.getD #[]
+        if spanNeedsLayer st then
+          layStack := layStack.push (lc.push owners.size)
+          owners := owners.push st
+        else layStack := layStack.push lc
         -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
         -- while its characters keep their slots in the position lists.
         let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
@@ -3073,6 +3109,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         if targetText.size > 0 then
           let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles (stStack.push st)
           styles := styles'.push st
+          chainOf := padChains chainOf styles.size (layStack.back?.getD #[])
           let selfIdx := styles.size - 1
           let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
           let sp := spanPropsOf st bpx bsub bsup
@@ -3089,6 +3126,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         let st := stStack.back?.getD default
         let (styles', underlineIdx, overlineIdx, throughIdx) := resolveDecor styles stStack
         styles := styles'.push st
+        chainOf := padChains chainOf styles.size (layStack.back?.getD #[])
         let selfIdx := styles.size - 1
         let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         let sp := spanPropsOf st bpx bsub bsup
@@ -3102,8 +3140,13 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             -- does not resolve to an installed font draws nothing either
             -- (`process_chunk`'s `None => continue`), same as `display:none`.
             ((rendStack.back?.getD true) && st.fontSize > 0 && st.fontAvailable))
-  let (placed, used, mbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
+  let (placed, used, mbox, sbox) := Text.layout evs textStyle.spacePreserve budget textStyle.writingMode
   let mut out : Array Shape := #[]
+  let mut chains : Array (Array Nat) := #[]
+  let mut oboxes : Array (Option Box) := owners.map fun _ => none
+  for k in [0:sbox.size] do
+    for o in chainOf.getD k #[] do
+      oboxes := oboxes.modify o (Box.union · (sbox.getD k none))
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
@@ -3112,11 +3155,12 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       -- that property, so glyphs stay antialiased regardless of an ambient
       -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
       out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := textStyle.ctm, crisp := false }, false, none, none⟩
+      chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
   -- `clipPathUnits="objectBoundingBox"` on this `<text>` actually sizes
   -- against.
-  return (out, used, mbox)
+  return (out, used, mbox, ⟨owners.zip oboxes, chains⟩)
 
 /-! ## `pattern` content
 
@@ -3193,7 +3237,7 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
-          let (shs, used, _) := textShapes applyEff events j st' chain budget {} stStack
+          let (shs, used, _, _) := textShapes applyEff events j st' chain budget {} stStack
           budget := budget - used
           nodes := nodes ++ shs.map Node.shape
           if layered then nodes := nodes.push .groupEnd
@@ -4040,7 +4084,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               let layerClips : Array Nat :=
                 if layered then (match slot with | some k => #[k] | none => #[]) else #[]
               let st := if layered && slot.isSome then { st with clips := st.clips.pop } else st
-              let (shs, used, mbox) := textShapes applyEffective events idx st chain textBudget textPaths stack
+              let (shs, used, mbox, spans) := textShapes applyEffective events idx st chain textBudget textPaths stack
               textBudget := textBudget - used
               -- T81: usvg's `objectBoundingBox` for `<text>` is the union of
               -- each glyph's *font-metric* box, not its outline (`Text.
@@ -4074,7 +4118,53 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               | none => pure ()
               match pf.mode with
               | .render =>
-                nodes := nodes ++ shs.map Node.shape
+                -- T90: each run inside its spans' layers (`SpanLayers`).
+                let mut opened : Array (Nat × Bool) := #[]
+                let base := layerDepth + (if layered then 1 else 0)
+                for si in [0:shs.size] do
+                  let c := spans.chains.getD si #[]
+                  let mut keep := 0
+                  for q in [0:opened.size] do
+                    if keep == q && c.getD q opened.size == (opened.getD q default).1 then keep := q + 1
+                  for _ in [keep:opened.size] do
+                    if (opened.back?.map (·.2)).getD false then nodes := nodes.push .groupEnd
+                    opened := opened.pop
+                  for q in [keep:c.size] do
+                    let o := c.getD q 0
+                    let (ost, obox) := spans.owners.getD o default
+                    let open? := base + opened.size < maxLayerDepth
+                    if open? then
+                      let (ost, uses', oslot) := addClipUse ost uses
+                      uses := uses'
+                      let (mu, mh, omslot) := addMaskUse ost.maskRef ost.ctm maskUses maskHolders openMasks
+                      maskUses := mu
+                      maskHolders := mh
+                      match oslot with
+                      | some k => uses := uses.modify k (fun u => { u with bbox := obox })
+                      | none => pure ()
+                      match omslot with
+                      | some k => maskUses := maskUses.modify k (fun u => { u with bbox := obox })
+                      | none => pure ()
+                      let gi : GroupInfo :=
+                        { opacity := ost.ownOpacity, blend := ost.blend, isolate := ost.isolate,
+                          clips := oslot.toArray, mask := omslot }
+                      let gi := match ost.filterRaw with
+                        | some raw =>
+                          if eqAscii (trim raw) "none" then gi else
+                          let fbox : Option Filter.URect := obox.bind fun b =>
+                            if Box.nonZero b then some ⟨b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0⟩ else none
+                          let cx : Filter.ElemCtx := ⟨fbox, ost.color, ost.fontSize, ost.pctRefW, ost.pctRefH⟩
+                          match Filter.resolve fparsers ftab raw cx with
+                          | .filters fs => { gi with filters := fs, filterCtm := ost.ctm }
+                          | .drop => { gi with dropped := true }
+                          | .noFilter => gi
+                        | none => gi
+                      nodes := nodes.push (.groupBegin gi)
+                    opened := opened.push (o, open?)
+                  nodes := nodes.push (.shape (shs.getD si default))
+                for _ in [0:opened.size] do
+                  if (opened.back?.map (·.2)).getD false then nodes := nodes.push .groupEnd
+                  opened := opened.pop
                 if pf.want then
                   match frames.back? with
                   | some pf' =>
