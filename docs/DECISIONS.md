@@ -120,3 +120,13 @@ code are the only effects. Open for Rowan to decide later:
   stderr). Nothing is written anywhere the user did not pick, and each
   output goes to exactly one place. The theorems would then be about the
   chosen destinations rather than fixed paths.
+
+## T99 follow-ups decided (Rowan, 2026-09-23)
+
+- `enable-background`, `BackgroundImage`, `BackgroundAlpha`: stay unsupported
+  (SVG 2 removed them; no major browser implements them).
+- External files (linked PNG/SVG, external CSS, external `tref`, `xlink` to
+  another file): stay blocked. The renderer reads exactly one input file.
+
+Still open from T99: spotlight cone edge, box blur vs Gaussian, legacy
+features Chromium ignores, `xml:lang` font selection.
