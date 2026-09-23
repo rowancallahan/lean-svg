@@ -2011,7 +2011,12 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "evenodd" then { st with evenOdd := true }
     else if eqAscii t "nonzero" then { st with evenOdd := false } else st
-  | "stroke-width" => match parseLengthAll v with | some w => { st with strokeWidth := Fx.max 0 w } | none => st
+  -- `em`/`ex` against `fontSize`, `%` against the viewport diagonal
+  -- (`units::convert_length`'s catch-all `aid` arm), exactly like
+  -- `stroke-dasharray`/`stroke-dashoffset` above.
+  | "stroke-width" =>
+    match parseDashLengthAll st.fontSize (viewportDiag st.pctRefW st.pctRefH) v with
+    | some w => { st with strokeWidth := Fx.max 0 w } | none => st
   | "stroke-linecap" =>
     let t := trim v
     if eqAscii t "round" then { st with cap := .round }
