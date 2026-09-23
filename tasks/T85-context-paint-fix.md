@@ -73,3 +73,71 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## Spec implemented
+
+usvg 0.48.1 (`parser/use_node.rs`, `parser/paint_server.rs::update_paint_servers`/
+`process_paint`/`process_context_paint`): a paint that a shape gets through
+`context-fill`/`context-stroke` from a `<use>` is a paint server *of that use*.
+It is placed with the use group's absolute transform (the use's `transform`
+followed by its `x`/`y` translate) and, for `objectBoundingBox` units, sized by
+the object bbox of the use's whole expanded content in that space (usvg's
+`Group::bounding_box`: children's fill boxes through their own transforms). The
+painted descendant's own bbox and transform play no part. usvg does not apply
+the descendant's own `has_bbox` check to a context paint either.
+
+Design (smaller than T79's proposal: no change to `Paint` constructors, so
+`PatternRender.lean` is untouched):
+
+- `Svg.CtxUse {ctm, bbox}` and `Doc.ctxUses`: one slot per rendered `<use>`
+  whose own fill or stroke is a gradient or pattern. The slot takes the use's
+  CTM on open. Its bbox comes from the existing `Frame.bbox`/`want` machinery
+  on close (the use frame sets `want`, the same way a `clip-path` use does).
+- `Style.ctxSlot` (inherited; set on each `use`, `none` when the use's paint is
+  not a server) and `Style.fillCtx`/`strokeCtx`. `applyProp` sets these to
+  `ctxSlot` when the value is `context-*` and resets them for any other paint.
+  An inherited context paint keeps its slot.
+- `Render.drawShape`: `paintMask` takes the shape's `fillCtx`/`strokeCtx`. With
+  a slot it hands `Grad.build`/`Pat.build` the slot's box as a rectangle path
+  and `rootMat · slot.ctm` (layer-shifted as before) instead of the shape's own
+  `cmds`/`gctm`. Without a slot the path is byte-identical to before.
+- The shape-level `has_bbox` fallback (`fixPaint`, T64) is skipped for a
+  context paint.
+
+## Skipped
+
+- Context paint inside markers (`with-gradient-on-marker`, `in-marker` etc.,
+  T73's scope). Slots are only created for a `use` in `.render` mode, so a `use`
+  inside a marker, `defs` or a clip keeps its old behaviour.
+- `use` → `symbol` with a viewport clip: usvg marks the outer clip group as the
+  context element, and that group's `abs_transform` is set to the parent's. We
+  use the `use`'s CTM. This is not exercised by the corpus.
+- Pattern content (`PatternRender`) does not read the slots. usvg resolves
+  pattern children with an empty context.
+
+## Report
+
+Target files, within-8:
+
+| file | 100 px before → after | 200 px before → after |
+|---|---|---|
+| with-gradient-and-gradient-transform | 69.45 → 99.71 (pass) | 71.04 → 99.93 (pass) |
+| with-gradient-in-use | 69.83 → 99.66 (pass) | 70.74 → 99.94 (pass) |
+| with-pattern-in-use | 82.42 → 99.84 (pass) | 83.70 → 99.94 (pass) |
+| with-pattern-and-transform-in-use | 70.11 → 98.40 (fail) | 74.12 → 98.86 (fail) |
+| with-pattern-objectBoundingBox-in-use | 68.94 → 98.07 (fail) | 72.06 → 93.45 (fail) |
+| with-text (bonus) | 96.74 → 100.00 (pass) | 97.00 → 99.90 (pass) |
+
+The pattern geometry in the two remaining failures now matches resvg (checked
+with side-by-side renders). What is left sits along pattern-cell edges. In both
+files the `use` has `transform="rotate(45)"`, so the pattern tile is sampled
+under rotation. That is the same limitation that makes
+`paint-servers/pattern/transform-and-patternTransform.svg` fail today (0.906 at
+200 px) and has nothing to do with context paint.
+
+Whole resvg suite (direct route): 100 px 1521 → 1525 pass. 200 px 1542 → 1546
+pass (92.1%). 0 pass→fail and no within-8 drops at either width.
+`tests/run_tests.py`: 47/51. The new `85_context_paint` passes (99.37); every
+other file is unchanged, and the 4 failures that were already there remain.
+`run_adversarial.py`: 117/117 clean. `run_tiles.py`: 51/51 byte-identical.
+`lake build`: no warnings. `check-theorems.sh`: `theorems ok`.
