@@ -44,3 +44,66 @@ supported should degrade exactly as it does today (skip), not error.
 (`git clone --depth 1 --branch v0.48.1 https://github.com/linebender/resvg`
 into a scratch dir; `crates/usvg/src/parser/*` and `crates/resvg/src/*`).
 
+## Report
+
+Wrote `docs/audit/A1-pass-rules.md` covering all five points, with
+measurements against the real corpus (not just source-reading).
+
+**Files changed:**
+- `docs/audit/A1-pass-rules.md` (new) — the audit.
+- `tests/run_corpora.py` — added `--ref {resvg,suite}` (default `resvg`,
+  behaviour unchanged when omitted); `render_one_suite`, `load_suite_ref`,
+  `SUITE_REF_CORPUS`, wired through `run_corpus_route`,
+  `write_worst_composites`, `main`, and the `summary.md` text.
+
+**Key findings** (details and full tables in the doc):
+1. resvg's own CI (`cargo test --all --release`) is a bit-almost-exact
+   *regression* test against PNGs checked into the `resvg` repo itself
+   (not `resvg-test-suite`'s), at width 300, requiring zero pixels to
+   differ by more than 1 level/channel. It never reads
+   `resvg-test-suite`'s PNGs.
+2. `resvg-test-suite`'s per-test PNG (`tools/vdiff`'s "Reference" backend)
+   is empirically resvg's own historical render, not an independent
+   oracle: live resvg 0.48.1 matches it (median within-8 99.87%, native
+   resolution, no resampling) for files `results.csv` already calls
+   "resvg correct" (1209/1520 clear our 99%/tol-8 bar), but only
+   12/95 "resvg known wrong" files and 5/61 unrated files do.
+3. Implemented `--ref suite`. At native resolution it's a real,
+   informative comparison (used for #2 above). At the widths we actually
+   render (100/200 px) it is not: the suite ships one fixed-resolution PNG
+   per file (~500 px) and resampling it dominates the result — pass rate
+   on the identical 1679 files swings from 7.5% (width 100) to 0.2% (width
+   200), purely from resampling-phase artifacts. Recommend keeping live
+   resvg as the default; `--ref suite` is for native-resolution spot
+   checks only, cross-referenced against `results.csv`'s rating.
+4. Our bar (8 levels / 99% of pixels) is far looser than resvg's own
+   (effectively 1 level / 100%, i.e. zero tolerated differing pixels).
+   Applying resvg's literal bar to our renders vs. live resvg drops our
+   resvg-corpus pass rate from 91.8% to 56.5% at width 200 — though that
+   comparison itself isn't apples-to-apples (regression-vs-self vs.
+   cross-implementation match), which the doc calls out explicitly.
+5. No evidence of accidental inflation (sampling is seeded and reported,
+   every status counts toward `pass% (all)`'s denominator, the 99%/tol-8
+   choice is stated in the tool's own output). One real, previously
+   under-surfaced gap: 96 of 1679 resvg-corpus files are
+   `results.csv`-rated "resvg known wrong", and matching resvg on those
+   counts as an ordinary pass in `run_corpora.py`'s default summary —
+   `tests/score_known.py` already splits this out but isn't folded into
+   `summary.md`, so the headline "N% pass" figure doesn't carry its
+   correct/known-wrong/unrated breakdown by default.
+
+**Verification:** `lake build` clean; `python3 tests/run_tests.py` baseline
+unchanged (46/50, pre-existing, this task didn't touch `LeanSvg/*` or
+`run_tests.py`); `python3 -m py_compile tests/run_corpora.py` clean; ran
+`run_corpora.py` with both `--ref resvg` (unchanged output) and `--ref
+suite` at widths 100/200, full resvg corpus (1679 files), both routes, to
+produce the tables above.
+
+**Could not do / left open:** did not fold `score_known.py`'s breakdown
+into `run_corpora.py`'s `summary.md` — that's a real code change beyond
+this audit's brief, flagged for a follow-up task. A 3-file discrepancy
+between `results.csv`'s rating counts (1522/96/61) and what the native-res
+measurement could actually score (1520/95/61) wasn't root-caused (likely a
+title/path mismatch or one unreadable PNG); too small to affect any
+conclusion.
+
