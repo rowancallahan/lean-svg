@@ -210,3 +210,13 @@ time theorems must keep holding.
 - Also to revisit: the filter work budget refuses PlantUML's drop shadow
   (300% filter region) on tall diagrams rendered at 1000 px wide
   (1000 × 5,500 px); they render at 600 px. Chromium has no such cap.
+
+## Font licensing rule (Rowan, 2026-09-24)
+
+Only highly open, well-permissioned fonts may be bundled (SIL OFL 1.1 or
+equally permissive, e.g. the Bitstream Vera / DejaVu licence). A font merges
+only when: its licence is verified against the upstream project, the full
+licence text is in `LeanSvg/Fonts/`, `NOTICE` credits it, and the README
+"Licensing and credits" table lists it with version, copyright and licence.
+Fonts embedded in an input SVG (T105) are used only to render that file and
+are never redistributed by lean-svg; the README says so.
