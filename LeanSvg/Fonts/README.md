@@ -1,6 +1,10 @@
 # Embedded fonts
 
-Every font here is under the **SIL Open Font License 1.1**. The fonts are
+Every font here is under the **SIL Open Font License 1.1**, except the DejaVu
+fonts (T106), which carry the permissive Bitstream Vera / Arev licence
+(`LICENSE-DejaVu.txt`: use, modify and redistribute, not sold by themselves;
+modified versions must not use the names "Bitstream Vera" or "Arev" — the
+embedded subsets keep the name "DejaVu"). The fonts are
 subsetted (hinting dropped, only the `kern` layout feature kept) and, for
 variable fonts, pinned to one static instance; the OFL permits both. None of
 the families embedded here uses a Reserved Font Name in its own name. Noto
@@ -28,7 +32,25 @@ SC"/"Noto Sans KR" and do not use "Source".
 | NotoSansThin | Noto Sans Thin | 2.000 | Latin, Greek, Cyrillic | 2793 | 273,578 | 366,626 | LICENSE-OFL.txt |
 | NotoSansLight | Noto Sans Light | 2.000 | Latin, Greek, Cyrillic | 2793 | 269,894 | 361,714 | LICENSE-OFL.txt |
 | NotoSansBlack | Noto Sans Black | 2.000 | Latin, Greek, Cyrillic | 2793 | 274,404 | 367,730 | LICENSE-OFL.txt |
-| **Total** | | | | | **20,753,329** | **27,777,504** | |
+| DejaVuSans | DejaVu Sans Book | 2.37 | Latin, Greek, Cyrillic, symbols, maths | 3074 | 284,426 | 381,352 | LICENSE-DejaVu.txt |
+| DejaVuSansBold | DejaVu Sans Bold | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 178,435 | 239,610 | LICENSE-DejaVu.txt |
+| DejaVuSansOblique | DejaVu Sans Oblique | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 181,794 | 244,099 | LICENSE-DejaVu.txt |
+| DejaVuSansMono | DejaVu Sans Mono Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2032 | 131,338 | 177,385 | LICENSE-DejaVu.txt |
+| DejaVuSerif | DejaVu Serif Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2069 | 148,628 | 200,257 | LICENSE-DejaVu.txt |
+| Arimo | Arimo Regular | 1.341, wght=400 | Latin, Greek, Cyrillic | 1830 | 140,270 | 188,803 | LICENSE-OFL-Croscore.txt |
+| ArimoBold | Arimo Bold | 1.341, wght=700 | Latin, Greek, Cyrillic | 1830 | 141,220 | 190,072 | LICENSE-OFL-Croscore.txt |
+| Tinos | Tinos Regular | 1.340 | Latin, Greek, Cyrillic | 1830 | 154,997 | 208,422 | LICENSE-OFL-Croscore.txt |
+| TinosBold | Tinos Bold | 1.340 | Latin, Greek, Cyrillic | 1830 | 148,256 | 199,439 | LICENSE-OFL-Croscore.txt |
+| TinosItalic | Tinos Italic | 1.340 | Latin, Greek, Cyrillic | 1830 | 157,247 | 211,433 | LICENSE-OFL-Croscore.txt |
+| Cousine | Cousine Regular | 1.241 | Latin, Greek, Cyrillic | 1625 | 111,478 | 150,554 | LICENSE-OFL-Croscore.txt |
+| STIXTwoMath | STIX Two Math Regular | 2.12 | maths symbols and alphanumerics | 2920 | 423,839 | 567,043 | LICENSE-OFL-STIXTwo.txt |
+| STIXTwoText | STIX Two Text Regular | 2.13, wght=400 | Latin, Greek, Cyrillic | 1243 | 148,480 | 199,858 | LICENSE-OFL-STIXTwo.txt |
+| STIXTwoTextItalic | STIX Two Text Italic | 2.13, wght=400 | Latin, Greek, Cyrillic | 1243 | 161,928 | 217,807 | LICENSE-OFL-STIXTwo.txt |
+| CMUSerif | CMU Serif Roman | 0.7.0 | Latin, Greek, Cyrillic | 1006 | 141,356 | 190,223 | LICENSE-OFL-CMU.txt |
+| CMUSerifItalic | CMU Serif Italic | 0.7.0 | Latin, Greek, Cyrillic | 829 | 143,974 | 193,966 | LICENSE-OFL-CMU.txt |
+| CMUSansSerif | CMU Sans Serif Medium | 0.7.0 | Latin, Greek, Cyrillic | 889 | 80,664 | 109,603 | LICENSE-OFL-CMU.txt |
+| CMUTypewriter | CMU Typewriter Text Regular | 0.7.0 | Latin, Greek, Cyrillic | 877 | 106,030 | 143,461 | LICENSE-OFL-CMU.txt |
+| **Total** | | | | | **23,737,689** | **31,790,891** | |
 
 Sources (all `glyf` TrueType outlines):
 
@@ -97,8 +119,55 @@ python3 tests/gen_font_module.py NotoSans-Thin.ttf NotoSansThin --unicodes='*' \
   --layout-features='kern,mark,mkmk,ccmp,locl,smcp,liga' --no-glyph-names
 ```
 
+## Real-world families (T106)
+
+The families matplotlib, Graphviz, PlantUML, Vega and Mermaid ask for, matched
+by `LeanSvg/FamilyMatch.lean` (exact name, then alias, then CSS generic, as
+Chromium on Linux does):
+
+- **DejaVu Sans / Sans Mono / Serif 2.37** (matplotlib's default, and its
+  `dejavusans` mathtext set; Chromium's `monospace`):
+  https://github.com/dejavu-fonts/dejavu-fonts, release
+  `dejavu-fonts-ttf-2.37.tar.bz2`.  DejaVu Sans keeps symbols, arrows, maths
+  operators and mathematical alphanumerics, being the first fallback of every
+  T106 family; the other faces keep text ranges only.
+- **Arimo, Tinos, Cousine** in place of Liberation Sans/Serif/Mono: the
+  Liberation 2.x downloads (GitHub release assets, pagure) were refused by
+  this session's network policy, and Liberation 2.x is built from these
+  Chrome OS core fonts with the same metrics (Arial/Helvetica,
+  Times/Times New Roman, Courier/Courier New compatible).  From
+  https://github.com/google/fonts/tree/main/ofl/{arimo,tinos,cousine}
+  (OFL 1.1, no Reserved Font Name).  Arimo's variable font is pinned at
+  wght 400 and 700.
+- **STIX Two Math 2.12 and STIX Two Text 2.13** (matplotlib's `stix`/`stixsans`
+  sets, STIXGeneral, STIXSize*): https://github.com/google/fonts/tree/main/ofl/
+  {stixtwomath,stixtwotext}.  Reserved Font Name "TM Math", not used here.
+  The `MATH` table is dropped (only `glyf` outlines are drawn).
+- **CMU Serif / Serif Italic / Sans Serif / Typewriter Text 0.7.0**
+  (Computer Modern Unicode, for `cmr10`, `cmmi10`, `cmss10`, `cmtt10`, …):
+  https://sourceforge.net/projects/cm-unicode/, `cm-unicode-0.7.0-ttf.tar.xz`
+  (CTAN was refused by the network policy).  Reserved Font Family Name
+  "Computer Modern Unicode fonts", not used by the embedded family names.
+
+All subsetted with `--no-glyph-names`, text ranges
+`U+0020-007E,U+00A0-04FF,U+1E00-1EFF,U+2000-23FF,U+2500-25FF,U+FB00-FB06,U+FFFD`
+(CMU: Latin/Greek/Cyrillic, punctuation, arrows, maths operators; STIX Two
+Math: maths and symbol blocks, U+1D400-1D7FF), e.g.
+
+```
+python3 tests/gen_font_module.py DejaVuSans.ttf DejaVuSans --no-glyph-names --unicodes=...
+python3 tests/gen_font_module.py 'Arimo[wght].ttf' ArimoBold --instance wght=700 --no-glyph-names --unicodes=...
+```
+
 ## Not embedded
 
 - **Emoji**: not now (Rowan's decision); colour emoji are bitmap/COLR, not `glyf`.
+- T106, skipped: Liberation fonts themselves (download refused, see above;
+  Arimo/Tinos/Cousine used instead); matplotlib's BaKoMa `cmr10.ttf` etc.
+  (their licence forbids modification, which subsetting is); Microsoft core
+  fonts (Arial, Times New Roman, Verdana, Trebuchet MS: not freely
+  redistributable); DejaVu Sans Bold Oblique, Serif Bold/Italic, Sans Mono
+  Bold, Cousine Bold, the other CMU faces (size; the nearest embedded face is
+  drawn, nothing is synthesised).
 - Noto Sans JP/TC: Mplus 1p and Noto Sans SC already cover kana and most
   Traditional characters; they would add ~20 MB for little reach.
