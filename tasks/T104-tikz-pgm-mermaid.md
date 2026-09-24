@@ -131,3 +131,12 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+## Addendum (integrator, Rowan's requirement)
+
+The foreignObject HTML subset must keep every theorem and the file
+behaviour exactly as it is: one input file read, at most the PNG and (with
+`--warnings`) the warnings file written, nothing on stdout/stderr, and no
+external resource ever loaded (no `img`, `link`, `iframe`, `object`,
+`embed`, `video`, CSS `url()`/`@import`). `tests/run_adversarial.py` now
+has `foreignobject_refs_inert`, which the merge gate runs.
