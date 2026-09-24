@@ -165,14 +165,16 @@ hours; partial but regression-free beats complete but risky.
 - `tests/svg/118_font_stretch.svg`: keywords, nearest-stretch, inherit,
   stretch over bold italic, expanded → normal, shorthand, percentage.
 
-- **Fallback** (follow-up commit): Noto Sans ExtraCondensed is a resvg-suite
+- **Fallback**: Noto Sans ExtraCondensed is a resvg-suite
   font, so a chunk it cannot fully draw follows usvg's rules (FontSet order,
   a fallback covering the whole chunk replaces every glyph), not T106's
-  per-character Chromium chain. `FamilyMatch.isSuite` (indices < 16, and
+  per-character Chromium chain. `FamilyMatch.suite` (indices < 16, and
   34) replaces the three `base < FamilyMatch.first` tests in
   `FamilyMatch.fallbackOrder` and `Text.assignFonts`; document fonts
   (≥ `FontSet.count`) are unaffected. Found by `118_font_stretch.svg`'s
   `ultra-condensed` line with a `→`, which resvg draws wholly in Mplus 1p.
+  (This branch had it as `isSuite`; the integration merge `d1e0a0c` made the
+  same fix as `FamilyMatch.suite`, which this branch now uses unchanged.)
 
 ## Skipped, and why
 
@@ -229,5 +231,8 @@ another.
 - Binary 46.8 MB → 47.2 MB (< 75 MB).
 - Merge notes: `SpanProps` gets T116's `weight`/`italic` and T118's
   `stretch`; T116's real-world italic pick also passes the stretch;
-  `Synth.realWorld` now excludes Noto Sans ExtraCondensed, because usvg never
-  synthesises bold or oblique for a suite font.
+  `Synth.realWorld` excludes Noto Sans ExtraCondensed, because usvg never
+  synthesises bold or oblique for a suite font. The integration merge
+  `d1e0a0c` resolved it the same way; after merging `d1e0a0c` back, this
+  branch's code is identical to the integration branch's, and the measured
+  code above is that code without T115's filter-budget change.

@@ -3003,9 +3003,9 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 `bsStack`, not from `st`: see `baselineShiftDelta`). -/
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
-    stretch := st.fontStretch,
     weight := st.fontWeight,
     italic := st.fontItalic,
+    stretch := st.fontStretch,
     smallCaps := st.fontSmallCaps,
     -- T105: a document family picks its face by weight and style
     family := if st.fontFamily < FontSet.count then st.fontFamily

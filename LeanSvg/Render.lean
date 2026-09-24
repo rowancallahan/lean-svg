@@ -724,16 +724,26 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
             let mut by0 := max fy0 my0
             let mut bx1 := min fx1 (mx0 + 5 * (fullW : Int))
             let mut by1 := min fy1 (my0 + 5 * (fullH : Int))
+            let nprims : Nat := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
             if bx1 > bx0 && by1 > by0 && (bx1 - bx0) * (by1 - by0) > (maxFilterPixels : Int) then
               bx0 := max bx0 curOx
               by0 := max by0 curOy
               bx1 := min bx1 (curOx + cur.w)
               by1 := min by1 (curOy + cur.h)
+            -- T115: a region whose work would pass `maxFilterWork` is cut to the
+            -- whole image (not the tile, so tiles stay identical) before the
+            -- budget is checked: PlantUML's 300% drop-shadow regions on tall
+            -- diagrams at 1000 px.
+            if bx1 > bx0 && by1 > by0 &&
+                (nprims : Int) * (bx1 - bx0) * (by1 - by0) > (maxFilterWork : Int) then
+              bx0 := max bx0 (mx0 + 2 * (fullW : Int))
+              by0 := max by0 (my0 + 2 * (fullH : Int))
+              bx1 := min bx1 (mx0 + 3 * (fullW : Int))
+              by1 := min by1 (my0 + 3 * (fullH : Int))
             if bx1 ≤ bx0 || by1 ≤ by0 then skipDepth := 1
             else
               let lw := (bx1 - bx0).toNat
               let lh := (by1 - by0).toNat
-              let nprims := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
               filterWork := filterWork + nprims * lw * lh
               if nprims * lw * lh > maxFilterWork || filterWork > maxFilterTotal then
                 err := some "filter budget"

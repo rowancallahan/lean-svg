@@ -48,12 +48,13 @@ def cmuSans : Nat := 32
 def cmuTypewriter : Nat := 33
 /-- The first T106 font: every font before it is the resvg suite's set. -/
 def first : Nat := 16
-/-- T118: Noto Sans ExtraCondensed, appended after the T106 fonts. -/
+
+/-- T118's Noto Sans ExtraCondensed: a resvg-suite face appended after the
+T106 fonts, so it follows usvg's rules (no synthesis, whole-chunk fallback). -/
 def notoSansExtraCondensed : Nat := 34
 
-/-- A resvg-suite font (usvg's fallback rules), as opposed to a T106 family
-or a document font: the fonts before `first`, and Noto Sans ExtraCondensed. -/
-def isSuite (k : Nat) : Bool := k < first || k == notoSansExtraCondensed
+/-- A resvg-suite font: usvg's font rules apply to it. -/
+def suite (k : Nat) : Bool := k < first || k == notoSansExtraCondensed
 
 /-- Lowercase alias → `FontSet` index.  An index that is not the first face
 of its family (`cmuSerifItalic`) locks that face: `pick` keeps it. -/
@@ -154,7 +155,7 @@ suite's fonts keep `FontSet` order (usvg's); a T106 base tries DejaVu Sans
 then STIX Two Math first (fontconfig's usual first fallbacks on Linux, and
 the widest symbol coverage embedded). -/
 def fallbackOrder (base count : Nat) : List Nat :=
-  if isSuite base then List.range count
+  if suite base then List.range count
   else dejaVuSans :: stixTwoMath :: List.range count
 
 end FamilyMatch
@@ -162,6 +163,9 @@ end LeanSvg
 
 namespace LeanSvg
 namespace FamilyMatch
+
+-- T118's face sits at `notoSansExtraCondensed` (width class 2).
+example : (FontSet.styles.getD notoSansExtraCondensed (0, false, 0)).2.2 = 2 := by rfl
 
 -- The index constants and the style table must agree with `FontSet`.
 example : FontSet.styles.size = FontSet.entries.size := by rfl
@@ -171,7 +175,6 @@ example : [dejaVuSans, dejaVuSansMono, dejaVuSerif, arimo, tinos, cousine, stixT
     ["DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "Arimo", "Tinos", "Cousine",
      "STIX Two Math", "STIX Two Text", "CMU Serif", "CMU Serif", "CMU Sans Serif",
      "CMU Typewriter Text"].map some := by rfl
-example : FontSet.styles[notoSansExtraCondensed]? = some (400, false, 2) := by rfl
 
 end FamilyMatch
 end LeanSvg

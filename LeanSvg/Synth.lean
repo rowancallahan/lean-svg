@@ -16,15 +16,14 @@ linear in between (the size in device pixels); advances do not change.
 
 Only the real-world fonts (`FamilyMatch`, `FontSet` indices from
 `FamilyMatch.first`) synthesise: usvg never does, and the resvg suite's fonts
-come before them (T118: except Noto Sans ExtraCondensed, a suite font after
-them, `FamilyMatch.isSuite`).
+come before them.
 -/
 
 namespace LeanSvg
 namespace Synth
 
 /-- A T106 embedded font: the only ones that synthesise. -/
-def realWorld (k : Nat) : Bool := !FamilyMatch.isSuite k && k < FontSet.count
+def realWorld (k : Nat) : Bool := !FamilyMatch.suite k && k < FontSet.count
 
 /-- Font `k` drawn for `weight` gets a fake-bold outline. -/
 def bold (k weight : Nat) : Bool :=
