@@ -3778,6 +3778,30 @@ structure SubCfg where
   the root's natural size. -/
   outSize : Option (Nat × Nat) := none
 
+/-- T104: the root `<svg>`'s non-standard `background-color` (usvg
+`convert_doc`): the winning value across `!important` CSS, `style=""`, normal
+CSS and the attribute, if it is a plain colour, as a shape filling `area` (the
+`viewBox`, or the root size without one) in the root's user space.  usvg makes
+it a sibling *before* the root group, so the root's own opacity, clip, mask
+and filter do not apply to it. -/
+def rootBackground (rules : Array Css.Rule) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo)
+    (area : Fx × Fx × Fx × Fx) : Option Shape :=
+  let n := "background-color"
+  let (normalCss, importantCss) := Css.matchingDeclsSplit rules chain
+  let lastNamed := fun (decls : Array (String × ByteArray)) =>
+    (decls.filter (fun d => d.1 == n)).back?.map (·.2)
+  let styleDecls := match attr attrs "style" with
+    | some v => parseStyleDecls v
+    | none => #[]
+  let v := (lastNamed importantCss).orElse fun _ =>
+    (lastNamed styleDecls).orElse fun _ => (lastNamed normalCss).orElse fun _ => attr attrs n
+  v.bind fun v => (parseSolidColor (lower (trim v))).bind fun c =>
+    let (x, y, w, h) := area
+    if w ≤ 0 || h ≤ 0 then none else
+    some { cmds := #[.moveTo ⟨x, y⟩, .lineTo ⟨x + w, y⟩, .lineTo ⟨x + w, y + h⟩,
+                     .lineTo ⟨x, y + h⟩, .close],
+           style := { (default : Style) with fill := .solid c } }
+
 /-- Walk the event stream with a style stack.
 
 T29 adds CSS from `<style>` elements, collected in one pre-pass over `events`
@@ -4122,6 +4146,13 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           if isDisplayNone attrs || !passesConditions attrs then
             skip := 1
           else
+            let r := parseRoot attrs
+            let area := match r.viewBox with
+              | some vb => some vb
+              | none => (resolveRootSize r).map fun (w, h) => (0, 0, w, h)
+            match area.bind (rootBackground rules attrs chain) with
+            | some bg => nodes := nodes.push (.shape bg)
+            | none => pure ()
             -- usvg converts the root `svg` as a group, so its own `clip-path`
             -- applies (`masking/clipPath/on-the-root-svg-with-size`).  T18's
             -- gradient table reaches every element from here, by inheritance.
