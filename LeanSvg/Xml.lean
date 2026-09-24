@@ -18,7 +18,11 @@ It is *not* a conforming XML parser, and that is the point:
 * Namespaces (T86) are resolved as roxmltree does, scoped per element: an
   unknown prefix is an error, and an element outside the SVG namespace (usvg
   accepts no namespace or SVG) is dropped with its whole subtree, text
-  included.  Attribute names come out canonical: SVG-namespace prefixes are
+  included — except (T104) an XHTML subtree whose root is a child of an SVG
+  `foreignObject`: its XHTML elements are delivered as `html:<local name>`
+  (so no SVG consumer can mistake one for an SVG element) with their text,
+  and anything inside it outside XHTML is dropped with its subtree
+  (`ForeignObject.lean` renders a small subset).  Attribute names come out canonical: SVG-namespace prefixes are
   stripped, XLink and XML ones become `xlink:`/`xml:`, any other namespace and
   the `xmlns` declarations themselves are dropped.  At most `maxNsBindings`
   declarations may be in scope at once.
@@ -51,6 +55,7 @@ def maxElements : Nat := 1000000
 def svgNs : String := "http://www.w3.org/2000/svg"
 def xlinkNs : String := "http://www.w3.org/1999/xlink"
 def xmlNs : String := "http://www.w3.org/XML/1998/namespace"
+def xhtmlNs : String := "http://www.w3.org/1999/xhtml"
 /-- Namespace declarations in scope at once (every ancestor's plus the
 element's own); bounds each prefix lookup. -/
 def maxNsBindings : Nat := 64
@@ -77,6 +82,8 @@ structure Scoped where
   binds : Array (String × String)
   name : String
   foreign : Bool
+  /-- T104: the element is in the XHTML namespace. -/
+  html : Bool
   attrs : Array Attr
 
 /-- Push the tag's own `xmlns`/`xmlns:p` declarations onto `binds`, then
@@ -103,7 +110,7 @@ def resolveNs (binds : Array (String × String)) (qname : String) (raw : Array A
       if u == svgNs then attrs := attrs.push { a with name := l }
       else if u == xlinkNs then attrs := attrs.push { a with name := "xlink:" ++ l }
       else if u == xmlNs then attrs := attrs.push { a with name := "xml:" ++ l }
-  return ⟨b, el, eu != "" && eu != svgNs, attrs⟩
+  return ⟨b, el, eu != "" && eu != svgNs, eu == xhtmlNs, attrs⟩
 
 /-- Parse `#NNN;` / `#xHHH;` (without the `&` and `;`). -/
 def parseCharRef (name : ByteArray) : Except String Nat := do
@@ -197,6 +204,10 @@ def decodeText (bs : ByteArray) (b e : Nat) : ByteArray := Id.run do
 def parse (bs : ByteArray) : Except String (Array Event) := do
   let mut events : Array Event := #[]
   let mut stack : Array String := #[]
+  -- T104: per open element, whether it is an SVG `foreignObject`; and the
+  -- depth of the outermost delivered XHTML element, `0` when none is open.
+  let mut foOpen : Array Bool := #[]
+  let mut htmlDepth : Nat := 0
   -- Namespace scope: every declaration in scope, and per open element the
   -- size `binds` had before it (restored on close).  `skip` is the depth of
   -- the outermost open non-SVG element, `0` when none: nothing under it is
@@ -253,9 +264,11 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
         if top != name then throw s!"mismatched end tag </{name}>, expected </{top}>"
       if skip == 0 then events := events.push .close
       if skip == stack.size then skip := 0
+      if htmlDepth == stack.size then htmlDepth := 0
       binds := binds.extract 0 (marks.back?.getD 0)
       marks := marks.pop
       stack := stack.pop
+      foOpen := foOpen.pop
       i := j + 1
     else
       let ns := i + 1
@@ -300,15 +313,20 @@ def parse (bs : ByteArray) : Except String (Array Event) := do
       if stack.size ≥ maxDepth then throw "elements nested too deeply"
       let sc ← resolveNs binds name attrs
       if stack.size == 0 && sc.foreign then throw "root element is not in the SVG namespace"
-      let skipping := skip != 0 || sc.foreign
-      if !skipping then events := events.push (.open_ sc.name sc.attrs)
+      let html := skip == 0 && sc.html && (htmlDepth > 0 || foOpen.back?.getD false)
+      let foreign := if htmlDepth > 0 then !html else sc.foreign && !html
+      let skipping := skip != 0 || foreign
+      let ename := if html then "html:" ++ sc.name else sc.name
+      if !skipping then events := events.push (.open_ ename sc.attrs)
       if selfClose then
         if !skipping then events := events.push .close
       else
         stack := stack.push name
+        foOpen := foOpen.push (!skipping && !html && sc.name == "foreignObject")
         marks := marks.push binds.size
         binds := sc.binds
-        if skip == 0 && sc.foreign then skip := stack.size
+        if skip == 0 && foreign then skip := stack.size
+        if html && htmlDepth == 0 then htmlDepth := stack.size
       i := j
   if stack.size != 0 then throw s!"unclosed element <{stack.back?.getD ""}>"
   -- `count` (not `events.isEmpty`): a tagless document now produces a single

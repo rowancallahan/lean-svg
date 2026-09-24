@@ -14,6 +14,7 @@ import LeanSvg.VertOrient
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use
+import LeanSvg.ForeignObject
 import LeanSvg.ImageData
 import LeanSvg.Inflate
 import LeanSvg.PngDecode

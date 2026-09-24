@@ -6,6 +6,7 @@ import LeanSvg.Canvas
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use
+import LeanSvg.ForeignObject
 import LeanSvg.Filter
 import LeanSvg.Image
 import LeanSvg.SvgImage
@@ -3853,6 +3854,9 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         if styleDepth.isSome && styleOk then out := (out ++ bytes).push 32
     return out
   let rules := Css.parseStylesheet combinedCss
+  -- T104: XHTML labels in `foreignObject` become SVG text (after `use`
+  -- expansion, so copies are rewritten too; needs the stylesheet).
+  let events ← ForeignObject.rewrite rules events
   -- One bounded pre-pass over the same events collects every referenceable
   -- definition: T18's gradient paint servers, resolved here into an immutable
   -- table that is handed to the root element's `Style` and inherited by
