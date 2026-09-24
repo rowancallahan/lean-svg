@@ -2696,6 +2696,10 @@ def wrapTransformOrigin (attrs : Array Xml.Attr) (pctRefW pctRefH : Fx) (m : Mat
     if odx == 0 && ody == 0 then m
     else ((Mat.translate odx ody).mul m).mul (Mat.translate (-odx) (-ody))
 
+/-- T102: what an invalid `gradientTransform`/`patternTransform` becomes: the
+zero matrix, which no paint server can invert, so the paint is `none`. -/
+def singularMat : Mat := ⟨0, 0, 0, 0, 0, 0⟩
+
 /-- One `linearGradient`/`radialGradient` element's own attributes.
 `pctRefW`/`pctRefH` are the same viewport rect `applyEffective` resolves
 `transform-origin` percentages against (`DefsScan.pctRef`'s doc comment). -/
@@ -2712,15 +2716,13 @@ def parseGradDef (name : String) (attrs : Array Xml.Attr) (pctRefW pctRefH : Fx)
       let t := trim v
       if eqAscii t "userSpaceOnUse" then some false
       else if eqAscii t "objectBoundingBox" then some true else none,
-    -- usvg's `svgtree` replaces *any* transform attribute whose value is not
-    -- `Transform::is_valid` with the identity: either column of the linear
-    -- part having zero length makes it invalid, so `matrix(0 0 0 0 0 0)`
-    -- renders as an untransformed gradient rather than as nothing.  (A
-    -- singular matrix with two non-zero columns stays singular and is
-    -- dropped later, by the inversion in `Grad.build`.)
+    -- T102: a transform with a zero-length column (`matrix(0 0 0 0 0 0)`)
+    -- becomes the zero matrix, so the paint draws nothing, as in Chromium
+    -- (usvg's `svgtree` would use the identity instead; Rowan's review).
+    -- Any singular matrix is then dropped by the inversion in `Grad.build`.
     transform := (attr attrs "gradientTransform").map fun v =>
       let m := parseTransform v
-      let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m
+      let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then singularMat else m
       wrapTransformOrigin attrs pctRefW pctRefH m,
     spread := (attr attrs "spreadMethod").bind fun v =>
       let t := trim v
@@ -2775,12 +2777,13 @@ def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Na
   { id := match attr attrs "id" with | some v => toStr v | none => "",
     href := if href.length > Pat.maxIdLen then "" else href,
     oBB := units "patternUnits", contentOBB := units "patternContentUnits",
-    -- Same "invalid transform becomes the identity" rule as `gradientTransform`.
+    -- Same "invalid transform draws nothing" rule as `gradientTransform`
+    -- (`Pat.build` skips a zero scale).
     transform := match attr attrs "patternTransform" with
       | none => Mat.identity
       | some v =>
         let m := parseTransform v
-        let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then Mat.identity else m
+        let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then singularMat else m
         wrapTransformOrigin attrs pctRefW pctRefH m,
     x := coord "x", y := coord "y", width := coord "width", height := coord "height",
     viewBox := (attr attrs "viewBox").bind fun v =>
