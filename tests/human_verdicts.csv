@@ -1,1 +1,77 @@
 file,verdict,note
+filters/feColorMatrix/type=saturate-with-a-large-coefficient.svg,pass,"seems like this should look way more saturated and closer to chromium tb, but the chromium one has bad transitions, so i think we are close and better than chromium, so if thats the best it can be we can just keep it like this and make a note."
+filters/feColorMatrix/type=saturate-with-negative-coefficient.svg,pass,
+filters/feConvolveMatrix/bias=-0.5.svg,pass,
+filters/feConvolveMatrix/bias=0.5.svg,pass,
+filters/feConvolveMatrix/bias=9999.svg,pass,
+filters/feConvolveMatrix/edgeMode=wrap-with-matrix-larger-than-target.svg,pass,
+filters/feDiffuseLighting/complex-transform.svg,pass,
+filters/feDisplacementMap/simple-case.svg,pass,ok we can draw nothing for this but add it to todo list for me to think about
+filters/fePointLight/complex-transform.svg,pass,
+filters/fePointLight/primitiveUnits=objectBoundingBox.svg,fail,seems like the circle should be lighter here and more like suite somehow
+filters/feSpotLight/complex-transform.svg,fail,needs to be softer /blurred on the edges like chromium and suite
+filters/feSpotLight/limitingConeAngle-anti-aliasing.svg,fail,no anti aliasing here
+filters/feSpotLight/primitiveUnits=objectBoundingBox.svg,pass,
+filters/feTile/complex-transform.svg,pass,
+filters/feTurbulence/stitchTiles=stitch.svg,pass,
+filters/filter-functions/two-exact-urls.svg,pass,
+filters/filter/in=FillPaint-on-g-without-children.svg,pass,
+filters/filter/in=FillPaint-with-gradient.svg,pass,
+filters/filter/in=FillPaint-with-pattern.svg,pass,
+filters/filter/in=FillPaint-with-target-on-g.svg,pass,
+filters/filter/in=FillPaint.svg,pass,
+filters/filter/in=StrokePaint.svg,pass,
+filters/filter/on-the-root-svg.svg,pass,
+filters/filter/transform-on-shape-with-filter-region.svg,pass,
+masking/clipPath/on-the-root-svg-without-size.svg,pass,
+masking/mask/recursive-on-child.svg,pass,
+paint-servers/linearGradient/invalid-gradientTransform.svg,pass,"not sure on this double check if its better for it to draw nothing if the transform is invalid, if it needs to draw something then you can pass it"
+paint-servers/pattern/invalid-patternTransform.svg,fail,its possible it shouldn't draw something here if its invalid inside the box
+paint-servers/pattern/overflow=visible.svg,pass,
+paint-servers/radialGradient/fr=-1.svg,pass,
+paint-servers/radialGradient/fr=0.5.svg,pass,
+paint-servers/radialGradient/invalid-gradientTransform.svg,fail,if its invalid it might be better to draw nothing tbh
+paint-servers/radialGradient/invalid-gradientUnits.svg,pass,see about invalid behavior above
+paint-servers/radialGradient/negative-r.svg,pass,
+painting/fill/rgb-int-int-int.svg,pass,
+painting/marker/target-with-subpaths-2.svg,fail,is there a reason its dark blue? if its better this way you cankeep it.
+painting/marker/with-viewBox-1.svg,pass,"why so smal for the hat? is ok if thats normal, also the aliasing is off somehow cant tell. this is probbably all fine since its UB though."
+painting/stroke-dasharray/n-0.svg,pass,
+painting/stroke-linejoin/arcs.svg,pass,
+painting/stroke-width/negative.svg,pass,
+shapes/rect/cap-values.svg,pass,
+shapes/rect/ic-values.svg,pass,seems like nothing should be rendered but we render here. [Claude: SVG 2 unit; Chromium draws it the same way; suite image blank only because resvg lacked the unit. Changed to pass per Rowan.]
+shapes/rect/lh-values.svg,pass,seems like we shouldn't render here? is ok if we should if so can keep [Claude: SVG 2 unit; Chromium draws it the same way; suite image blank only because resvg lacked the unit. Changed to pass per Rowan.]
+shapes/rect/rlh-values.svg,pass,again not sure if we should or shouldn't render here [Claude: SVG 2 unit; Chromium draws it the same way; suite image blank only because resvg lacked the unit. Changed to pass per Rowan.]
+shapes/rect/vi-and-vb-values.svg,pass,"not sure if we should or sholdnt render here if its the new svg then we want the new features, same for all the other svg2 ones"
+structure/svg/funcIRI-parsing.svg,pass,
+structure/svg/invalid-id-attribute-1.svg,pass,
+structure/svg/invalid-id-attribute-2.svg,pass,
+text/alignment-baseline/after-edge.svg,pass,
+text/alignment-baseline/baseline.svg,pass,
+text/alignment-baseline/ideographic.svg,pass,
+text/alignment-baseline/text-after-edge.svg,pass,
+text/direction/rtl-with-vertical-writing-mode.svg,fail,i think text should probably be centered? unclear exactly
+text/dominant-baseline/reset-size.svg,pass,
+text/dominant-baseline/use-script.svg,pass,
+text/font-size-adjust/simple-case.svg,pass,
+text/font-size/negative-size.svg,pass,"negative size showing nothing seems good tbh, can add as a warning if it happens like all the other fail stuff."
+text/font/simple-case.svg,pass,
+text/letter-spacing/large-negative.svg,pass,unclear why it should or shouldnt be capital
+text/text-decoration/style-resolving-4.svg,pass,
+text/text-rendering/geometricPrecision.svg,pass,
+text/text/complex-grapheme-split-by-tspan.svg,pass,
+text/text/complex-graphemes-and-coordinates-list.svg,fail,yeah do the suite reference for this one
+text/text/compound-emojis-and-coordinates-list.svg,fail,"wait is rainbow flag one thing? if so should be three boxes, ok but we will add emoji to add later, not for now."
+text/text/rotate-on-Arabic.svg,pass,
+text/textPath/complex.svg,fail,seems like we should show the text if we can graph it?
+text/textPath/method=stretch.svg,pass,
+text/textPath/side=right.svg,pass,
+text/textPath/spacing=auto.svg,pass,
+text/textPath/with-baseline-shift-and-rotate.svg,pass,
+text/textPath/with-invalid-path-and-xlink-href.svg,pass,
+text/textPath/with-path-and-xlink-href.svg,pass,
+text/textPath/with-path.svg,pass,
+text/word-spacing/large-negative.svg,pass,
+text/writing-mode/tb-with-rotate-and-underline.svg,pass,ours looks lowkey better for what its asking.
+text/writing-mode/tb-with-rotate.svg,pass,ours is better

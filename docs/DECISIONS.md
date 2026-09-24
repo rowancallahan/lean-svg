@@ -144,3 +144,25 @@ features Chromium ignores, `xml:lang` font selection.
   `tests/criteria.csv` where resvg is not the reference.
 - **`xml:lang`:** choose the fallback font for Han characters by language tag
   (`ja` → Mplus 1p, `ko` → Noto Sans KR, else Noto Sans SC), as Chromium does.
+
+## Human review of the 76 no-reference files (Rowan, 2026-09-24)
+
+Verdicts are in `tests/human_verdicts.csv` (66 pass, 10 fail after the
+three SVG 2 unit files were confirmed against Chromium). Follow-ups:
+
+- **Fix (T102):** invalid (singular) `gradientTransform`/`patternTransform`
+  draws nothing, like Chromium (linear, radial, pattern); markers on a path
+  with several subpaths follow Chromium (`target-with-subpaths-2`);
+  `textPath/complex` (vertical text on a path) draws the text;
+  `rtl-with-vertical-writing-mode` placed like Chromium (centred on the
+  column); `complex-graphemes-and-coordinates-list` follows the suite PNG;
+  `fePointLight` with `primitiveUnits=objectBoundingBox` lighter, like the
+  suite; negative `font-size` draws nothing and reports a warning.
+- **Fix (T101, running):** `feSpotLight` soft cone edge
+  (`complex-transform`, `limitingConeAngle-anti-aliasing`).
+- **To think about (Rowan):** `feDisplacementMap/simple-case` draws nothing
+  today, which is accepted for now.
+- **Later:** emoji (`compound-emojis-and-coordinates-list`: a rainbow flag is
+  one grapheme, so three boxes, not more).
+- **Noted:** `feColorMatrix type=saturate` with a large coefficient looks less
+  saturated than Chromium's, but Chromium has banding; ours is accepted.
