@@ -229,6 +229,8 @@ structure Style where
   ownBidiOverride : Bool := false
   /-- `xml:space="preserve"`. -/
   spacePreserve : Bool := false
+  /-- T101: the nearest `xml:lang`/`lang` (`langOf`), inherited. -/
+  lang : Nat := 0
   /-- `clip-rule`: inherited; the fill rule of a `clipPath` child (T20). -/
   clipEvenOdd : Bool := false
   /-- This element's own `clip-path` reference (the id inside `url(#id)`), *not*
@@ -2150,6 +2152,14 @@ def fontShorthand (v : ByteArray) : Option (Bool × Option ByteArray × ByteArra
       return some (italic, weight, size, t.extract (toks.getD f (0, 0)).1 t.size)
   return none
 
+/-- T101: an `xml:lang`/`lang` value by its primary subtag, ASCII
+case-insensitively: 1 `ja`, 2 `ko`, 3 any other, 0 empty (`xml:lang=""`,
+"unknown", resets to no tag) (`Text.SpanProps.lang`). -/
+def langOf (v : ByteArray) : Nat :=
+  let prim := v.extract 0 (findByte v 0 45)
+  if v.size == 0 then 0
+  else if eqAsciiCI prim "ja" then 1 else if eqAsciiCI prim "ko" then 2 else 3
+
 def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   match name with
   | "color" => match parseColor v with | some c => { st with color := c } | none => st
@@ -2391,6 +2401,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   -- it back on, and an absent attribute inherits (which is what not matching
   -- here does).
   | "xml:space" => { st with spacePreserve := eqAscii (trim v) "preserve" }
+  | "xml:lang" | "lang" => { st with lang := langOf (trim v) }
   | "paint-order" =>
     { st with strokeFirst := strokeBeforeFill v, markersPos := paintOrderPos (paintOrderOf v) 2 }
   | _ => st
@@ -2959,7 +2970,8 @@ def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
     textLength := st.ownTextLength,
     lengthAdjustGlyphs := st.ownLengthAdjustGlyphs,
     rtl := st.textRtl,
-    bidiOverride := st.ownBidiOverride }
+    bidiOverride := st.ownBidiOverride,
+    lang := st.lang }
 
 /-- The per-character position lists of one `text`/`tspan` element, resolved
 against that element's own font size and the viewport. -/

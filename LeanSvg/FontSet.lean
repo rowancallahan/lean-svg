@@ -80,6 +80,12 @@ def notoSansThin : Nat := 13
 def notoSansLight : Nat := 14
 def notoSansBlack : Nat := 15
 
+/-- The `entries` indices of the CJK fonts `Text.assignFonts` picks among for
+a Han character by language tag (T101). -/
+def mplus1p : Nat := 3
+def notoSansSC : Nat := 4
+def notoSansKR : Nat := 5
+
 /-- The number of embedded fonts. -/
 def count : Nat := entries.size
 

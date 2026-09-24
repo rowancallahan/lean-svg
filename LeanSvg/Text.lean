@@ -106,6 +106,11 @@ def baseFont (family : Nat) (face : Face) : Nat :=
     | .light => FontSet.notoSansLight
     | .black => FontSet.notoSansBlack
 
+/-- A Han (CJK unified or compatibility ideograph) code point (T101). -/
+def isHan (cp : Nat) : Bool :=
+  (0x3400 ≤ cp && cp ≤ 0x4DBF) || (0x4E00 ≤ cp && cp ≤ 0x9FFF) ||
+  (0xF900 ≤ cp && cp ≤ 0xFAFF) || (0x20000 ≤ cp && cp ≤ 0x3134F)
+
 /-- usvg's `shape_text` fallback loop for one base font over one chunk's
 characters, with shaping reduced to one glyph per character: the base font
 keeps every character it maps; then, for the first still-missing character,
@@ -113,10 +118,21 @@ the first font in `FontSet` order that has not been tried yet and maps it is
 tried; if it maps *every* character of the chunk it replaces them all,
 otherwise it fills the characters it maps and the loop goes on.  A character
 no font maps stays with the base font (its `.notdef`).  `covs` is each font's
-decoded coverage. -/
-def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Nat) :
-    Array Nat := Id.run do
+decoded coverage.
+
+T101 (Chromium's behaviour): when the missing character is Han, the CJK font
+of the span's language tag `lang` (`SpanProps.lang`) is tried first:
+`ja` → Mplus 1p, `ko` → Noto Sans KR, any other tag → Noto Sans SC.  Without
+a tag, and for other characters, the order is `FontSet`'s, as usvg's (which
+ignores the tag). -/
+def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Nat)
+    (lang : Nat := 0) : Array Nat := Id.run do
   let has := fun (k cp : Nat) => Font.inRanges (covs.getD k #[]) cp
+  let pref : Option Nat := match lang with
+    | 1 => some FontSet.mplus1p
+    | 2 => some FontSet.notoSansKR
+    | 3 => some FontSet.notoSansSC
+    | _ => none
   let mut res : Array (Option Nat) := cps.map (fun cp => if has base cp then some base else none)
   let mut tried : Array Nat := #[base]
   for _ in [0:covs.size] do
@@ -124,7 +140,10 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
     | none => break
     | some i =>
       let cp := cps.getD i 0
-      match (List.range covs.size).find? (fun k => !tried.contains k && has k cp) with
+      let order := match pref with
+        | some p => if isHan cp then p :: List.range covs.size else List.range covs.size
+        | none => List.range covs.size
+      match order.find? (fun k => !tried.contains k && has k cp) with
       | none => break
       | some k =>
         if cps.all (has k) then
@@ -203,6 +222,10 @@ structure SpanProps where
   (T93, Chromium's behaviour; usvg ignores it): the chunk is laid out as one
   run in the `direction`, without the bidi algorithm. -/
   bidiOverride : Bool := false
+  /-- T101: the nearest `xml:lang`/`lang` (`Svg.langOf`): 0 none, 1 `ja`,
+  2 `ko`, 3 any other tag.  Chooses the CJK fallback font for a Han character
+  (`assignFonts`). -/
+  lang : Nat := 0
 deriving Inhabited, Repr
 
 /-- The per-character position lists of one `text`/`tspan` element. -/
@@ -872,12 +895,18 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     let bases : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       let pr := cProps.getD (rend.getD (a + q) 0) default
       baseFont pr.family pr.face)
+    -- (T101: and each language tag, keyed `base · 4 + lang`)
+    let langs : Array Nat := (List.range (b - a)).toArray.map (fun q =>
+      (cProps.getD (rend.getD (a + q) 0) default).lang)
     let mut perBase : Array (Nat × Array Nat) := #[]
-    for bf in bases do
-      if !perBase.any (·.1 == bf) then perBase := perBase.push (bf, assignFonts covs bf cps)
-    let asgOf := fun (q : Nat) =>
+    for q in [0:b - a] do
       let bf := bases.getD q 0
-      ((perBase.find? (·.1 == bf)).map (·.2)).getD #[]
+      let lg := langs.getD q 0
+      if !perBase.any (·.1 == bf * 4 + lg) then
+        perBase := perBase.push (bf * 4 + lg, assignFonts covs bf cps lg)
+    let asgOf := fun (q : Nat) =>
+      let key := bases.getD q 0 * 4 + langs.getD q 0
+      ((perBase.find? (·.1 == key)).map (·.2)).getD #[]
     let fis : Array Nat := (List.range (b - a)).toArray.map (fun q => (asgOf q).getD q (bases.getD q 0))
     for k in fis ++ bases do
       if !loaded.getD k true then
