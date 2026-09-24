@@ -2,9 +2,9 @@
 
 Every font here is under the **SIL Open Font License 1.1**, except the DejaVu
 fonts (T106), which carry the permissive Bitstream Vera / Arev licence
-(`LICENSE-DejaVu.txt`: use, modify and redistribute, not sold by themselves;
-modified versions must not use the names "Bitstream Vera" or "Arev" — the
-embedded subsets keep the name "DejaVu"). The fonts are
+(`licenses/fonts/DejaVu-LICENSE.txt`: use, modify and redistribute, not sold
+by themselves; modified versions must not use the names "Bitstream Vera" or
+"Arev" — the embedded subsets keep the name "DejaVu"). The fonts are
 subsetted (hinting dropped, only the `kern` layout feature kept) and, for
 variable fonts, pinned to one static instance; the OFL permits both. None of
 the families embedded here uses a Reserved Font Name in its own name. Noto
@@ -14,43 +14,48 @@ SC"/"Noto Sans KR" and do not use "Source".
 
 `LeanSvg/FontSet.lean` lists them in fallback order (the order below).
 
+The licence files linked in the table are byte-for-byte copies of the upstream
+files listed in `licenses/MANIFEST.csv`. Each font's own copyright record
+(`name` ID 0) is in `licenses/fonts/EMBEDDED-COPYRIGHTS.txt`; for some fonts
+it differs from the licence file's copyright line (see `NOTICE`).
+
 | Module | Font | Version | Scripts | cmap entries | Embedded bytes | Lean source | Licence |
 |---|---|---|---|---:|---:|---:|---|
-| NotoSans | Noto Sans Regular | 2.000 | Latin, Greek, Cyrillic | 2793 | 272,129 | 364,692 | LICENSE-OFL.txt |
-| NotoSansBold | Noto Sans Bold | 2.000 | Latin, Greek, Cyrillic | 2793 | 272,793 | 365,574 | LICENSE-OFL.txt |
-| NotoSansItalic | Noto Sans Italic | 2.000 | Latin, Greek, Cyrillic | 2793 | 285,639 | 382,720 | LICENSE-OFL.txt |
-| Mplus1p | Mplus 1p Regular | 1.061 | Japanese (kana, JIS kanji), Latin | 8331 | 1,728,720 | 2,337,045 | LICENSE-OFL-Mplus1p.txt |
-| NotoSansSC | Noto Sans SC | 2.004, wght=400 | Chinese (Simplified, much Traditional), kana | 30890 | 10,370,644 | 13,836,489 | LICENSE-OFL-NotoSansCJK.txt |
-| NotoSansKR | Noto Sans KR | 2.004, wght=400 | Korean (Hangul, Hanja) | 23174 | 5,743,856 | 7,699,771 | LICENSE-OFL-NotoSansCJK.txt |
-| NotoSansThai | Noto Sans Thai | 2.002, wght=400 wdth=100 | Thai | 426 | 39,244 | 54,016 | LICENSE-OFL-NotoScripts.txt |
-| NotoSansArmenian | Noto Sans Armenian | 2.008, wght=400 wdth=100 | Armenian | 430 | 44,528 | 61,080 | LICENSE-OFL-NotoScripts.txt |
-| NotoSansGeorgian | Noto Sans Georgian | 2.005, wght=400 wdth=100 | Georgian | 509 | 59,744 | 81,426 | LICENSE-OFL-NotoScripts.txt |
-| NotoSansEthiopic | Noto Sans Ethiopic | 2.102, wght=400 wdth=100 | Ethiopic | 860 | 346,096 | 463,558 | LICENSE-OFL-NotoScripts.txt |
-| Amiri | Amiri Regular | 000.109 | Arabic (and Latin) | 1674 | 535,420 | 716,039 | LICENSE-OFL-Amiri.txt |
-| NotoSansHebrew | Noto Sans Hebrew | 3.001, wght=400 wdth=100 | Hebrew | 464 | 46,560 | 63,803 | LICENSE-OFL-NotoScripts.txt |
-| NotoSansDevanagari | Noto Sans Devanagari | 2.003 | Devanagari | 555 | 190,080 | 255,221 | LICENSE-OFL-NotoScripts.txt |
-| NotoSansThin | Noto Sans Thin | 2.000 | Latin, Greek, Cyrillic | 2793 | 273,578 | 366,626 | LICENSE-OFL.txt |
-| NotoSansLight | Noto Sans Light | 2.000 | Latin, Greek, Cyrillic | 2793 | 269,894 | 361,714 | LICENSE-OFL.txt |
-| NotoSansBlack | Noto Sans Black | 2.000 | Latin, Greek, Cyrillic | 2793 | 274,404 | 367,730 | LICENSE-OFL.txt |
-| DejaVuSans | DejaVu Sans Book | 2.37 | Latin, Greek, Cyrillic, symbols, maths, emoticons | 3138 | 303,681 | 407,068 | LICENSE-DejaVu.txt |
-| DejaVuSansBold | DejaVu Sans Bold | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 178,435 | 239,610 | LICENSE-DejaVu.txt |
-| DejaVuSansOblique | DejaVu Sans Oblique | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 181,794 | 244,099 | LICENSE-DejaVu.txt |
-| DejaVuSansMono | DejaVu Sans Mono Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2032 | 131,338 | 177,385 | LICENSE-DejaVu.txt |
-| DejaVuSerif | DejaVu Serif Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2069 | 148,628 | 200,257 | LICENSE-DejaVu.txt |
-| Arimo | Arimo Regular | 1.341, wght=400 | Latin, Greek, Cyrillic | 1830 | 140,270 | 188,803 | LICENSE-OFL-Croscore.txt |
-| ArimoBold | Arimo Bold | 1.341, wght=700 | Latin, Greek, Cyrillic | 1830 | 141,220 | 190,072 | LICENSE-OFL-Croscore.txt |
-| Tinos | Tinos Regular | 1.340 | Latin, Greek, Cyrillic | 1830 | 154,997 | 208,422 | LICENSE-OFL-Croscore.txt |
-| TinosBold | Tinos Bold | 1.340 | Latin, Greek, Cyrillic | 1830 | 148,256 | 199,439 | LICENSE-OFL-Croscore.txt |
-| TinosItalic | Tinos Italic | 1.340 | Latin, Greek, Cyrillic | 1830 | 157,247 | 211,433 | LICENSE-OFL-Croscore.txt |
-| Cousine | Cousine Regular | 1.241 | Latin, Greek, Cyrillic | 1625 | 111,478 | 150,554 | LICENSE-OFL-Croscore.txt |
-| STIXTwoMath | STIX Two Math Regular | 2.12 | maths symbols and alphanumerics | 2920 | 423,839 | 567,043 | LICENSE-OFL-STIXTwo.txt |
-| STIXTwoText | STIX Two Text Regular | 2.13, wght=400 | Latin, Greek, Cyrillic | 1243 | 148,480 | 199,858 | LICENSE-OFL-STIXTwo.txt |
-| STIXTwoTextItalic | STIX Two Text Italic | 2.13, wght=400 | Latin, Greek, Cyrillic | 1243 | 161,928 | 217,807 | LICENSE-OFL-STIXTwo.txt |
-| CMUSerif | CMU Serif Roman | 0.7.0 | Latin, Greek, Cyrillic | 1006 | 141,356 | 190,223 | LICENSE-OFL-CMU.txt |
-| CMUSerifItalic | CMU Serif Italic | 0.7.0 | Latin, Greek, Cyrillic | 829 | 143,974 | 193,966 | LICENSE-OFL-CMU.txt |
-| CMUSansSerif | CMU Sans Serif Medium | 0.7.0 | Latin, Greek, Cyrillic | 889 | 80,664 | 109,603 | LICENSE-OFL-CMU.txt |
-| CMUTypewriter | CMU Typewriter Text Regular | 0.7.0 | Latin, Greek, Cyrillic | 877 | 106,030 | 143,461 | LICENSE-OFL-CMU.txt |
-| NotoSansExtraCondensed | Noto Sans ExtraCondensed | 2.000 | Latin, Greek, Cyrillic | 2793 | 266,481 | 356,958 | LICENSE-OFL.txt |
+| NotoSans | Noto Sans Regular | 2.000 | Latin, Greek, Cyrillic | 2793 | 272,129 | 364,692 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| NotoSansBold | Noto Sans Bold | 2.000 | Latin, Greek, Cyrillic | 2793 | 272,793 | 365,574 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| NotoSansItalic | Noto Sans Italic | 2.000 | Latin, Greek, Cyrillic | 2793 | 285,639 | 382,720 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| Mplus1p | Mplus 1p Regular | 1.061 | Japanese (kana, JIS kanji), Latin | 8331 | 1,728,720 | 2,337,045 | [Mplus1p-OFL.txt](../../licenses/fonts/Mplus1p-OFL.txt) |
+| NotoSansSC | Noto Sans SC | 2.004, wght=400 | Chinese (Simplified, much Traditional), kana | 30890 | 10,370,644 | 13,836,489 | [NotoSansSC-OFL.txt](../../licenses/fonts/NotoSansSC-OFL.txt) |
+| NotoSansKR | Noto Sans KR | 2.004, wght=400 | Korean (Hangul, Hanja) | 23174 | 5,743,856 | 7,699,771 | [NotoSansKR-OFL.txt](../../licenses/fonts/NotoSansKR-OFL.txt) |
+| NotoSansThai | Noto Sans Thai | 2.002, wght=400 wdth=100 | Thai | 426 | 39,244 | 54,016 | [NotoSansThai-OFL.txt](../../licenses/fonts/NotoSansThai-OFL.txt) |
+| NotoSansArmenian | Noto Sans Armenian | 2.008, wght=400 wdth=100 | Armenian | 430 | 44,528 | 61,080 | [NotoSansArmenian-OFL.txt](../../licenses/fonts/NotoSansArmenian-OFL.txt) |
+| NotoSansGeorgian | Noto Sans Georgian | 2.005, wght=400 wdth=100 | Georgian | 509 | 59,744 | 81,426 | [NotoSansGeorgian-OFL.txt](../../licenses/fonts/NotoSansGeorgian-OFL.txt) |
+| NotoSansEthiopic | Noto Sans Ethiopic | 2.102, wght=400 wdth=100 | Ethiopic | 860 | 346,096 | 463,558 | [NotoSansEthiopic-OFL.txt](../../licenses/fonts/NotoSansEthiopic-OFL.txt) |
+| Amiri | Amiri Regular | 000.109 | Arabic (and Latin) | 1674 | 535,420 | 716,039 | [Amiri-OFL.txt](../../licenses/fonts/Amiri-OFL.txt) |
+| NotoSansHebrew | Noto Sans Hebrew | 3.001, wght=400 wdth=100 | Hebrew | 464 | 46,560 | 63,803 | [NotoSansHebrew-OFL.txt](../../licenses/fonts/NotoSansHebrew-OFL.txt) |
+| NotoSansDevanagari | Noto Sans Devanagari | 2.003 | Devanagari | 555 | 190,080 | 255,221 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| NotoSansThin | Noto Sans Thin | 2.000 | Latin, Greek, Cyrillic | 2793 | 273,578 | 366,626 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| NotoSansLight | Noto Sans Light | 2.000 | Latin, Greek, Cyrillic | 2793 | 269,894 | 361,714 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| NotoSansBlack | Noto Sans Black | 2.000 | Latin, Greek, Cyrillic | 2793 | 274,404 | 367,730 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
+| DejaVuSans | DejaVu Sans Book | 2.37 | Latin, Greek, Cyrillic, symbols, maths, emoticons | 3138 | 303,681 | 407,068 | [DejaVu-LICENSE.txt](../../licenses/fonts/DejaVu-LICENSE.txt) |
+| DejaVuSansBold | DejaVu Sans Bold | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 178,435 | 239,610 | [DejaVu-LICENSE.txt](../../licenses/fonts/DejaVu-LICENSE.txt) |
+| DejaVuSansOblique | DejaVu Sans Oblique | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 181,794 | 244,099 | [DejaVu-LICENSE.txt](../../licenses/fonts/DejaVu-LICENSE.txt) |
+| DejaVuSansMono | DejaVu Sans Mono Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2032 | 131,338 | 177,385 | [DejaVu-LICENSE.txt](../../licenses/fonts/DejaVu-LICENSE.txt) |
+| DejaVuSerif | DejaVu Serif Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2069 | 148,628 | 200,257 | [DejaVu-LICENSE.txt](../../licenses/fonts/DejaVu-LICENSE.txt) |
+| Arimo | Arimo Regular | 1.341, wght=400 | Latin, Greek, Cyrillic | 1830 | 140,270 | 188,803 | [Arimo-OFL.txt](../../licenses/fonts/Arimo-OFL.txt) |
+| ArimoBold | Arimo Bold | 1.341, wght=700 | Latin, Greek, Cyrillic | 1830 | 141,220 | 190,072 | [Arimo-OFL.txt](../../licenses/fonts/Arimo-OFL.txt) |
+| Tinos | Tinos Regular | 1.340 | Latin, Greek, Cyrillic | 1830 | 154,997 | 208,422 | [Tinos-OFL.txt](../../licenses/fonts/Tinos-OFL.txt) |
+| TinosBold | Tinos Bold | 1.340 | Latin, Greek, Cyrillic | 1830 | 148,256 | 199,439 | [Tinos-OFL.txt](../../licenses/fonts/Tinos-OFL.txt) |
+| TinosItalic | Tinos Italic | 1.340 | Latin, Greek, Cyrillic | 1830 | 157,247 | 211,433 | [Tinos-OFL.txt](../../licenses/fonts/Tinos-OFL.txt) |
+| Cousine | Cousine Regular | 1.241 | Latin, Greek, Cyrillic | 1625 | 111,478 | 150,554 | [Cousine-OFL.txt](../../licenses/fonts/Cousine-OFL.txt) |
+| STIXTwoMath | STIX Two Math Regular | 2.12 | maths symbols and alphanumerics | 2920 | 423,839 | 567,043 | [STIXTwoMath-OFL.txt](../../licenses/fonts/STIXTwoMath-OFL.txt) |
+| STIXTwoText | STIX Two Text Regular | 2.13, wght=400 | Latin, Greek, Cyrillic | 1243 | 148,480 | 199,858 | [STIXTwoText-OFL.txt](../../licenses/fonts/STIXTwoText-OFL.txt) |
+| STIXTwoTextItalic | STIX Two Text Italic | 2.13, wght=400 | Latin, Greek, Cyrillic | 1243 | 161,928 | 217,807 | [STIXTwoText-OFL.txt](../../licenses/fonts/STIXTwoText-OFL.txt) |
+| CMUSerif | CMU Serif Roman | 0.7.0 | Latin, Greek, Cyrillic | 1006 | 141,356 | 190,223 | [CMU-OFL.txt](../../licenses/fonts/CMU-OFL.txt) |
+| CMUSerifItalic | CMU Serif Italic | 0.7.0 | Latin, Greek, Cyrillic | 829 | 143,974 | 193,966 | [CMU-OFL.txt](../../licenses/fonts/CMU-OFL.txt) |
+| CMUSansSerif | CMU Sans Serif Medium | 0.7.0 | Latin, Greek, Cyrillic | 889 | 80,664 | 109,603 | [CMU-OFL.txt](../../licenses/fonts/CMU-OFL.txt) |
+| CMUTypewriter | CMU Typewriter Text Regular | 0.7.0 | Latin, Greek, Cyrillic | 877 | 106,030 | 143,461 | [CMU-OFL.txt](../../licenses/fonts/CMU-OFL.txt) |
+| NotoSansExtraCondensed | Noto Sans ExtraCondensed | 2.000 | Latin, Greek, Cyrillic | 2793 | 266,481 | 356,958 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
 | **Total** | | | | | **24,023,425** | **32,173,565** | |
 
 Sources (all `glyf` TrueType outlines):

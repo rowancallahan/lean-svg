@@ -6,7 +6,8 @@ credits that travel with any redistribution are in `NOTICE` and in README
 "Licensing and credits".
 
 How this was checked:
-- each licence file here was compared with the upstream licence at its source;
+- each licence file here is a byte-for-byte copy of a pinned upstream file,
+  checked by SHA-256 (see "Byte-identical licence texts" below);
 - the `name` table of every embedded font was decoded (from the Lean modules)
   and searched for Reserved Font Names;
 - `git ls-files` was used to list what is actually committed.
@@ -39,33 +40,61 @@ contains it.
 
 | Font (modules) | Licence | Reserved Font Name | Embedded name (checked) | Licence file here | Upstream to compare |
 |---|---|---|---|---|---|
-| Noto Sans Regular, Bold, Italic, Thin, Light, Black, ExtraCondensed | OFL 1.1 | none | "Noto Sans …" | `LeanSvg/Fonts/LICENSE-OFL.txt` | [notofonts/latin-greek-cyrillic OFL.txt](https://github.com/notofonts/latin-greek-cyrillic/blob/main/OFL.txt) (the embedded 2.000 files are the resvg test suite's copies; same licence) |
-| Noto Sans SC, Noto Sans KR | OFL 1.1 | **"Source"** (Adobe) | "Noto Sans SC", "Noto Sans KR": RFN not used | `LICENSE-OFL-NotoSansCJK.txt` | [google/fonts ofl/notosanssc](https://github.com/google/fonts/tree/main/ofl/notosanssc), [ofl/notosanskr](https://github.com/google/fonts/tree/main/ofl/notosanskr) |
-| Noto Sans Thai, Armenian, Georgian, Ethiopic, Hebrew, Devanagari | OFL 1.1 | none | "Noto Sans …" | `LICENSE-OFL-NotoScripts.txt` (6 copyright lines) | [google/fonts ofl/notosansthai](https://github.com/google/fonts/tree/main/ofl/notosansthai) (and the other 5 script folders) |
-| Mplus 1p | OFL 1.1 | none | "Mplus 1p" | `LICENSE-OFL-Mplus1p.txt` | [google/fonts ofl/mplus1p](https://github.com/google/fonts/tree/main/ofl/mplus1p) |
-| Amiri 000.109 | OFL 1.1 | none | "Amiri" | `LICENSE-OFL-Amiri.txt` (notice of the embedded version, 2010-2016 Khaled Hosny) | [aliftype/amiri OFL.txt](https://github.com/aliftype/amiri/blob/main/OFL.txt) |
-| DejaVu Sans (Book, Bold, Oblique), Sans Mono, Serif 2.37 | Bitstream Vera + Arev (permissive), DejaVu changes public domain | names "Bitstream", "Vera", "Arev" | "DejaVu …" | `LICENSE-DejaVu.txt` (identical to upstream) | [dejavu-fonts LICENSE](https://github.com/dejavu-fonts/dejavu-fonts/blob/master/LICENSE) |
-| Arimo, Tinos, Cousine | OFL 1.1 (Google relicensed these from Apache 2.0; google/fonts metadata says `license: "OFL"`) | none | "Arimo", "Tinos", "Cousine" | `LICENSE-OFL-Croscore.txt` | [googlefonts/arimo OFL.txt](https://github.com/googlefonts/arimo/blob/main/OFL.txt), [tinos](https://github.com/googlefonts/tinos/blob/main/OFL.txt), [cousine](https://github.com/googlefonts/cousine/blob/main/OFL.txt) |
-| STIX Two Math, STIX Two Text (Regular, Italic) | OFL 1.1 | **"TM Math"** | "STIX Two …": RFN not used | `LICENSE-OFL-STIXTwo.txt` | [google/fonts ofl/stixtwomath](https://github.com/google/fonts/tree/main/ofl/stixtwomath), [stipub/stixfonts](https://github.com/stipub/stixfonts) |
-| CMU Serif (Roman, Italic), Sans Serif, Typewriter 0.7.0 | OFL 1.1 | **"Computer Modern Unicode fonts"** (family name) | "CMU Serif", "CMU Sans Serif", "CMU Typewriter Text" | `LICENSE-OFL-CMU.txt` | [cm-unicode on SourceForge](https://sourceforge.net/projects/cm-unicode/) (not re-downloaded today: the network policy blocked it in T106) |
+| Noto Sans Regular, Bold, Italic, Thin, Light, Black, ExtraCondensed | OFL 1.1 | none | "Noto Sans …" | [`licenses/fonts/NotoSans-OFL.txt`](../licenses/fonts/NotoSans-OFL.txt) (the resvg test suite's copy; also covers Noto Sans Devanagari) | [linebender/resvg-test-suite@d8e0643 `fonts/Noto-LICENSE-OFL.txt`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Noto-LICENSE-OFL.txt) ([browse](https://github.com/linebender/resvg-test-suite/blob/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Noto-LICENSE-OFL.txt)) |
+| Noto Sans SC, Noto Sans KR | OFL 1.1 | **"Source"** (Adobe) | "Noto Sans SC", "Noto Sans KR": RFN not used | [`licenses/fonts/NotoSansSC-OFL.txt`](../licenses/fonts/NotoSansSC-OFL.txt), [`licenses/fonts/NotoSansKR-OFL.txt`](../licenses/fonts/NotoSansKR-OFL.txt) | [google/fonts@23e54b5 `ofl/notosanssc/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanssc/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanssc/OFL.txt)); [google/fonts@23e54b5 `ofl/notosanskr/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanskr/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanskr/OFL.txt)) |
+| Noto Sans Thai, Armenian, Georgian, Ethiopic, Hebrew, Devanagari | OFL 1.1 | none | "Noto Sans …" | [`licenses/fonts/NotoSansThai-OFL.txt`](../licenses/fonts/NotoSansThai-OFL.txt), [`licenses/fonts/NotoSansArmenian-OFL.txt`](../licenses/fonts/NotoSansArmenian-OFL.txt), [`licenses/fonts/NotoSansGeorgian-OFL.txt`](../licenses/fonts/NotoSansGeorgian-OFL.txt), [`licenses/fonts/NotoSansEthiopic-OFL.txt`](../licenses/fonts/NotoSansEthiopic-OFL.txt), [`licenses/fonts/NotoSansHebrew-OFL.txt`](../licenses/fonts/NotoSansHebrew-OFL.txt) (Devanagari: `NotoSans-OFL.txt`, the resvg test suite's copy) | [google/fonts@23e54b5 `ofl/notosansthai/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansthai/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansthai/OFL.txt)); [google/fonts@23e54b5 `ofl/notosansarmenian/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansarmenian/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansarmenian/OFL.txt)); [google/fonts@23e54b5 `ofl/notosansgeorgian/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansgeorgian/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansgeorgian/OFL.txt)); [google/fonts@23e54b5 `ofl/notosansethiopic/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansethiopic/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansethiopic/OFL.txt)); [google/fonts@23e54b5 `ofl/notosanshebrew/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanshebrew/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanshebrew/OFL.txt)) |
+| Mplus 1p | OFL 1.1 | none | "Mplus 1p" | [`licenses/fonts/Mplus1p-OFL.txt`](../licenses/fonts/Mplus1p-OFL.txt) (the resvg test suite's copy) | [linebender/resvg-test-suite@d8e0643 `fonts/MPLUS1p-LICENSE-OFL.txt`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/MPLUS1p-LICENSE-OFL.txt) ([browse](https://github.com/linebender/resvg-test-suite/blob/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/MPLUS1p-LICENSE-OFL.txt)) |
+| Amiri 000.109 | OFL 1.1 | none | "Amiri" | [`licenses/fonts/Amiri-OFL.txt`](../licenses/fonts/Amiri-OFL.txt) (the resvg test suite's copy) | [linebender/resvg-test-suite@d8e0643 `fonts/Amiri-LICENSE-OFL.txt`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Amiri-LICENSE-OFL.txt) ([browse](https://github.com/linebender/resvg-test-suite/blob/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Amiri-LICENSE-OFL.txt)) |
+| DejaVu Sans (Book, Bold, Oblique), Sans Mono, Serif 2.37 | Bitstream Vera + Arev (permissive), DejaVu changes public domain | names "Bitstream", "Vera", "Arev" | "DejaVu …" | [`licenses/fonts/DejaVu-LICENSE.txt`](../licenses/fonts/DejaVu-LICENSE.txt) | [dejavu-fonts/dejavu-fonts@9b5d1b2 `LICENSE`](https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/9b5d1b2ffeec20c7b46aa89c0223d783c02762cf/LICENSE) ([browse](https://github.com/dejavu-fonts/dejavu-fonts/blob/9b5d1b2ffeec20c7b46aa89c0223d783c02762cf/LICENSE)) |
+| Arimo, Tinos, Cousine | OFL 1.1 (Google relicensed these from Apache 2.0; google/fonts metadata says `license: "OFL"`) | none | "Arimo", "Tinos", "Cousine" | [`licenses/fonts/Arimo-OFL.txt`](../licenses/fonts/Arimo-OFL.txt), [`licenses/fonts/Tinos-OFL.txt`](../licenses/fonts/Tinos-OFL.txt), [`licenses/fonts/Cousine-OFL.txt`](../licenses/fonts/Cousine-OFL.txt) | [google/fonts@23e54b5 `ofl/arimo/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/arimo/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/arimo/OFL.txt)); [googlefonts/tinos@3b4482a `OFL.txt`](https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/OFL.txt) ([browse](https://github.com/googlefonts/tinos/blob/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/OFL.txt)); [google/fonts@23e54b5 `ofl/cousine/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/cousine/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/cousine/OFL.txt)) |
+| STIX Two Math, STIX Two Text (Regular, Italic) | OFL 1.1 | **"TM Math"** | "STIX Two …": RFN not used | [`licenses/fonts/STIXTwoMath-OFL.txt`](../licenses/fonts/STIXTwoMath-OFL.txt), [`licenses/fonts/STIXTwoText-OFL.txt`](../licenses/fonts/STIXTwoText-OFL.txt) | [google/fonts@23e54b5 `ofl/stixtwomath/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwomath/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwomath/OFL.txt)); [google/fonts@23e54b5 `ofl/stixtwotext/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwotext/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwotext/OFL.txt)) |
+| CMU Serif (Roman, Italic), Sans Serif, Typewriter 0.7.0 | OFL 1.1 | **"Computer Modern Unicode fonts"** (family name) | "CMU Serif", "CMU Sans Serif", "CMU Typewriter Text" | [`licenses/fonts/CMU-OFL.txt`](../licenses/fonts/CMU-OFL.txt) | [`cm-unicode-0.7.0-ttf.tar.xz` member `OFL.txt`](https://sourceforge.net/projects/cm-unicode/files/cm-unicode/0.7.0/cm-unicode-0.7.0-ttf.tar.xz/download#cm-unicode-0.7.0/OFL.txt) (SourceForge) |
 
 No embedded font's name records contain "Source", "TM Math", "Computer
 Modern Unicode", "Bitstream Vera" or "Vera".
 
 ### Fixed during this review
 
-- `LICENSE-OFL-Croscore.txt` had only Arimo's copyright line. Tinos's and
-  Cousine's are now added.
-- `LICENSE-OFL-Mplus1p.txt` lacked upstream's second line, "Copyright 2016
-  The Rounded M+ Project Authors.". It is now added.
-- A second pass compared each embedded font's own copyright record (`name`
-  ID 0, decoded from the Lean modules) with its licence file, and found three
-  more lines missing. Each is now added:
-  - Amiri: "Portions copyright (c) 2010, Sebastian Kosch";
-  - Noto Sans Hebrew: the font says 2024, and the file had only upstream's
-    2022 line;
-  - Arimo: the font says 2020, and the file had only upstream's current
-    2026 line.
+- The old licence files (`LeanSvg/Fonts/LICENSE-*.txt`,
+  `LeanSvg/LICENSE-*.txt`, `tests/corpora/realworld/LICENSES/`) were edited
+  by hand: some combined several fonts, some had explanatory headers, and
+  copyright lines had been added to match the fonts. They were not verbatim.
+  They are replaced by byte-for-byte copies of the upstream files in
+  `licenses/`, one per upstream file, plus
+  `licenses/fonts/EMBEDDED-COPYRIGHTS.txt`, which holds each embedded font's
+  own copyright record (`name` ID 0, decoded from the Lean modules). The
+  explanatory headers moved to `NOTICE`.
+- Comparing the fonts' own records with the upstream licence files found
+  these differences; `NOTICE` lists them, and `EMBEDDED-COPYRIGHTS.txt` holds
+  the fonts' lines:
+  - Amiri: the font adds "Portions copyright (c) 2010, Sebastian Kosch";
+  - Arimo: the font says 2020, the licence file 2026;
+  - Noto Sans Hebrew: the font says 2024, the licence file 2022;
+  - Noto Sans (2.000 faces, Devanagari): the resvg test suite's licence file
+    has no copyright line;
+  - Mplus 1p: the resvg test suite's licence file has no copyright line; the
+    font says "Copyright 2016 The M+ Project Authors.".
+
+### Byte-identical licence texts
+
+Every file under `licenses/` (except `MANIFEST.csv` and
+`EMBEDDED-COPYRIGHTS.txt`) is a byte-for-byte copy of one upstream file.
+`licenses/MANIFEST.csv` has four columns: `file`, `sha256`, `source_url` (a
+URL pinned to a commit or tag) and `covers` (what in this repository the
+file licenses). `tests/check_licenses.py` checks it:
+
+- `python3 tests/check_licenses.py` (offline; CI runs it) checks each
+  file's SHA-256, that the file set matches the manifest, and that
+  `EMBEDDED-COPYRIGHTS.txt` matches the fonts in `LeanSvg/Fonts/*.lean`;
+- `--online` also re-downloads every `source_url` and checks that the bytes
+  are identical;
+- `--write-copyrights` regenerates `EMBEDDED-COPYRIGHTS.txt`.
+
+The CMU licence is the `OFL.txt` member of the SourceForge
+`cm-unicode-0.7.0-ttf.tar.xz` archive (the URL's `#` fragment names it).
+Tinos's licence comes from googlefonts/tinos, because google/fonts no longer
+has `ofl/tinos` at HEAD; its copyright year, 2026, matches the font. The
+copyright mismatches between licence files and fonts are listed above.
 
 ### Open question: notices in a binary-only distribution
 
@@ -90,15 +119,16 @@ those files next to it.
 
 | Component | Licence | What we ship | Licence text here |
 |---|---|---|---|
-| harfrust 0.12.0 (port of HarfBuzz) | MIT | tables in `LeanSvg/ShapeData.lean` and `Bidi.lean`; shaping algorithms re-implemented in Lean | `LeanSvg/LICENSE-harfrust.txt` |
-| unicode-bidi 0.3.18 | MIT OR Apache-2.0 (MIT chosen) | Bidi tables and the UAX #9 algorithm in `LeanSvg/Bidi.lean` | `LeanSvg/LICENSE-unicode-bidi.txt` |
-| brotli 1.2.0 | MIT | static dictionary and transforms in `LeanSvg/BrotliData.lean`; decoder written from RFC 7932 | `LeanSvg/LICENSE-brotli.txt` |
-| tiny-skia | BSD-3-Clause (Google 2011, Reizner 2020) | scan converter, strokes, dashes, blending and gradients re-implemented in Lean | `LeanSvg/LICENSE-tiny-skia.txt` (**added in this review**) |
+| harfrust 0.12.0 (port of HarfBuzz) | MIT | tables in `LeanSvg/ShapeData.lean` and `Bidi.lean`; shaping algorithms re-implemented in Lean | [`licenses/code/harfrust-LICENSE.txt`](../licenses/code/harfrust-LICENSE.txt) |
+| unicode-bidi 0.3.18 | MIT OR Apache-2.0 (MIT chosen) | Bidi tables and the UAX #9 algorithm in `LeanSvg/Bidi.lean` | [`licenses/code/unicode-bidi-LICENSE-MIT.txt`](../licenses/code/unicode-bidi-LICENSE-MIT.txt) |
+| brotli 1.2.0 | MIT | static dictionary and transforms in `LeanSvg/BrotliData.lean`; decoder written from RFC 7932 | [`licenses/code/brotli-LICENSE.txt`](../licenses/code/brotli-LICENSE.txt) |
+| tiny-skia | BSD-3-Clause (Google 2011, Reizner 2020) | scan converter, strokes, dashes, blending and gradients re-implemented in Lean | [`licenses/code/tiny-skia-LICENSE.txt`](../licenses/code/tiny-skia-LICENSE.txt) (**added in this review**) |
 | Unicode Character Database (via harfrust) | Unicode License v3 | property values inside the generated tables | credited in `NOTICE` |
+| matplotlib 3.9.2 | Matplotlib License | STIXNonUnicode table in `LeanSvg/StixNonUnicodeTable.lean` | [`licenses/code/matplotlib-LICENSE.txt`](../licenses/code/matplotlib-LICENSE.txt) |
 
 MIT and BSD require the copyright notice and licence text to travel with
-copies. All four texts are now in the repository and referenced from
-`NOTICE`.
+copies. All these texts are in `licenses/code/`, byte-identical to the
+upstream files in `licenses/MANIFEST.csv`, and referenced from `NOTICE`.
 
 ## 3. Test data committed to the repository (`tests/corpora/realworld/`)
 
@@ -107,9 +137,9 @@ source URL (at a pinned commit), author and licence of every downloaded file.
 
 | Files | Licence | Licence text here |
 |---|---|---|
-| `mpl-tests/` (515 matplotlib test baseline SVGs) | Matplotlib License (PSF-based, BSD-compatible) | `tests/corpora/realworld/LICENSES/LICENSE-matplotlib.txt` |
-| `web-tikz/` (50 files from janosh/diagrams) | MIT | `LICENSE-janosh-diagrams-MIT.txt` |
-| `web-vega/` (31 Vega-Lite examples) | BSD-3-Clause | `LICENSE-vega-lite-BSD-3-Clause.txt` |
+| `mpl-tests/` (515 matplotlib test baseline SVGs) | Matplotlib License (PSF-based, BSD-compatible) | [`licenses/corpora/matplotlib-LICENSE.txt`](../licenses/corpora/matplotlib-LICENSE.txt) |
+| `web-tikz/` (50 files from janosh/diagrams) | MIT | [`licenses/corpora/janosh-diagrams-license.txt`](../licenses/corpora/janosh-diagrams-license.txt) |
+| `web-vega/` (31 Vega-Lite examples) | BSD-3-Clause | [`licenses/corpora/vega-lite-LICENSE.txt`](../licenses/corpora/vega-lite-LICENSE.txt) |
 | everything else (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib*/`, `src/`) | Apache-2.0: generated for this project from our own sources | none needed |
 
 The `tikz-fonts/` SVGs embed WOFF2 subsets of the AMS Type 1 Computer Modern

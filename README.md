@@ -1,4 +1,7 @@
 # lean-svg
+
+Licence: [Apache-2.0](LICENSE). Third-party fonts, data and test files: [NOTICE](NOTICE), [licenses/](licenses/) and the [licensing review](docs/LICENSING-REVIEW.md).
+
 ## Human Preamble
 An experiment in specification based programming.
 The overall goal here is to my understanding of theorems on programs, and how to use theorems on programs to allow for more unrestricted use of computer generated code.
@@ -122,16 +125,22 @@ lean-svg is licensed under the Apache License 2.0 (`LICENSE`). `NOTICE`
 carries these credits and accompanies any redistribution.
 
 Each licence below was verified against the upstream project's own licence
-files and package manifests on 2026-09-21.
+files and package manifests on 2026-09-24. The licence texts in `licenses/`
+are byte-identical to pinned upstream files: `licenses/MANIFEST.csv` gives
+each file's source URL and SHA-256, `python3 tests/check_licenses.py` checks
+the hashes (CI runs it), and `python3 tests/check_licenses.py --online`
+re-downloads every file and compares. Each embedded font's own copyright
+record is in `licenses/fonts/EMBEDDED-COPYRIGHTS.txt`; `NOTICE` lists where
+it differs from the licence file.
 
 ### Redistributed by this repository
 
 | component | licence |
 |---|---|
-| **Noto Sans** Regular, Bold, Italic, Thin, Light, Black and ExtraCondensed (Latin/Greek/Cyrillic), **Mplus 1p**, **Noto Sans SC/KR/Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari**, **Amiri** — subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1, all of them. Copyright 2015 Google Inc. (Noto Sans; Noto is a trademark of Google Inc., not licensed under the OFL), 2016 The M+ Project Authors (Mplus 1p), 2014-2021 Adobe with Reserved Font Name 'Source' (Noto Sans SC/KR), 2022 The Noto Project Authors (Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari), 2010-2016 Khaled Hosny (Amiri). Versions, sources and licence texts: `LeanSvg/Fonts/README.md` and `LeanSvg/Fonts/LICENSE-OFL*.txt`. The fonts are subsetted and instanced, which the OFL permits; no embedded font uses a Reserved Font Name. |
-| **DejaVu Sans** (Regular, Bold, Oblique), **DejaVu Sans Mono**, **DejaVu Serif** 2.37 — subsets in `LeanSvg/Fonts/*.lean` | Bitstream Vera / Arev licence (permissive). Bitstream Vera Fonts Copyright (c) 2003 Bitstream, Inc.; Arev Fonts Copyright (c) 2006 Tavmjong Bah; DejaVu changes are public domain. `LeanSvg/Fonts/LICENSE-DejaVu.txt`. |
-| **Arimo**, **Tinos**, **Cousine**, **STIX Two Math/Text**, **CMU Serif/Serif Italic/Sans Serif/Typewriter Text** — subsets in `LeanSvg/Fonts/*.lean` | SIL Open Font License 1.1. Copyright 2020-2026 The Arimo/Tinos/Cousine Project Authors; 2001-2021 The STIX Fonts Project Authors (Reserved Font Name "TM Math", not used; STIX Fonts is a trademark of the IEEE); 2003-2009 Andrey V. Panov and the authors of the original METAFONT fonts (Reserved Font Family Name "Computer Modern Unicode fonts", not used). `LeanSvg/Fonts/LICENSE-OFL-{Croscore,STIXTwo,CMU}.txt`. |
-| **Brotli static dictionary, transforms and context tables** (brotli 1.2.0), generated into `LeanSvg/BrotliData.lean` | MIT. Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors. `LeanSvg/LICENSE-brotli.txt`. |
+| **Noto Sans** Regular, Bold, Italic, Thin, Light, Black and ExtraCondensed (Latin/Greek/Cyrillic), **Mplus 1p**, **Noto Sans SC/KR/Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari**, **Amiri** — subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1, all of them. Copyright 2015 Google Inc. (Noto Sans; Noto is a trademark of Google Inc., not licensed under the OFL), 2016 The M+ Project Authors (Mplus 1p), 2014-2021 Adobe with Reserved Font Name 'Source' (Noto Sans SC/KR), 2022 The Noto Project Authors (Thai/Armenian/Georgian/Ethiopic/Devanagari), 2024 The Noto Project Authors (Hebrew), 2010-2016 Khaled Hosny with portions 2010 Sebastian Kosch (Amiri). Versions and sources: `LeanSvg/Fonts/README.md`. Licence texts: `licenses/fonts/`. The fonts are subsetted and instanced, which the OFL permits; no embedded font uses a Reserved Font Name. |
+| **DejaVu Sans** (Regular, Bold, Oblique), **DejaVu Sans Mono**, **DejaVu Serif** 2.37 — subsets in `LeanSvg/Fonts/*.lean` | Bitstream Vera / Arev licence (permissive). Bitstream Vera Fonts Copyright (c) 2003 Bitstream, Inc.; Arev Fonts Copyright (c) 2006 Tavmjong Bah; DejaVu changes are public domain. `licenses/fonts/DejaVu-LICENSE.txt`. |
+| **Arimo**, **Tinos**, **Cousine**, **STIX Two Math/Text**, **CMU Serif/Serif Italic/Sans Serif/Typewriter Text** — subsets in `LeanSvg/Fonts/*.lean` | SIL Open Font License 1.1. Copyright 2020 The Arimo Project Authors, 2026 The Tinos Project Authors, 2026 The Cousine Project Authors; 2001-2021 The STIX Fonts Project Authors (Reserved Font Name "TM Math", not used; STIX Fonts is a trademark of the IEEE); 2003-2009 Andrey V. Panov and the authors of the original METAFONT fonts (Reserved Font Family Name "Computer Modern Unicode fonts", not used). `licenses/fonts/{Arimo,Tinos,Cousine,STIXTwoMath,STIXTwoText,CMU}-OFL.txt`. |
+| **Brotli static dictionary, transforms and context tables** (brotli 1.2.0), generated into `LeanSvg/BrotliData.lean` | MIT. Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors. `licenses/code/brotli-LICENSE.txt`. |
 | **Original artwork and renders** — `tests/svg/*.svg`, `docs/readme/*.svg`, and the PNG images in this README | Apache-2.0. Authored for this project. |
 
 Fonts embedded in an input SVG (`@font-face` with a `data:` URL) are decoded
@@ -144,13 +153,13 @@ licences are the concern of whoever made the SVG.
 `tests/corpora/realworld/` holds 848 chart SVGs used only as test inputs; none
 is compiled into the binary. `SOURCES.csv` records the source, author and
 licence of every downloaded file; the licence texts are in
-`tests/corpora/realworld/LICENSES/`.
+`licenses/corpora/`.
 
 | component | licence |
 |---|---|
-| **matplotlib test-suite baseline SVGs** (`mpl-tests/`, 515 files) | Matplotlib License (PSF-based, BSD-compatible). Copyright (c) 2012- Matplotlib Development Team; 2002-2011 John D. Hunter. `LICENSE-matplotlib.txt`. |
-| **janosh/diagrams** (`web-tikz/`, 50 files) | MIT. Copyright (c) 2021 Janosh Riebesell. `LICENSE-janosh-diagrams-MIT.txt`. |
-| **Vega-Lite examples** (`web-vega/`, 31 files) | BSD-3-Clause. Copyright (c) 2015, University of Washington Interactive Data Lab. `LICENSE-vega-lite-BSD-3-Clause.txt`. |
+| **matplotlib test-suite baseline SVGs** (`mpl-tests/`, 515 files) | Matplotlib License (PSF-based, BSD-compatible). Copyright (c) 2012- Matplotlib Development Team; 2002-2011 John D. Hunter. `matplotlib-LICENSE.txt`. |
+| **janosh/diagrams** (`web-tikz/`, 50 files) | MIT. Copyright (c) 2021 Janosh Riebesell. `janosh-diagrams-license.txt`. |
+| **Vega-Lite examples** (`web-vega/`, 31 files) | BSD-3-Clause. Copyright (c) 2015, University of Washington Interactive Data Lab. `vega-lite-LICENSE.txt`. |
 | **Generated charts** (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib/`, `matplotlib-text/`) and their sources in `src/` | Apache-2.0, authored for this project. The TikZ SVGs contain glyphs of the AMS Type 1 Computer Modern and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm), embedded by dvisvgm as the SIL Open Font License 1.1 permits for fonts embedded in documents. |
 
 ### Not redistributed

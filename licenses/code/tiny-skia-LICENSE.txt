@@ -1,8 +1,3 @@
-The scan converter, hairline stroking, curve subdivision, dashing, lowp/highp
-blend arithmetic, layer compositing and gradient evaluation in
-LeanSvg/{Raster,Geom,Canvas,Shader}.lean re-implement tiny-skia
-(https://github.com/linebender/tiny-skia), whose licence follows.
-
 Copyright (c) 2011 Google Inc. All rights reserved.
 Copyright (c) 2020 Yevhenii Reizner All rights reserved.
 
