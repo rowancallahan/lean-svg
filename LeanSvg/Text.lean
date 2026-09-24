@@ -597,6 +597,24 @@ def decorRectCmds (r : DecorRun) : Array PathCmd :=
       (⟨Fx.clamp (Int.ediv (rx + r.ox + 128) 256), Fx.clamp (Int.ediv (ry + r.oy + 128) 256)⟩ : Pt)
     #[.moveTo (tr 0 y0), .lineTo (tr r.width y0), .lineTo (tr r.width y1), .lineTo (tr 0 y1), .close]
 
+/-- T102: one cluster's piece of a decoration on a `textPath`: `r`'s
+rectangle (its `ox`/`oy`/`rot` unused) with its left end at `(u0, v0)` in
+the cluster's frame on the path, the point `(nx, ny)` with tangent
+`(cs, sn)` (16.16). -/
+def decorRectOn (r : DecorRun) (nx ny cs sn u0 v0 : Int) : Array PathCmd :=
+  if r.width ≤ 0 then #[]
+  else
+    let upem : Int := if r.unitsPerEm == 0 then 1000 else r.unitsPerEm
+    let k : Int := r.size * 256
+    let y0 := -(roundScale r.dyUnits k upem) - Int.ediv (roundScale r.thicknessUnits k upem) 2
+    let y1 := y0 + roundScale r.thicknessUnits k upem
+    let tr := fun (lx ly : Int) =>
+      let u := u0 + lx
+      let v := v0 + ly
+      (⟨Fx.clamp (Int.ediv (nx + Int.ediv (cs * u - sn * v) 65536 + 128) 256),
+        Fx.clamp (Int.ediv (ny + Int.ediv (sn * u + cs * v) 65536 + 128) 256)⟩ : Pt)
+    #[.moveTo (tr 0 y0), .lineTo (tr r.width y0), .lineTo (tr r.width y1), .lineTo (tr 0 y1), .close]
+
 /-! ## Layout -/
 
 /-- One laid-out character. -/
@@ -843,6 +861,14 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           if k < p.rots.size then lastRot := a
           pos := pos.setIfInBounds (o + k) { pos.getD (o + k) {} with rot := a }
     | _ => pure ()
+  -- T102: the lists apply per grapheme, not per character: a nonspacing
+  -- mark's own `x`/`y`/`dx`/`dy` entries are ignored (not shifted onto the
+  -- next character), so it stays in its base's cluster and chunk
+  -- (`complex-graphemes-and-coordinates-list.svg`; usvg reads positions at
+  -- each cluster's first character).
+  for i in [1:total] do
+    if Bidi.bidiClass (chars.getD i 0) == .NSM then
+      pos := pos.setIfInBounds i { pos.getD i {} with x := none, y := none, dx := 0, dy := 0 }
   -- ---- 6. fonts (T91): every font's coverage, for fallback; each font
   -- itself is decoded and parsed the first time a character needs it
   let covs : Array (Array (Nat × Nat)) := FontSet.entries.map (fun e => Font.decodeRanges e.coverage)
@@ -1084,10 +1110,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     -- anchored chunk: the whole run shifts by its own width
     let width := cl.foldl (fun w c => w + c.adv) 0
     -- the chunk's anchor is its first character's; with `direction: rtl`
-    -- (T93, Chromium) `start` and `end` name the right and left edges
+    -- (T93, Chromium) `start` and `end` name the right and left edges; in
+    -- vertical text (T102, Chromium) the bottom and top ones, while the
+    -- glyphs still run top to bottom
     let anchor : Anchor := match p0.anchor with
-      | .start => if rtlPara then .atEnd else .start
-      | .atEnd => if rtlPara then .start else .atEnd
+      | .start => if p0.rtl then .atEnd else .start
+      | .atEnd => if p0.rtl then .start else .atEnd
       | .middle => .middle
     let x0 : Int := match anchor with
       | .start => 0
@@ -1166,7 +1194,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       -- closures it compiles to never capture the run buffers below
       -- (`curCmds`, ...): a captured buffer is shared, and every cluster's
       -- `curCmds ++ cmds` then copied the whole run (quadratic per chunk).
-      let (cmds, ox, oy, x', y', adv', pathEnd', mbox', sbox') := Id.run do
+      let (cmds, ox, oy, x', y', adv', pathEnd', mbox', sbox', dec) := Id.run do
+        -- T102: this cluster's decoration pieces on a path (over, under, through)
+        let mut dec : Array PathCmd × Array PathCmd × Array PathCmd := (#[], #[], #[])
         let mut x := x
         let mut y := y
         let mut adv := adv
@@ -1200,24 +1230,58 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
                 let pr := c.props
                 let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
                   pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
-                let yEff := y + bshift
-                let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
+                -- T102: vertical text on a path (Chromium): the path is the
+                -- column's centre line.  A sideways cluster sits like
+                -- horizontal path text, shifted by usvg's `(ascent +
+                -- descent) / 2`; an upright one (CJK) turns a further -90°,
+                -- its top against the path direction, and is centred on it.
+                let upright := vertical && VertOrient.isUpright c.cp
+                let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+                let half := Int.ediv ((f.ascent + f.descent) * (pr.size * 256)) (2 * upem)
+                let yEff := if vertical then y + half else y + bshift
+                let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int))
                   else sinCos16 (degToRad16 p.rot)
+                -- the glyph's angle: `rotate`, less 90° when upright
+                let (sr, cr) := if upright then (-cs, sn) else (sn, cs)
                 let hw := Int.ediv c.width 2
+                -- the glyph origin, relative to the cluster's midpoint on
+                -- the path: `(-width/2, yEff)`, or for an upright cluster
+                -- the vertical layout's `R(rotate) · (w/2 + h, w/2)` from its
+                -- pen (see the non-path `upright` branch below)
+                let (ux, uy) := if upright then
+                    (Int.ediv (cs * (hw + half) - sn * hw) 65536 - hw,
+                     y + Int.ediv (sn * (hw + half) + cs * hw) 65536)
+                  else (-hw, yEff)
                 let la := Int.ediv (n.cos * cr - n.sin * sr) 65536
                 let lb := Int.ediv (n.sin * cr + n.cos * sr) 65536
                 let lc := Int.ediv (-(n.cos * sr) - n.sin * cr) 65536
-                let tox := n.x + Int.ediv (-(n.cos * hw) - n.sin * yEff) 65536
-                let toy := n.y + Int.ediv (n.cos * yEff - n.sin * hw) 65536
-                let lsa := Int.ediv (la * c.sx) 65536
-                let lsb := Int.ediv (lb * c.sx) 65536
+                let tox := n.x + Int.ediv (n.cos * ux - n.sin * uy) 65536
+                let toy := n.y + Int.ediv (n.sin * ux + n.cos * uy) 65536
+                let lsa := if upright then la else Int.ediv (la * c.sx) 65536
+                let lsb := if upright then lb else Int.ediv (lb * c.sx) 65536
                 cmds := clusterCmds fonts f c (lsa * outK) (lsb * outK) (lc * outK) (la * outK)
                   (tox * outK) (toy * outK)
                 let adv16 := if c.adv ≤ 0 then 65536 else c.adv
-                let (top16, bot16) := metricTopBot f c.props.size
+                let (top16, bot16) := if upright then (-hw, c.width - hw)
+                  else metricTopBot f c.props.size
                 for pt in metricCorners lsa lsb lc la tox toy adv16 top16 bot16 do
                   mbox := Box.cover mbox pt
                   sbox := coverAt sbox c.styleIdx pt
+                -- T102: decorations follow the path one cluster at a time
+                -- (Chromium), over the cluster's whole advance; in vertical
+                -- text either side of the path, as in a column
+                let piece := fun (idx? : Option Nat) (dyU : Int) (dsz : Fx) =>
+                  match idx? with
+                  | some idx =>
+                    decorRectOn { styleIdx := idx, width := c.adv * outK, unitsPerEm := fb.unitsPerEm,
+                                  size := (if dsz > 0 then dsz else pr.size) * outK, dyUnits := dyU,
+                                  thicknessUnits := fb.underlineThickness }
+                      (n.x * outK) (n.y * outK) n.cos n.sin (-hw * outK) (y * outK)
+                  | none => #[]
+                let halfH := Int.ediv (fb.ascent - fb.descent) 2
+                dec := (piece pr.overlineIdx (if vertical then halfH else fb.ascent) pr.overlineSize,
+                        piece pr.underlineIdx (if vertical then -halfH else fb.underlinePosition) pr.underlineSize,
+                        piece pr.throughIdx (if vertical then 0 else fb.strikeoutPosition) pr.throughSize)
               | _, _ => pure ()
         else
           if vertical then
@@ -1291,7 +1355,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             | _, _ => pure ()
           x := x + c.adv
           adv := adv + c.adv
-        return (cmds, ox, oy, x, y, adv, pathEnd, mbox, sbox)
+        return (cmds, ox, oy, x, y, adv, pathEnd, mbox, sbox, dec)
       x := x'; y := y'; adv := adv'; pathEnd := pathEnd'; mbox := mbox'; sbox := sbox'
       let styleChanged := curStyle != some c.styleIdx
       let shiftBreak := p.dx != 0 || p.dy != 0 || p.rot != 0
@@ -1318,9 +1382,11 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         ulCmds := closeSub ulCmds ulRun
         thCmds := closeSub thCmds thRun
       if styleChanged || shiftBreak then
+        -- (on a path each cluster draws its own piece instead, `dec` above)
         let mkRun := fun (idx? : Option Nat) (metric : Font → Int) (dsz : Fx) =>
           match idx?, fonts.getD c.base none with
           | some idx, some f =>
+            if flow.isSome then none else
             some { styleIdx := idx, ox := ox * outK, oy := oy * outK,
                    rot := if vertical then p.rot + Fx.ofNat 90 else p.rot, width := 0,
                    unitsPerEm := f.unitsPerEm, size := (if dsz > 0 then dsz else c.props.size) * outK,
@@ -1339,6 +1405,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       ulRun := ulRun.map (fun r => { r with width := r.width + c.adv * outK })
       thRun := thRun.map (fun r => { r with width := r.width + c.adv * outK })
       curCmds := curCmds ++ cmds
+      olCmds := olCmds ++ dec.1
+      ulCmds := ulCmds ++ dec.2.1
+      thCmds := thCmds ++ dec.2.2
     olCmds := closeSub olCmds olRun
     ulCmds := closeSub ulCmds ulRun
     thCmds := closeSub thCmds thRun

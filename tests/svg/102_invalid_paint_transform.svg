@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150" viewBox="0 0 300 150">
+  <!-- T102: a gradientTransform/patternTransform with a zero column paints
+       nothing, as in Chromium (resvg uses the identity); strokes still draw -->
+  <linearGradient id="lg"><stop offset="0" stop-color="white"/><stop offset="1" stop-color="green"/></linearGradient>
+  <linearGradient id="lg0" href="#lg" gradientTransform="matrix(0 0 0 0 0 0)"/>
+  <radialGradient id="rg0" gradientTransform="scale(0 1)"><stop offset="0" stop-color="white"/><stop offset="1" stop-color="green"/></radialGradient>
+  <pattern id="p0" patternUnits="userSpaceOnUse" width="20" height="20" patternTransform="matrix(0 0 0 0 0 0)">
+    <rect width="10" height="10" fill="grey"/>
+  </pattern>
+  <rect x="10" y="10" width="80" height="60" fill="url(#lg)"/>
+  <rect x="110" y="10" width="80" height="60" fill="url(#lg0)" stroke="navy"/>
+  <rect x="210" y="10" width="80" height="60" fill="url(#rg0)" stroke="navy"/>
+  <rect x="10" y="80" width="80" height="60" fill="url(#p0)" stroke="navy"/>
+  <path d="M 120 90 L 180 90 L 150 135 Z M 210 90 L 280 90 L 245 135"
+        fill="none" stroke="green" marker-start="url(#m1)" marker-mid="url(#m2)"/>
+  <marker id="m1" refX="4" refY="4" markerWidth="8" markerHeight="8"><circle cx="4" cy="4" r="4" fill="blue" opacity="0.75"/></marker>
+  <marker id="m2" refX="4" refY="4" markerWidth="8" markerHeight="8"><circle cx="4" cy="4" r="3" fill="orange" opacity="0.75"/></marker>
+</svg>

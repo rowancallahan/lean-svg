@@ -124,3 +124,159 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+### What was implemented (one commit per item)
+
+1. **Invalid paint transforms draw nothing** (`LeanSvg/Svg.lean`,
+   `singularMat`). A `gradientTransform`/`patternTransform` with a
+   zero-length column now becomes the zero matrix (it used to become the
+   identity, as in usvg). `Grad.build` and `Pat.build` already skip a
+   singular matrix, so the fill is `none`. The stroke still draws.
+   Matches Chromium on all three files.
+2. **Markers on multi-subpath paths** (`LeanSvg/Marker.lean`). A closepath
+   directly followed by a `moveTo` is now a mid vertex at its subpath's
+   start, as in Chromium. usvg skips it. Its `orient="auto"` angle bisects
+   the closing line and the subpath's first segment (`subpathFirstOut`).
+   Repeated closes (`M L L Z Z Z`) stay skipped, so
+   `orient=auto-on-M-L-L-Z-Z-Z.svg` is unchanged. All 62 other
+   `painting/marker/*` files are unchanged at 200 px.
+3. **Vertical text on a `textPath`** (`Svg.lean`, `Text.lean`). A
+   `textPath` under a vertical `writing-mode` was dropped whole. It is now
+   laid out along the path:
+   - An upright cluster (CJK, `VertOrient.isUpright`) turns −90° against
+     the path direction and is centred on the path.
+   - A sideways cluster sits like horizontal path text, shifted onto the
+     column centre by usvg's `(ascent + descent) / 2`.
+
+   Decorations on any path text are now drawn as one piece per cluster,
+   in that cluster's frame on the path (`decorRectOn`). Before, path text
+   drew one straight run from the chunk origin. That run was the stray
+   black line at the top-left in `textPath/with-underline.svg`. Side
+   effect: `with-underline.svg` goes from fail to pass against resvg.
+4. **`rtl` with vertical `writing-mode`** (`Text.lean`). `direction: rtl`
+   now swaps `start` and `end` in vertical text too. So a `start`-anchored
+   vertical run ends at its `y`, as in Chromium: centred on x=100 and
+   ending at y=150. Glyphs still run top to bottom. Bidi reordering stays
+   horizontal-only.
+5. **Coordinate lists per grapheme** (`Text.lean`). A nonspacing mark's
+   own `x`/`y`/`dx`/`dy` entries are cleared. They are ignored, not
+   shifted onto the next character. The mark therefore stays in its base's
+   chunk and cluster. `complex-graphemes-and-coordinates-list.svg` now
+   matches the suite PNG (й on the crosshair, y=120 ignored).
+6. **`fePointLight` with `primitiveUnits=objectBoundingBox`: no code
+   change.** `x`, `y` and `z` already resolve correctly (`z` × the
+   normalised bbox diagonal: 0.2 × 160 = 32). A Chromium render with the
+   equivalent user-space light (`x=100 y=148 z=32`) matches ours. Swapping
+   in z = 45, 64, 100 or 160 moves it far from the suite PNG.
+   - The difference Rowan saw is scale. The suite PNG is 500 px, and
+     lighting surface normals are computed per device pixel. At 200 px the
+     alpha slope per pixel is 2.5× steeper, so the ring looks darker.
+   - Rendered at 500 px, ours matches the suite PNG (mean |Δ| 0.02 on
+     0–255). Chromium at 500 px is further off (mean |Δ| 2.5). See
+     `T102/fePointLight_obb_at_500px.png`.
+7. **Negative `font-size`** (`Svg.lean`, `Warn.lean`). The text is still
+   not drawn. It now also adds the warning `negative font-size; text not
+   drawn` (exit code 2, and a line in `<out>.warnings.txt` under
+   `--warnings`). `tests/check_warnings.py` has a case for it.
+
+Tests: `tests/svg/102_invalid_paint_transform.svg` (items 1, 2) and
+`tests/svg/102_vertical_text.svg` (items 3, 4, 5, 7). Both follow
+Chromium or the suite, not resvg, so `run_tests.py` scores them as fail
+against resvg by design, like `99_feoffset_subregion.svg`.
+
+### The 10 `fail` verdicts: status for re-review
+
+Images are in `tasks/T102/<dir>_<file>.png`. Each shows lean-svg after
+T102, then Chromium, then the suite PNG, all at 200 px.
+
+| file | status |
+|---|---|
+| `paint-servers/pattern/invalid-patternTransform.svg` | **fixed**: fill is none, stroke drawn, same as Chromium |
+| `paint-servers/radialGradient/invalid-gradientTransform.svg` | **fixed**: draws nothing, same as Chromium |
+| `painting/marker/target-with-subpaths-2.svg` | **fixed**: the start vertex now also gets the mid marker blended over it, same as Chromium |
+| `text/direction/rtl-with-vertical-writing-mode.svg` | **fixed**: centred on the x=100 column, ends at y=150, same as Chromium. Chromium's glyphs are smaller because it fell back to a serif face |
+| `text/text/complex-graphemes-and-coordinates-list.svg` | **fixed**: matches the suite PNG |
+| `text/textPath/complex.svg` | **fixed, differs in detail**: the text is drawn along the circle with an overline along the path. Chromium hides the first two glyphs (startOffset −10) and puts "スト。" on the left, where we continue it down from the path's end. Chromium also colours the overline red from the `<g>`, while ours and resvg use the text's black (a separate, existing difference, also in horizontal text) |
+| `filters/fePointLight/primitiveUnits=objectBoundingBox.svg` | **not changed, needs Rowan**: correct at the suite's own 500 px (see item 6). Please re-judge at 500 px or keep |
+| `filters/feSpotLight/complex-transform.svg` | T101's (not touched here) |
+| `filters/feSpotLight/limitingConeAngle-anti-aliasing.svg` | T101's (not touched here) |
+| `text/text/compound-emojis-and-coordinates-list.svg` | emoji, "later" per DECISIONS (not touched) |
+
+Also: `paint-servers/linearGradient/invalid-gradientTransform.svg` (was a
+`pass` with a doubt) now draws nothing too, and `text/font-size/negative-size.svg`
+(`pass`) now reports the warning.
+
+### Numbers
+
+`run_corpora.py --corpus resvg --route direct --ref resvg`:
+
+| | before | after |
+|---|---|---|
+| fast (100 px) | 1552 / 1679 pass | 1547 / 1679 pass |
+| default (200 px) | 1576 / 1679 pass | 1571 / 1679 pass |
+
+The same 10 files moved at both widths. Nothing else moved by more than
+0.1 points.
+
+| file | 200 px within-8 | resvg status | reference in criteria.csv |
+|---|---|---|---|
+| linearGradient/invalid-gradientTransform | 100.0 → 36.0 | pass → fail | human (intended, Chromium) |
+| radialGradient/invalid-gradientTransform | 100.0 → 36.0 | pass → fail | human (intended, Chromium) |
+| pattern/invalid-patternTransform | 99.6 → 68.1 | pass → fail | human (intended, Chromium) |
+| direction/rtl-with-vertical-writing-mode | 99.98 → 93.3 | pass → fail | human (intended, Chromium) |
+| textPath/complex | 99.4 → 95.1 | pass → fail | human (intended, Chromium) |
+| **textPath/writing-mode=tb** | 99.995 → 96.2 | **pass → fail** | **resvg** (see below) |
+| text/complex-graphemes-and-coordinates-list | 99.99 → 99.6 | pass → pass | human (suite) |
+| marker/target-with-subpaths-2 | 100.0 → 99.65 | pass → pass | human (Chromium) |
+| textPath/with-underline | 97.96 → 99.69 | fail → **pass** | resvg |
+| text/compound-emojis-and-coordinates-list | 91.6 → 91.7 | fail → fail | human |
+
+**The one pass→fail on a resvg-reference file: `text/textPath/writing-mode=tb.svg`.**
+- resvg 0.48.1 has no vertical text on a path, so its reference is blank
+  (`criteria.csv` lists it as resvg=1 "correct").
+- Item 3 now draws the text, and it matches the suite's own PNG more
+  closely than before: `--ref suite` within-8 96.77 → 97.19%, and the
+  image `T102/text_textPath_writing-mode=tb.png` shows the same shape.
+  Chromium draws it differently, with sideways, overlapping glyphs.
+- This is unavoidable with item 3: the SVG structure is the same as
+  `textPath/complex.svg`.
+- Item 3 is its own commit ("vertical text on a textPath"). If Rowan
+  prefers resvg's blank output there, reverting that one commit restores
+  both files, and `with-underline`'s gain goes with it.
+- Otherwise, `criteria.csv` could switch this file's reference to `suite`
+  or `human`. That is Rowan's call, so it is not edited here.
+
+`tests/score_criteria.py` (`--resvg-csv` 200 px, `--chrome-csv` a
+`--ref chrome` run over the chrome/human files, `--local-json`):
+
+- resvg bucket: 1528 / 1587 before and after (`writing-mode=tb` fail and
+  `with-underline` pass cancel out).
+- chrome bucket: 19 / 45 after.
+- human bucket: 66 pass / 10 fail. It is scored from
+  `tests/human_verdicts.csv`, which T102 does not edit, so it only changes
+  once Rowan re-reviews the files above.
+- Overall: 1613 pass / 95 fail, the same before and after.
+
+Other checks:
+- `lake build`: clean, no warnings.
+- `bash scripts/check-theorems.sh`: `invariants ok`, `theorems ok`
+  (`proofs/SizeBound.lean` untouched).
+- `run_tests.py`: 60/73. It was 60/71; the two new files are the
+  `102_*` cases above. No existing file's score dropped.
+- `run_adversarial.py`: 149/149 clean.
+- `run_tiles.py`: 73/73 byte-identical.
+- `check_warnings.py`: `warnings ok`.
+
+### Not done / notes
+
+- Item 6 has no code change (above). It needs Rowan to re-judge at
+  500 px.
+- For the text after a vertical `textPath`, we continue from the path's
+  end, as horizontal text does. Chromium puts it somewhere else again. Left
+  as is.
+- The decoration fill from an ancestor `<g>` (red in Chromium, black in
+  resvg and ours) is unchanged. It is resvg-consistent and out of scope.

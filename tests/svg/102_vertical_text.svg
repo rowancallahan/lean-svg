@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200" font-family="Noto Sans">
+  <!-- T102: vertical text on a textPath (upright CJK against the path
+       direction, overline following the path), direction=rtl ending a
+       vertical run at its y, and x/y lists applied per grapheme -->
+  <path id="arc" d="M 20 150 A 70 70 0 0 1 160 150" fill="none" stroke="gray"/>
+  <text font-size="18" writing-mode="tb" text-decoration="overline">
+    <textPath href="#arc">日本語のtext</textPath>
+  </text>
+  <text x="200" y="120" font-size="28" writing-mode="tb" direction="rtl">Text</text>
+  <text x="240" y="160 190" font-size="36">&#x438;&#x306;&#x438;</text>
+  <text x="20" y="190" font-size="-20">hidden</text>
+</svg>

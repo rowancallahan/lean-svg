@@ -10,8 +10,9 @@ writes it to `<output>.warnings.txt` through the effect layer
 (`Prog.writeWarnings`).  The list is deduplicated and bounded, so a document
 cannot grow it without limit.
 
-Today only one feature reports: a `font-family` that does not resolve to an
-embedded font (the text is drawn in Noto Sans instead).
+Reported today: a `font-family` that does not resolve to an embedded font
+(the text is drawn in Noto Sans instead), and a negative `font-size` (the
+text is not drawn, T102).
 -/
 
 namespace LeanSvg
@@ -43,6 +44,10 @@ def quote (bs : ByteArray) : String :=
 /-- The message for a `font-family` value that selects no embedded font. -/
 def missingFont (family : ByteArray) : String :=
   s!"font-family \"{quote family}\" not available; used Noto Sans"
+
+/-- A text node with a negative `font-size` (T102): it is not drawn. -/
+def negativeFontSize : String :=
+  "negative font-size; text not drawn"
 
 /-- The warnings file's contents: one message per line. -/
 def text (ws : Array String) : ByteArray :=
