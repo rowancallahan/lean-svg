@@ -49,7 +49,11 @@ inductive Event where
   | text (bytes : ByteArray)
 deriving Inhabited
 
-def maxDepth : Nat := 64
+/-- Nesting cap.  T104 raised it from 64: pgfplots' 3D surfaces nest one `g`
+per patch (1164 levels in `tikz/plot_pgf_3d_surface`).  Every stack is an
+array, so depth costs memory linearly; the one per-element cost that grows
+with depth is CSS descendant matching over the ancestor chain (linear). -/
+def maxDepth : Nat := 2048
 def maxElements : Nat := 1000000
 
 def svgNs : String := "http://www.w3.org/2000/svg"

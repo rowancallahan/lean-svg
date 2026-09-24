@@ -613,7 +613,7 @@ structure Doc where
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
-deeper (the XML parser's own cap is `Xml.maxDepth` = 64) and every level would
+deeper (the XML parser's own cap is `Xml.maxDepth` = 2048) and every level would
 cost one canvas, so past this bound a group that asks for a layer is rendered
 as a plain group instead: its opacity is folded into its children's paint, as
 it was before T22, and its blend mode is ignored.  Ten is more than any real
