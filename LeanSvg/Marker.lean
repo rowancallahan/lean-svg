@@ -173,6 +173,21 @@ def getPrevVertex (segs : Array Seg) (idx : Nat) : Pt :=
   | .cubicTo _ _ p => p
   | .close => getSubpathStart segs idx
 
+/-- T102: where the first segment of the subpath open before `idx` heads:
+its end for a line, its first control point for a curve (its end when that
+control point sits on the start). -/
+def subpathFirstOut (segs : Array Seg) (idx : Nat) : Pt := Id.run do
+  for j in [0:idx] do
+    let i := idx - 1 - j
+    match segs.getD i default with
+    | .moveTo pm =>
+      return match segs.getD (i + 1) default with
+        | .lineTo p => p
+        | .cubicTo c1 _ p => if c1.x == pm.x && c1.y == pm.y then p else c1
+        | _ => pm
+    | _ => pure ()
+  return ⟨0, 0⟩
+
 /-- `calc_vertex_angle`, as a 16.16 `(cos, sin)` pair (never itself converted
 to degrees, since every caller only ever wants a rotation matrix from it). -/
 def calcVertexAngle (segs : Array Seg) (idx : Nat) : Int × Int :=
@@ -203,6 +218,13 @@ def calcVertexAngle (segs : Array Seg) (idx : Nat) : Int × Int :=
     | _, .close => (65536, 0)
   else
     match segs.getD idx default, segs.getD (idx + 1) default with
+    | .close, _ =>
+      -- T102: a mid closepath vertex (Chromium): the closing line in, the
+      -- subpath's first segment out.
+      let prev := getPrevVertex segs idx
+      let st := getSubpathStart segs idx
+      let out := subpathFirstOut segs idx
+      calcAngle4 prev.x prev.y st.x st.y st.x st.y out.x out.y
     | .moveTo pm, .lineTo p => calcLineAngle pm.x pm.y p.x p.y
     | .moveTo pm, .cubicTo p1 _ _ => calcLineAngle pm.x pm.y p1.x p1.y
     | .lineTo p1, .lineTo p2 =>
@@ -234,7 +256,6 @@ def calcVertexAngle (segs : Array Seg) (idx : Nat) : Int × Int :=
       let next := getSubpathStart segs idx
       calcLineAngle prev.x prev.y next.x next.y
     | _, .moveTo _ => (65536, 0)
-    | .close, _ => (65536, 0)
 
 /-! ## `draw_markers`: which vertices get a marker -/
 
@@ -252,7 +273,13 @@ def midVertices (segs : Array Seg) : Array (Pt × Nat) := Id.run do
     | .moveTo p => out := out.push (p, i)
     | .lineTo p => out := out.push (p, i)
     | .cubicTo _ _ p => out := out.push (p, i)
-    | .close => pure ()
+    -- T102: a closepath that ends a subpath before another starts is a
+    -- vertex too, at its subpath's start, as in Chromium (usvg skips it;
+    -- repeated closes, `M L L Z Z Z`, stay skipped as in both).
+    | .close =>
+      match segs.getD (i + 1) default with
+      | .moveTo _ => out := out.push (getSubpathStart segs i, i)
+      | _ => pure ()
   return out
 
 def endVertex (segs : Array Seg) : Option (Pt × Nat) :=
