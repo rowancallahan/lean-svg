@@ -128,3 +128,88 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+### What changed
+
+1. **`systemLanguage` / `requiredFeatures` / `requiredExtensions` on `tspan`, `tref`, `a`, `textPath`**
+   (`LeanSvg/Svg.lean`, `textShapes`). usvg's `collect_text_chunks` checks
+   `is_visible_element` (display *and* `is_condition_passed`) on each text
+   node's parent; we only checked `display`. A failing span now keeps its
+   characters' position slots but draws no glyphs, same as `display:none`.
+2. **Group-opacity composite ties** (`LeanSvg/Canvas.lean`, `compositeNormal`).
+   The integer `normal` composite (T44) rounds an exact half to even; tiny-skia's
+   f32 pipeline (`Gather` has no lowp stage, so `draw_pixmap` is highp) lands an
+   ulp either side. Every odd layer alpha at `opacity="0.5"` is a tie, so a
+   masked layer was one alpha level off on half its pixels, which becomes ~10
+   levels of colour after un-premultiplying. Only a channel on an exact tie is
+   now recomputed with `blendPixel`'s f32 arithmetic (`blendOverScaledT`);
+   non-tie pixels take the same path as before. Opacity passed as
+   `F32.ofRat opQ opGrid` (exact for every opacity that is a multiple of 1/255,
+   1/256 and common decimals, since `opGrid = 2^8·255`), so `compositeNormal`'s
+   signature and its locality proof are unchanged.
+3. **Paint servers on text use the `<text>` font-metric bbox**
+   (`LeanSvg/Svg.lean`, `.render` branch of `<text>`). usvg's
+   `node_to_user_coordinates` gives every path in `Text::flattened` the text's
+   `bounding_box` (T81's metric box, `(0,-ascent)..(advance,-descent)` per
+   cluster), not the run's glyph outlines. The run shapes now point at a
+   `ctxUses` slot holding `mbox` and the text's `ctm` (the mechanism
+   `Marker.expand` already uses for a shape's own box). Paints already tied to
+   a `use` (`context-*`) keep their slot. Also fixes `text/tspan/tspan-bbox-*`,
+   `text/text/real-text-height.svg`, `bidi-reordering.svg`,
+   `underline-with-rotate-list-4.svg`.
+4. Tests: `tests/svg/109_text_paint_lang.svg`, `tests/svg/109_mask_opacity.svg`.
+
+### Target files (within-8, 200 px, vs resvg)
+
+| file | before | after |
+|---|---|---|
+| masking/mask/with-opacity-1.svg | 95.20 | **100.00** |
+| masking/mask/with-opacity-3.svg | 88.80 | **100.00** |
+| structure/systemLanguage/on-tspan.svg | 95.19 | **99.98** |
+| painting/fill/radial-gradient-on-text.svg | 94.64 | **99.97** |
+| painting/stroke/radial-gradient-on-text.svg | 94.43 | **99.70** |
+| filters/feSpotLight/limitingConeAngle=±30.svg | 98.59 | 98.59 (by decision, see below) |
+| painting/marker/marker-on-circle.svg | 98.51 | 98.51 (not fixed, see below) |
+
+### Left, with cause and proposed fix
+
+- **feSpotLight limitingConeAngle=±30** — the whole difference is the T101 soft
+  cone edge vs resvg's hard edge, kept as instructed. Against the suite PNG
+  (`--ref suite`, `filters/feSpotLight`) both score **100.000%** and all 12
+  files in the directory pass. **Reference looks wrong:** `tests/criteria.csv`
+  lists both as `resvg`, but `docs/DECISIONS.md` (T99 answers) says files
+  affected by the soft-fade change are judged against the suite PNG. Not
+  changed here (criteria.csv is off limits); the integrator should set these
+  two to `suite` (`limitingConeAngle=0.svg` passes either way).
+- **marker-on-circle** — the markers are pixel-identical; the miss is the
+  1 px green circle, and the plain circle without markers misses the same way.
+  A 1 px stroke at scale 1 is a tiny-skia hairline, and `hairline::
+  stroke_path_impl` flattens curves its own way: `hair_cubic` splits each cubic
+  into `2^k` uniform-t lines (`compute_cubic_segments`, tol 1/8 ×4 per level;
+  16 lines per quarter here), after `chop_cubic_at_max_curvature` when
+  `quick_cubic_niceness_check` fails; quads use `compute_quad_level`. Since
+  hairline segments are blended independently (no joins), the vertex positions
+  show. `Render.drawStroke`'s hairline branch feeds `Raster.hairline` our
+  general flattener's polylines instead. Fix: a hairline-only flattener over
+  device-space path commands implementing those three rules (the niceness
+  check is four dot products; the max-curvature chop needs a cubic solve).
+  Size: ~150 lines in a new module plus plumbing the commands to that branch;
+  it changes every hairline in both corpora, so it needs its own task and a
+  full re-check against Chromium.
+
+### Verification
+
+- `lake build`: no errors, no new warnings. `check-theorems.sh`: `theorems ok`
+  (invariants ok).
+- resvg suite, fast 100 px: pass 1543 → **1553**, newly passing 10, newly
+  failing 0.
+- resvg suite, 200 px: pass 1567 → **1574**, newly passing 7, newly failing 0;
+  11 files moved, all up. Wall time 17.6 s → 16.6 s.
+- `run_tests.py`: 63/80 → 65/82 (the two new files pass); no file dropped;
+  exact-match improved on `104_root_background` (81.5 → 99.98), `26_layers`
+  (96.5 → 99.98), `34_filters`, `84_svg_image`.
+- `run_adversarial.py`: 172/172 clean. `run_tiles.py`: 82/82 byte-identical.
