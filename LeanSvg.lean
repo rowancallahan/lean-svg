@@ -11,6 +11,7 @@ import LeanSvg.Xml
 import LeanSvg.Css
 import LeanSvg.TextPath
 import LeanSvg.VertOrient
+import LeanSvg.Synth
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use

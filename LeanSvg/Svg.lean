@@ -2972,6 +2972,8 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 `bsStack`, not from `st`: see `baselineShiftDelta`). -/
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
+    weight := st.fontWeight,
+    italic := st.fontItalic,
     smallCaps := st.fontSmallCaps,
     -- T105: a document family picks its face by weight and style
     family := if st.fontFamily < FontSet.count then st.fontFamily
@@ -3442,6 +3444,12 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       let st := if outK == 1 then st else
         { st with strokeWidth := st.strokeWidth * outK, dashes := st.dashes.map (· * outK),
                   dashOffset := st.dashOffset * outK }
+      -- T116: a synthetic-bold outline is stroked in the fill's paint (Skia's
+      -- fake bold), under the run's own fill and stroke
+      let st := if p.boldSize == 0 then st else
+        { st with stroke := st.fill, strokeOpacity := st.fillOpacity, strokeCtx := st.fillCtx,
+                  strokeWidth := Synth.boldWidth p.boldSize sc * outK, fill := .none, fillCtx := none,
+                  cap := .butt, join := .miter, miterLimit := 1024, dashes := #[], dashOffset := 0 }
       out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := false }, false, none, none⟩
       chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
