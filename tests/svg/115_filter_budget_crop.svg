@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="1500" viewBox="0 0 300 1500">
+  <!-- T115: a 300% filter region whose primitives x area pass Render.maxFilterWork
+       is cut to the canvas (as an oversized region is) instead of refused. -->
+  <filter id="f" x="-1" y="-1" width="300%" height="300%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="b"/>
+    <feColorMatrix in="b" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .4 0" result="c"/>
+    <feOffset in="c" dx="4" dy="4" result="o"/>
+    <feOffset in="o" dx="0" dy="0" result="o2"/>
+    <feOffset in="o2" dx="0" dy="0" result="o3"/>
+    <feOffset in="o3" dx="0" dy="0" result="o4"/>
+    <feOffset in="o4" dx="0" dy="0" result="o5"/>
+    <feOffset in="o5" dx="0" dy="0" result="o6"/>
+    <feOffset in="o6" dx="0" dy="0" result="o7"/>
+    <feBlend in="SourceGraphic" in2="o7" mode="normal"/>
+  </filter>
+  <rect x="10" y="10" width="270" height="1470" rx="12" fill="#FEFECE" stroke="#A80036" stroke-width="1.5" filter="url(#f)"/>
+  <rect x="60" y="60" width="120" height="40" fill="#8cf" filter="url(#f)"/>
+</svg>
