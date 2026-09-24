@@ -279,7 +279,11 @@ def build (doc : Svg.Doc) (fuel : Nat) (idx : Nat) (cmds : Array PathCmd) (ctm0 
   if pxW == 0 || pxH == 0 || pxW > maxTileDim || pxH > maxTileDim || pxW * pxH > maxTilePixels then
     .skip
   else
-  let bicubic := !(m.b == 0 && m.c == 0 && m.a > 0 && m.d > 0)
+  -- T108: a skew coefficient within 4/65536 of zero counts as zero.  A rotation undone by
+  -- the opposite one (`transform-and-patternTransform`: `rotate(-30)` on
+  -- the shape, `rotate(30)` as `patternTransform`) cancels exactly in
+  -- resvg's `f32` but leaves a unit or two in 16.16's rounded products.
+  let bicubic := !(m.b.natAbs ≤ 4 && m.c.natAbs ≤ 4 && m.a > 0 && m.d > 0)
   let contentMat : Mat := match res.viewBox with
     | some (vx, vy, vw, vh) => viewBoxMat vx vy vw vh res.alignX res.alignY res.slice res.alignNone
         wAbs hAbs
