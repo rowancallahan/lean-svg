@@ -87,16 +87,25 @@ theorem runFS_input_only (inp out : String) (p : Prog α) (fs fs' : FS)
 > produced. There is no fourth outcome.
 
 ```lean
-theorem renderProgram_spec (clobberError : ε) (render : ByteArray → Except ε ByteArray)
-    (inp out : String) (fs : FS) :
+theorem renderProgram_spec (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS) :
     runFS inp out (renderProgram clobberError render) fs =
       if (fs out).isSome then
         (.error clobberError, fs)
       else
         match render ((fs inp).getD ByteArray.empty) with
-        | .ok png => (.ok (), fs.write out png)
+        | .ok (png, warn) => (.ok (warn.size != 0), fs.write out png)
         | .error e => (.error e, fs)
 ```
+
+This is the default (strict) program (T98b). `render` also returns a
+warnings text; the strict program never writes it and returns only whether it
+was non-empty, which `Main` turns into exit code `2`. With `--warnings`,
+`Main` runs `renderProgramWarn` instead (T98): it refuses if either the output
+path or `<out>.warnings.txt` exists, and otherwise also writes the non-empty
+warnings text there (`renderProgramWarn_spec`, `renderProgramWarn_ok_frame`:
+nothing but those two paths changes; `renderProgramWarn_never_overwrites`:
+only paths that were absent change).
 
 ### No-clobber
 
@@ -104,7 +113,8 @@ theorem renderProgram_spec (clobberError : ε) (render : ByteArray → Except ε
 > it changes the file system not at all.
 
 ```lean
-theorem renderProgram_no_clobber (clobberError : ε) (render : ByteArray → Except ε ByteArray)
+theorem renderProgram_no_clobber (clobberError : ε)
+    (render : ByteArray → Except ε (ByteArray × ByteArray))
     (inp out : String) (fs : FS) (b : ByteArray) (h : fs out = some b) :
     (runFS inp out (renderProgram clobberError render) fs).2 = fs
 ```
@@ -113,8 +123,14 @@ The remaining three are corollaries, each with an added `fs out = none`
 hypothesis (a success or an ordinary render error can only happen once
 no-clobber has let the program past its first check): `renderProgram_error_no_write`
 (on error, nothing changed), `renderProgram_ok_output` (on success, the output
-path holds `some` the bytes), `renderProgram_ok_frame` (on success, nothing
-else moved).
+path holds `some` the bytes), `renderProgram_ok_frame` (nothing but the
+output path ever moves), plus `renderProgram_never_overwrites` (a changed path
+was absent before).
+
+`Main.lean` writes nothing to stdout or stderr; its only other output is the
+exit code (`0` ok, `2` ok with warnings, `1` failure). `Op` has no operation
+that could print, and `tests/check_invariants.py` fails if the `lean-svg`
+main path mentions a print, stream, trace, panic or subprocess.
 
 ### Returned byte arrays have a bounded size
 
@@ -184,7 +200,7 @@ other limits have no corresponding resource theorem here.
 
 - Canvas dimensions ≤ 16384 and total pixels ≤ 16777216.
 - Input size ≤ 64 MiB (`maxInput`; proved above, `render_rejects_large`).
-- XML nesting depth ≤ 64; element count ≤ 1000000.
+- XML nesting depth ≤ 2048 (T104; pgfplots nests one `g` per path); element count ≤ 1000000.
 - Fuel limits on gradient `href` chains, clip nesting, composite glyphs.
 - A layer-pixel budget for group opacity.
 

@@ -1,0 +1,12 @@
+@startuml
+[*] --> Idle
+Idle --> Warmup : start
+state Warmup {
+  [*] --> FastAdapt
+  FastAdapt --> SlowAdapt
+  SlowAdapt --> [*]
+}
+Warmup --> Sampling
+Sampling --> Done : n == N
+Done --> [*]
+@enduml

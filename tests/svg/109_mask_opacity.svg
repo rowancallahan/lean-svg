@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <!-- T109: group opacity on a masked layer; exact rounding ties follow the f32 pipeline -->
+  <linearGradient id="lg">
+    <stop offset="0" stop-color="white" stop-opacity="0"/>
+    <stop offset="1" stop-color="black"/>
+  </linearGradient>
+  <mask id="m"><rect x="10" y="10" width="180" height="85" fill="url(#lg)"/></mask>
+  <mask id="m2"><rect x="10" y="105" width="180" height="85" fill="url(#lg)" opacity="0.5"/></mask>
+  <rect width="200" height="100" fill="#0a0" mask="url(#m)" opacity="0.5"/>
+  <rect y="100" width="200" height="100" fill="#06c" mask="url(#m2)" opacity="0.75"/>
+  <g opacity="0.25"><circle cx="100" cy="100" r="40" fill="#c30" fill-opacity="0.6"/><circle cx="130" cy="100" r="30" fill="#fc0"/></g>
+</svg>

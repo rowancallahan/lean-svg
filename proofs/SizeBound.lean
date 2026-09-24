@@ -259,11 +259,15 @@ nothing about the XML/SVG pipeline is involved. -/
 theorem render_rejects_large (opts : Options) (input : ByteArray) (h : input.size > maxInput) :
     ∃ e, render opts input = .error e := by
   refine ⟨s!"input {input.size} bytes exceeds the {maxInput} byte limit", ?_⟩
-  unfold render
-  simp only [bind, Except.bind, pure, Except.pure]
-  split
-  · rfl
-  · omega
+  -- T98: `render` is `renderWithWarnings` minus the warnings.
+  have hw : renderWithWarnings opts input =
+      .error s!"input {input.size} bytes exceeds the {maxInput} byte limit" := by
+    unfold renderWithWarnings
+    simp only [bind, Except.bind, pure, Except.pure]
+    split
+    · rfl
+    · omega
+  simp [render, hw, Functor.map, Except.map]
 
 /-- Every successful render returns a byte array bounded by its checked canvas.
 The witnesses are the dimensions passed to the encoder, including for tiles
@@ -273,7 +277,17 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
     ∃ w h : Nat, w ≤ maxDim ∧ h ≤ maxDim ∧ w * h ≤ maxPixels ∧
       png.size ≤ 68 + h * (4 * w + 16 + 5 * (4 * w / 65535)) ∧
       png.size ≤ 5 * (max w h) * (max w h) + 132 := by
-  unfold render at hr
+  -- T98: `render` is `renderWithWarnings` minus the warnings; reduce to it.
+  cases hw : renderWithWarnings opts input with
+  | error e => simp [render, hw, Functor.map, Except.map] at hr
+  | ok r =>
+  obtain ⟨png', ws⟩ := r
+  have hp : png' = png := by simpa [render, hw, Functor.map, Except.map] using hr
+  subst hp
+  clear hr
+  have hr := hw
+  clear hw
+  unfold renderWithWarnings at hr
   simp only [bind, Except.bind, pure, Except.pure] at hr
   split at hr
   · simp at hr
@@ -281,12 +295,12 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
   | error e => simp [hp] at hr
   | ok events =>
     simp only [hp] at hr
-    cases hd : Svg.interpret events with
+    cases hd : Svg.interpretWith { outSize := Render.outSize events opts } events with
     | error e => simp [hd] at hr
     | ok doc =>
       simp only [hd] at hr
       -- T52/T86: `render` expands markers and refits the root size (pure
-      -- `Doc → Doc` transforms) between `Svg.interpret` and `canvasSetup`;
+      -- `Doc → Doc` transforms) between `Svg.interpretWith` and `canvasSetup`;
       -- whatever size they lead to is checked below.
       cases hs : Render.canvasSetup (RootFit.apply (Marker.expand doc)).root opts with
       | error e => simp [hs] at hr
@@ -310,7 +324,7 @@ theorem render_output_size_bound (opts : Options) (input png : ByteArray)
               have ha : w * h ≤ maxPixels := by omega
               split at hr <;> split at hr <;> simp at hr
               all_goals
-                subst png
+                obtain ⟨rfl, -⟩ := hr
                 exact ⟨w, h, hw, hh, ha, Png.SizeBound.encode_size_le w h _,
                   Png.SizeBound.encode_size_le_square w h _⟩
 

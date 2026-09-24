@@ -14,13 +14,15 @@
     path unchanged.
   - `runFS_input_only`: the result depends only on the input path's contents
     and on whether the output path is present.
-  - `renderProgram_spec`: the renderer program's run equals
-    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok png => (ok, fs[out ↦ png]) | error e => (error e, fs)`.
+  - `renderProgram_spec`: the default (strict, T98b) renderer program's run equals
+    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok (png, warn) => (ok (warn ≠ ∅), fs[out ↦ png]) | error e => (error e, fs)`.
+    `renderProgramWarn_*` state the same for `--warnings` (T98), which also
+    writes `<out>.warnings.txt` and refuses if either path exists.
   - `renderProgram_no_clobber`: if the output path already holds something,
     running the program changes the file system not at all.
   - Corollaries (each additionally given `fs out = none`): on error nothing is
     written; on success the output path holds exactly `some (render input)`.
-- `#print axioms` on all seven of these: `propext` only. No `sorry`, no `Classical`.
+- `#print axioms` on all of these: `propext` only. No `sorry`, no `Classical`.
 
 **Claimed by construction** (enforced by the language, checked by grep):
 
@@ -41,7 +43,8 @@ semantics. Fidelity is measured against resvg (`tests/run_tests.py`).
 **Trusted:** the Lean compiler and runtime (C), the C compiler, the OS,
 `Prog.execIO` (eleven lines mapping the three ops to
 `System.FilePath.pathExists` / `IO.FS.readBinFile` / `writeBinFile`), and
-`Main.lean` (argument parsing, stderr message).
+`Main.lean` (argument parsing, exit code; it writes nothing to stdout or
+stderr, T98b).
 
 ## 2. Threat model
 
@@ -53,7 +56,7 @@ An attacker controls the input file completely. Goals we defend against:
 | External entities / local file read (XXE, librsvg CVE-2023-38633, Inkscape CVE-2026-4980) | DTD, `href`, XInclude | No code path resolves any reference; `Prog` cannot open a second file |
 | SSRF via remote resources (Batik) | `href`, `url()` | same |
 | Script execution | `<script>`, event attrs | skipped as unknown elements |
-| Stack exhaustion via nesting (librsvg CVE-2019-20446) | recursive parser/renderer | parser is iterative with a stack array; depth cap 64 |
+| Stack exhaustion via nesting (librsvg CVE-2019-20446) | recursive parser/renderer | parser is iterative with a stack array; depth cap 2048 (T104) |
 | Memory exhaustion via dimensions | canvas alloc | dimension and pixel caps checked before allocation |
 | CPU exhaustion via numbers (`1e999999999`, megabytes of digits) | number parsing, big-int math | 18 significant digits kept, exponent saturates at 10^5 and clamps at ±60, result clamped |
 | Malformed input crashes | parser | every read past the end returns 0; every array op is bounds-checked |
@@ -405,6 +408,55 @@ arithmetic operation for operation on `F32`, with a scalar correctly-rounded
 falls back to an exact 2^-80 computation only near a rounding tie (at most
 `exactBudget` times per primitive).
 
+### 3.12 CSS Values 4 units and CSS basic shapes (T92)
+
+usvg 0.48.1 knows neither, so these follow Chromium as `tests/render_chrome.py`
+runs it (the SVG in an `<img>`), measured probe by probe. The choices a
+standalone renderer has to make:
+
+* **Viewport units** (`vw vh vmin vmax vi vb`, and the `sv*`/`lv*`/`dv*`
+  variants, all equal for a static image) are a percentage of the **output
+  canvas in px**, taken as user units with no `viewBox` scaling. That is what
+  Chromium does: an `<img>`'s viewport is its box on the page, so `50vw` in a
+  file rendered 800 px wide is 400 user units whatever the `viewBox`. The
+  geometry therefore depends on `--width`/`--zoom` (never on `--viewport`,
+  so tiles still stitch). `Render.outSize` computes the canvas from the root
+  element before `interpret`; a root without a usable size (refit later by
+  `RootFit`) and nested SVG images use their natural size instead.
+* **Font units** use the embedded Noto Sans regular face (the only family
+  drawn, whatever the weight/style): `ch` = advance of `0`, `ic` = advance of
+  `水` (not in the subset, so CSS's `1em` fallback), `cap` = `OS/2.sCapHeight`,
+  `lh` = `line-height: normal` as Chromium's `FontMetrics::LineSpacing`
+  (ascent, descent and line gap each rounded to whole px, then summed; the
+  `line-height` property itself is not read). `rch ric rcap rlh rex` are the
+  same against the root's font size; `rex` is Chromium's x-height, while
+  `ex` keeps usvg's `0.5em`. Measured against Chromium with the real Noto
+  Sans embedded via `@font-face` (this container's Chromium lacks it and
+  falls back to `ch = 0.5em`), `10ch`, `10cap`, `10lh`, `10rch`, `10rex` and
+  `10rlh` all agree to within 0.1 px. Default font
+  size remains usvg's 12 px (Chromium's is 16).
+* The units work in every length `parseTextLen` reads (geometry, text
+  positions, `stroke-width`, dashes) plus `font-size` and
+  `letter-/word-spacing`; context-free parsers (`width`/`height` of the root,
+  nested `svg`, `image`, pattern and marker attributes) do not take them.
+* **Basic shapes** (`LeanSvg/BasicShape.lean`) are accepted where SVG 2 takes
+  them in a renderer: `clip-path`. `circle() ellipse() inset() rect() xywh()`
+  (with `round`), `polygon()`/`path()` (with a fill rule), and a reference
+  box keyword alone. Reference boxes: `fill-box` (= `content-box`,
+  `padding-box`), `stroke-box` (= `border-box`, `margin-box`, and the default)
+  and `view-box` (user-space `(0, 0)` with the nearest viewport's `viewBox`
+  size). Chromium's `stroke-box` is the bounds of the exact stroke outline
+  (a square-capped diagonal line inflates by `hw·√2`), so it is computed with
+  `Geom.strokePoly` (without dashes), only while a `stroke-box` shape is in
+  force; a group's is the union of its children's. `round` percentages
+  resolve against the reference box, adjacent radii are scaled down like
+  `border-radius`, and insets that overlap shrink proportionally to nothing.
+  Coordinates (including `path()`'s) are offsets from the box origin;
+  unitless numbers are px; keywords are case-insensitive. An invalid value is
+  no clip, as in usvg. Each shape becomes a synthetic one-child `ClipEntry`
+  built at the end of `interpret`, so `Clip.lean` needed no change. Caps:
+  10 000 polygon points, 100 000 path commands (beyond: invalid).
+
 ## 4. Fidelity results (M0 corpus, natural size, vs resvg 0.48.1)
 
 | file | exact | ≤ 8 | ≤ 32 | max d |
@@ -454,6 +506,64 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/FilterApply.lean` | filter primitives on pixels (resvg `filter/`) |
 | `LeanSvg/Filter/Image.lean` | `feImage` spec, `fix_recursive_fe_image`, link sub-documents |
 | `LeanSvg/Filter/ImageRender.lean` | `feImage` jobs and geometry for `Render` |
+| `LeanSvg/Units.lean` | CSS Values 4 units (T92): viewport and Noto Sans font metrics |
+| `LeanSvg/BasicShape.lean` | CSS basic shapes for `clip-path` (T92) |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
 | `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |
+
+## 6. Per-file pass criteria (T100)
+
+A fourth kind, `excluded`, overrides the rule for files whose behaviour
+Rowan has decided (`docs/DECISIONS.md`): DTD entities, `enable-background`
+(where resvg is not the reference), zero/negative document size (refused),
+and external resources in files that would otherwise need a human check.
+They are listed but never scored or queued for review.
+
+Judging every file against resvg conflates two different questions: "does
+lean-svg match resvg" and "is lean-svg correct". resvg-test-suite's own
+`results.csv` rates the seven big renderers against the SVG spec per file
+(`1` correct, `2` known wrong, `0` unrated); 96 files resvg itself gets
+wrong and 61 are unrated, so scoring those against resvg would just reward
+copying resvg's bugs (`tests/score_known.py` already reported this split;
+T100 turns it into an actual scoring policy).
+
+`tests/make_criteria.py` writes `tests/criteria.csv` (one row per
+resvg-test-suite file, plus every `tests/svg/*.svg` regression file), giving
+each file a `reference`:
+
+1. resvg rated correct (`resvg` column `1`) &rarr; **resvg**.
+2. Else Chromium rated correct (`chrome` column `1`) &rarr; **chrome**
+   (`tests/render_chrome.py`; `tests/run_corpora.py --ref chrome`).
+3. Else &rarr; **human**: no known-correct oracle exists, so the file needs
+   a person to look at it. `tests/svg/*.svg` files have no `results.csv`
+   row and are always scored against resvg (unchanged from before T100).
+
+Of 1679 suite files: 1522 resvg, 45 chrome, 112 human.
+
+`tests/make_human_review.py` renders ours / the suite's own bundled PNG /
+Chromium for every `human` row that has no verdict yet in
+`tests/human_verdicts.csv`, and writes a static `index.html` (three panels
+per file) so Rowan can decide and add `file,pass|fail,note` rows by hand.
+
+`tests/score_criteria.py` takes a `run_corpora.py --ref resvg` CSV, a
+`--ref chrome` CSV, and `tests/human_verdicts.csv`, and reports pass counts
+per reference kind and overall using the *same* criterion as everywhere
+else — &ge;99% of pixels within 8 levels — plus a list of failures.
+`--strict` exits non-zero if any scored file fails (an unreviewed `human`
+row is neither a pass nor a fail, and never trips `--strict`).
+
+**Does Chromium need a looser tolerance?** Measured on the 45 `chrome`
+files at the standard width-200 render: within-8/&ge;99% passes 18/44
+scored (one `size_mismatch`). Loosening only the tolerance barely moves
+it (within-32/&ge;99%: 23/44); loosening only the threshold moves it more
+(within-8/&ge;95%: 31/44; &ge;90%: 37/44). Most of the failures are text
+(RTL, bidi, emoji, font-weight, tspan-with-filter/mask/opacity) where
+Chromium's font substitution, hinting and subpixel AA genuinely differ
+from resvg/lean-svg's, not a handful of stray seam pixels — a blanket
+looser number would hide real bugs as often as it forgives AA noise. Kept
+the criterion unchanged; ambiguous chrome-reference files are exactly what
+the `human` bucket and `make_human_review.py` are for.
+
+First full numbers (width 200, tol 8, threshold 0.99): see
+`tasks/T100-criteria.md`'s `## Report`.

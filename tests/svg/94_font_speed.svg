@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="240" font-family="Noto Sans" font-size="22">
+  <!-- T94: glyphs read lazily from the embedded fonts' base64 tail -->
+  <!-- kana and kanji from both ends of Mplus 1p's glyph list (loca/glyf at the
+       start and the end of the tail), via fallback from Noto Sans -->
+  <text x="12" y="34" fill="#1d3557">ぁあいうえおかがきぎ</text>
+  <text x="12" y="70" fill="#1d3557">鷹鷺鹿麒麟黄黒鼓鼠齢</text>
+  <!-- a longer mixed run: many distinct glyphs, full-width punctuation -->
+  <text x="12" y="106" fill="#457b9d" font-size="18">東京都、大阪府。「漢字」とカタカナ！</text>
+  <!-- Mplus 1p selected directly, kerned Latin in it and in Noto Sans -->
+  <text x="12" y="142" fill="#2a9d8f" font-family="'Mplus 1p'">AVA To 日本 WAVE</text>
+  <text x="388" y="178" fill="#e63946" text-anchor="end">AVATAR Tokyo 東京</text>
+  <text x="200" y="220" fill="#264653" text-anchor="middle" font-size="26">ヴァイオリン</text>
+</svg>

@@ -37,11 +37,20 @@ DIFF_GAIN = 4  # diff image red intensity = d * DIFF_GAIN, clamped
 # --------------------------------------------------------------------------
 
 
-def resvg_font_args(no_font_pin=False):
+def resvg_font_args(no_font_pin=False, suite_generics=False):
     """Extra `resvg` flags that pin the oracle to the test suite's own bundled
     fonts, so text renders against known font files instead of whatever the
     system happens to have installed. Returns [] (no pinning) when disabled
-    or when the fonts directory is missing (with a warning on stderr)."""
+    or when the fonts directory is missing (with a warning on stderr).
+
+    T110: with `suite_generics` (`run_corpora.py`), the CSS generic families
+    also map to suite fonts exactly as resvg's own test harness does (`crates/resvg/tests/integration/main.rs`, v0.48.1),
+    which is the setup the suite's `resvg=1` verdicts were made with. The
+    CLI's defaults (Times New Roman, Arial, ...) are not in the suite's font
+    dir, so without these flags `serif`, an unmatched list and an unparsable
+    `font-family` (which usvg replaces by Times New Roman, then `serif`)
+    draw no text at all. The local tests keep the CLI defaults: they are
+    not the suite, and their generic-family files target Chromium."""
     if no_font_pin:
         return []
     if not RESVG_FONTS_DIR.is_dir():
@@ -51,7 +60,18 @@ def resvg_font_args(no_font_pin=False):
             file=sys.stderr,
         )
         return []
-    return ["--skip-system-fonts", "--use-fonts-dir", str(RESVG_FONTS_DIR)]
+    pin = ["--skip-system-fonts", "--use-fonts-dir", str(RESVG_FONTS_DIR)]
+    return pin + (RESVG_GENERIC_ARGS if suite_generics else [])
+
+
+# `--<generic>-family` flags matching resvg's integration-test fontdb setup.
+RESVG_GENERIC_ARGS = [
+    "--serif-family", "Noto Serif",
+    "--sans-serif-family", "Noto Sans",
+    "--cursive-family", "Yellowtail",
+    "--fantasy-family", "Sedgwick Ave Display",
+    "--monospace-family", "Noto Mono",
+]
 
 
 def run_renderer(cmd):
@@ -169,7 +189,9 @@ def run_one(svg, binary, tol, threshold, resvg_args=None):
 
     ref_png = OUT_DIR / result["ref_png"]
     ours_png = OUT_DIR / result["ours_png"]
-    for stale in (ref_png, ours_png, OUT_DIR / result["cmp_png"]):
+    # T98: lean-svg also refuses to run if `<out>.warnings.txt` exists.
+    ours_warn = OUT_DIR / (result["ours_png"] + ".warnings.txt")
+    for stale in (ref_png, ours_png, OUT_DIR / result["cmp_png"], ours_warn):
         stale.unlink(missing_ok=True)
 
     rc_ref, ms_ref, err_ref, to_ref = run_renderer(
@@ -184,7 +206,7 @@ def run_one(svg, binary, tol, threshold, resvg_args=None):
     if to_ref or rc_ref != 0:
         result["error"] = "resvg failed: " + (err_ref or "rc=%s" % rc_ref)
         return result
-    if to_ours or rc_ours != 0:
+    if to_ours or rc_ours not in (0, 2):  # T98b: 2 = PNG written, with warnings
         result["error"] = "lean-svg failed: " + (err_ours or "rc=%s" % rc_ours)
         return result
 

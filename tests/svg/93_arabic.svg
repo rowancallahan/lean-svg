@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" font-family="Amiri" font-size="28">
+  <!-- T93: Arabic shaping (joining forms, lam-alef, harakat) and bidi -->
+  <text x="20" y="40" fill="#1d3557">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ</text>
+  <!-- mixed-direction chunk: Latin and digits inside Arabic, brackets mirrored -->
+  <text x="20" y="84" fill="#457b9d">مرحبا (SVG 2) العالم!</text>
+  <!-- a tspan with its own fill inside an RTL run -->
+  <text x="20" y="128" fill="#e63946">Hello <tspan fill="#2a9d8f">لا إله</tspan> end.</text>
+  <!-- Noto Sans base font: the Arabic falls back to Amiri -->
+  <text x="20" y="172" font-family="Noto Sans" font-size="22" fill="#264653">Arabic: كتاب ١٢٣</text>
+  <!-- letter-spacing applies to Latin but not to Arabic -->
+  <text x="200" y="220" text-anchor="middle" letter-spacing="4" fill="#6a4c93">abc عربي def</text>
+  <text x="380" y="252" text-anchor="end" font-size="20" fill="#8d0801">اقرأ المزيد</text>
+</svg>

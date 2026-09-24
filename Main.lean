@@ -5,24 +5,20 @@ import LeanSvg
 
 This file is the only code that runs in `IO` besides `Prog.execIO`.  It parses
 arguments, builds the `Prog` program from the pure `render`, hands it to the
-interpreter, and prints an error message to stderr on failure.
+interpreter, and maps the outcome to an exit code.  It writes nothing to
+stdout or stderr, ever (T98b): the only outputs are the files the effect
+layer writes and the exit code.
+
+    lean-svg <input.svg> <output.png> [--width N] [--zoom Z] [--background COLOR]
+             [--viewport X Y W H] [--threads N] [--warnings]
+
+Exit codes: `0` success, no warnings; `2` success with warnings (by default
+they are dropped; with `--warnings` they are in `<output>.warnings.txt`);
+`1` failure, nothing written (bad arguments, unreadable input, an output path
+that already exists, or a render error).  See README.md for the flags.
 -/
 
 open LeanSvg
-
-def usage : String :=
-  "usage: lean-svg <input.svg> <output.png> [--width N] [--zoom Z] [--background COLOR]\n" ++
-  "                [--viewport X Y W H] [--threads N]\n" ++
-  "  --viewport X Y W H  render only the W x H window whose top-left corner is\n" ++
-  "                      at (X, Y) in the zoomed image; X and Y are integers and\n" ++
-  "                      may be negative.  The zoom is still whatever --width or\n" ++
-  "                      --zoom asks for, so a viewer can tile a large virtual\n" ++
-  "                      image; the size limits apply to the tile.  Zoom factors\n" ++
-  "                      above 4096x are clamped.\n" ++
-  "  --threads N         render the image on up to N threads, as horizontal\n" ++
-  "                      bands (0 or 1 = serial, the default).  The output is\n" ++
-  "                      byte-identical whatever N is.  Set LEAN_NUM_THREADS to\n" ++
-  "                      size the runtime's worker pool."
 
 /-- A decimal integer argument; a leading `-` is allowed. -/
 def parseIntArg (s : String) : Option Int :=
@@ -66,18 +62,20 @@ def parseArgs : List String → Option (String × String × Options) → Option 
       | some _ => none
 
 def main (args : List String) : IO UInt32 := do
-  match parseArgs args none with
+  let warnings := args.contains "--warnings"
+  match parseArgs (args.filter (· != "--warnings")) none with
   | some (inp, out, opts) =>
-    if out == "" then
-      IO.eprintln usage
-      return 2
-    let clobberError := s!"refusing to overwrite existing file {out}"
-    let result ← (Prog.renderProgram clobberError (render opts)).execIO ⟨inp⟩ ⟨out⟩
+    if out == "" then return 1
+    let pure_ := fun b => match renderWithWarnings opts b with
+      | .ok (png, ws) => .ok (png, Warn.text ws)
+      | .error _ => .error ()
+    let prog := if warnings then Prog.renderProgramWarn () pure_ else Prog.renderProgram () pure_
+    -- An `IO` error (unreadable input, an output that appeared after the
+    -- existence check) is exit code 1 like any other failure; uncaught, the
+    -- runtime would print it to stderr.
+    let result ← try prog.execIO ⟨inp⟩ ⟨out⟩ catch _ => return 1
     match result with
-    | .ok () => return 0
-    | .error e =>
-      IO.eprintln s!"lean-svg: error: {e}"
-      return 1
-  | none =>
-    IO.eprintln usage
-    return 2
+    | .ok false => return 0
+    | .ok true => return 2
+    | .error () => return 1
+  | none => return 1

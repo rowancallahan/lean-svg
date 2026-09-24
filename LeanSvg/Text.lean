@@ -2,9 +2,11 @@ import LeanSvg.Geom
 import LeanSvg.TextPath
 import LeanSvg.Font
 import LeanSvg.Baseline
-import LeanSvg.Fonts.NotoSans
-import LeanSvg.Fonts.NotoSansBold
-import LeanSvg.Fonts.NotoSansItalic
+import LeanSvg.FontSet
+import LeanSvg.FamilyMatch
+import LeanSvg.Synth
+import LeanSvg.ShapeText
+import LeanSvg.VertOrient
 
 /-!
 # Text layout
@@ -22,10 +24,12 @@ whitespace, `crates/usvg/src/parser/text.rs` for character positions and
 chunking, `crates/usvg/src/text/layout.rs` for advances, spacing and
 anchoring), simplified to what one Latin face per span can do:
 
-* one glyph per character (no ligatures, no complex-script shaping, no BiDi
-  reordering — every run is left to right);
-* kerning from `Font.kern` (GPOS pairs, or a legacy `kern` table) between
-  adjacent characters of the same chunk.
+* one glyph per character, kerning from `Font.kern` (GPOS pairs, or a
+  legacy `kern` table) between adjacent characters of the same chunk;
+* except (T93) a chunk with right-to-left text or drawn with a font that
+  carries GSUB/GPOS (Amiri, Noto Sans Hebrew/Devanagari): it is shaped by
+  `LeanSvg/ShapeText.lean` (bidi runs, OpenType shaping, font fallback) into
+  clusters of positioned glyphs (`Cluster.glyphs`).
 
 `dominant-baseline`, `alignment-baseline` and `baseline-shift` (T54,
 `LeanSvg/Baseline.lean`) shift each glyph vertically off the alphabetic
@@ -48,43 +52,130 @@ open Bytes
 
 /-! ## Faces
 
-Only the three embedded Noto Sans subsets exist.  `font-family` selects
-nothing: every family falls back to Noto Sans (recorded as this task's
-fallback policy).  Weight and slant pick among the three. -/
+The embedded fonts are `FontSet.entries` (T91).  `font-family` picks a base
+font per span (`SpanProps.family`, resolved by `Svg.resolveFontFamily`); for
+the "Noto Sans" family, weight and slant pick among its six faces, and for
+the T106 families among theirs (`FamilyMatch.pick`).  A
+character the base font does not map falls back through the other embedded
+fonts in `FontSet` order (`assignFonts`). -/
 
 inductive Face where
   | regular
   | bold
   | italic
+  /-- T97: Noto Sans Thin (100), Light (300) and Black (900). -/
+  | thin
+  | light
+  | black
 deriving DecidableEq, Repr, Inhabited, BEq
 
-/-- usvg maps `font-weight` to a number (`bolder`/`lighter` step relative to
-the inherited one); we have no semibold face, so anything at 600 or above is
-bold.  Italic and oblique both pick the italic face, and bold wins over
-italic because there is no bold-italic subset. -/
+/-- fontdb's `find_best_match` weight step (CSS Fonts 4 §5.2 4c) over the
+weights `avail`: the exact weight; else for 400–449 try 500 and for 450–500
+try 400; else at or below 500 the nearest lighter weight, then the nearest
+heavier; above 500 the nearest heavier, then the nearest lighter. -/
+def matchWeight (avail : List Nat) (w : Nat) : Nat :=
+  let lighter := (avail.filter (· ≤ w)).foldl Nat.max 0
+  let heavier := (avail.filter (· ≥ w)).foldl Nat.min 1000
+  if avail.contains w then w
+  else if 400 ≤ w && w < 450 && avail.contains 500 then 500
+  else if 450 ≤ w && w ≤ 500 && avail.contains 400 then 400
+  else if w ≤ 500 then (if lighter != 0 then lighter else heavier)
+  else if heavier != 1000 then heavier else lighter
+
+/-- usvg asks fontdb for the face of the requested style and weight (`font-
+stretch` selects nothing: every face is normal width).  Style comes first:
+italic and oblique both pick the italic face, the only slanted one, whatever
+the weight (fontdb keeps only the faces of the best-matching style before it
+looks at weight).  Upright text matches weight among 100, 300, 400, 700 and
+900 (`matchWeight`), so e.g. 200 → Thin, 500 → Regular, 600 → Bold. -/
 def pickFace (weight : Nat) (italic : Bool) : Face :=
-  if weight ≥ 600 then .bold else if italic then .italic else .regular
+  if italic then .italic
+  else match matchWeight [100, 300, 400, 700, 900] weight with
+    | 100 => .thin
+    | 300 => .light
+    | 700 => .bold
+    | 900 => .black
+    | _ => .regular
 
-/-- The three embedded faces, parsed at most once per render.  `Font.parse` is
-pure, so this is a plain function; `Svg.lean` calls it once and keeps the
-result in a `let`.  A face that no span asks for is never decoded: hex-decoding
-one subset costs about half a millisecond, which is worth skipping on the
-overwhelmingly common documents that use one face or none. -/
-structure Faces where
-  regular : Option Font := none
-  bold : Option Font := none
-  italic : Option Font := none
-deriving Inhabited
+/-- The `FontSet` index of a span's base font: `family` is a `FontSet` index
+(0 = "Noto Sans"); only Noto Sans has more than one face. -/
+def baseFont (family : Nat) (face : Face) (stretch : Nat := 5) : Nat :=
+  -- T106: the other multi-face families pick by the face's weight and slant
+  -- (T118: and a non-normal stretch, Noto Sans included)
+  if family != 0 || stretch != 5 then
+    let (w, it) := match face with
+      | .regular => (400, false) | .bold => (700, false) | .italic => (400, true)
+      | .thin => (100, false) | .light => (300, false) | .black => (900, false)
+    FamilyMatch.pick family w it matchWeight stretch
+  else match face with
+    | .regular => 0
+    | .bold => 1
+    | .italic => 2
+    | .thin => FontSet.notoSansThin
+    | .light => FontSet.notoSansLight
+    | .black => FontSet.notoSansBlack
 
-def Faces.get (fs : Faces) : Face → Option Font
-  | .regular => fs.regular
-  | .bold => fs.bold
-  | .italic => fs.italic
+/-- A Han (CJK unified or compatibility ideograph) code point (T101). -/
+def isHan (cp : Nat) : Bool :=
+  (0x3400 ≤ cp && cp ≤ 0x4DBF) || (0x4E00 ≤ cp && cp ≤ 0x9FFF) ||
+  (0xF900 ≤ cp && cp ≤ 0xFAFF) || (0x20000 ≤ cp && cp ≤ 0x3134F)
 
-def loadFaces (needRegular needBold needItalic : Bool) : Faces :=
-  { regular := if needRegular then Font.parse (Fonts.NotoSans.bytes ()) else none,
-    bold := if needBold then Font.parse (Fonts.NotoSansBold.bytes ()) else none,
-    italic := if needItalic then Font.parse (Fonts.NotoSansItalic.bytes ()) else none }
+/-- usvg's `shape_text` fallback loop for one base font over one chunk's
+characters, with shaping reduced to one glyph per character: the base font
+keeps every character it maps; then, for the first still-missing character,
+the first font in `FontSet` order that has not been tried yet and maps it is
+tried; if it maps *every* character of the chunk it replaces them all,
+otherwise it fills the characters it maps and the loop goes on.  A character
+no font maps stays with the base font (its `.notdef`).  `covs` is each font's
+decoded coverage.
+
+T101 (Chromium's behaviour): when the missing character is Han, the CJK font
+of the span's language tag `lang` (`SpanProps.lang`) is tried first:
+`ja` → Mplus 1p, `ko` → Noto Sans KR, any other tag → Noto Sans SC.  Without
+a tag, and for other characters, the order is `FontSet`'s, as usvg's (which
+ignores the tag).
+
+T106: a base font from `FamilyMatch` (index ≥ `FamilyMatch.first`) tries
+DejaVu Sans and STIX Two Math first (`FamilyMatch.fallbackOrder`) and falls
+back per character, as Chromium does: a fallback font covering the whole
+chunk does not replace the base font's own glyphs. -/
+def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Nat)
+    (lang : Nat := 0) : Array Nat := Id.run do
+  let has := fun (k cp : Nat) => Font.inRanges (covs.getD k #[]) cp
+  let pref : Option Nat := match lang with
+    | 1 => some FontSet.mplus1p
+    | 2 => some FontSet.notoSansKR
+    | 3 => some FontSet.notoSansSC
+    | _ => none
+  let mut res : Array (Option Nat) := cps.map (fun cp => if has base cp then some base else none)
+  let mut tried : Array Nat := #[base]
+  for _ in [0:covs.size] do
+    match (List.range cps.size).find? (fun i => (res.getD i none).isNone) with
+    | none => break
+    | some i =>
+      let cp := cps.getD i 0
+      -- T105: only the embedded fonts are fallbacks, never a document font
+      let dflt := FamilyMatch.fallbackOrder base (Nat.min covs.size FontSet.count)
+      let order := match pref with
+        | some p => if isHan cp then p :: dflt else dflt
+        | none => dflt
+      match order.find? (fun k => !tried.contains k && has k cp) with
+      | none => break
+      | some k =>
+        -- T106: a T106 base falls back per character, as Chromium does
+        if FamilyMatch.suite base && cps.all (has k) then
+          res := cps.map (fun _ => some k)
+          break
+        res := (List.range cps.size).toArray.map (fun j =>
+          match res.getD j none with
+          | some v => some v
+          | none => if has k (cps.getD j 0) then some k else none)
+        tried := tried.push k
+  -- T106: a character no font maps keeps the base font's `.notdef`; for a
+  -- T106 base that is Noto Sans's light box, not e.g. CMU's heavy crossed one
+  -- (dvisvgm's private-use code points, drawn by the file's own fonts, T105)
+  let tofu := if FamilyMatch.suite base then base else 0
+  return res.map (·.getD tofu)
 
 /-! ## What `Svg.lean` resolves for us -/
 
@@ -99,7 +190,20 @@ cascade by `Svg.lean`.  `size`, `letterSpacing` and `wordSpacing` are `Fx`
 (1/256 px) user-space lengths. -/
 structure SpanProps where
   face : Face := .regular
+  /-- T116: the requested weight and slant, for the T106 families' face pick
+  and `Synth`. -/
+  weight : Nat := 400
+  italic : Bool := false
+  /-- T118: `font-stretch`, an OS/2 width class (5 = normal). -/
+  stretch : Nat := 5
+  /-- T97: `font-variant: small-caps`, shaped with the font's `smcp`. -/
+  smallCaps : Bool := false
+  /-- The base font's family, as a `FontSet` index (T91). -/
+  family : Nat := 0
   size : Fx := Fx.ofNat 12
+  /-- T90: `font-size-adjust`'s aspect value (`Fx`): the used size becomes
+  `size · adjust / (xHeight / unitsPerEm)` once the face is known. -/
+  sizeAdjust : Option Fx := none
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
   /-- `font-kerning: none` (or SVG 1.1 `kerning="0"`) turns pair kerning off. -/
@@ -125,6 +229,12 @@ structure SpanProps where
   underlineIdx : Option Nat := none
   overlineIdx : Option Nat := none
   throughIdx : Option Nat := none
+  /-- T90: the font size of the element that declared each decoration, which
+  sizes its offset and thickness (Firefox, Safari, the suite; usvg uses the
+  glyph's own size, resvg#411).  `0` means the glyph's own. -/
+  underlineSize : Fx := 0
+  overlineSize : Fx := 0
+  throughSize : Fx := 0
   /-- `textLength`, already resolved to an `Fx` user-space length (`none` if
   the element carries no such attribute of its own: like `text-decoration`,
   it is not inherited). -/
@@ -132,6 +242,17 @@ structure SpanProps where
   /-- `lengthAdjust="spacingAndGlyphs"` (`false`, the default, is `"spacing"`
   — the only mode implemented). -/
   lengthAdjustGlyphs : Bool := false
+  /-- `direction: rtl` (T93): the bidi paragraph direction of the chunk this
+  span starts (Chromium's behaviour; usvg ignores `direction`). -/
+  rtl : Bool := false
+  /-- `unicode-bidi: bidi-override` (or `isolate-override`) on the element
+  (T93, Chromium's behaviour; usvg ignores it): the chunk is laid out as one
+  run in the `direction`, without the bidi algorithm. -/
+  bidiOverride : Bool := false
+  /-- T101: the nearest `xml:lang`/`lang` (`Svg.langOf`): 0 none, 1 `ja`,
+  2 `ko`, 3 any other tag.  Chooses the CJK fallback font for a Han character
+  (`assignFonts`). -/
+  lang : Nat := 0
 deriving Inhabited, Repr
 
 /-- The per-character position lists of one `text`/`tspan` element. -/
@@ -172,6 +293,9 @@ element's user space.  `Svg.lean` turns each into a `Shape`. -/
 structure Placed where
   styleIdx : Nat
   cmds : Array PathCmd
+  /-- T116: non-zero for a synthetic-bold copy of glyph outlines (drawn under
+  the run as a stroke in the fill's paint): their font size (`Fx`). -/
+  boldSize : Fx := 0
 deriving Inhabited
 
 /-! ## UTF-8 -/
@@ -503,6 +627,24 @@ def decorRectCmds (r : DecorRun) : Array PathCmd :=
       (⟨Fx.clamp (Int.ediv (rx + r.ox + 128) 256), Fx.clamp (Int.ediv (ry + r.oy + 128) 256)⟩ : Pt)
     #[.moveTo (tr 0 y0), .lineTo (tr r.width y0), .lineTo (tr r.width y1), .lineTo (tr 0 y1), .close]
 
+/-- T102: one cluster's piece of a decoration on a `textPath`: `r`'s
+rectangle (its `ox`/`oy`/`rot` unused) with its left end at `(u0, v0)` in
+the cluster's frame on the path, the point `(nx, ny)` with tangent
+`(cs, sn)` (16.16). -/
+def decorRectOn (r : DecorRun) (nx ny cs sn u0 v0 : Int) : Array PathCmd :=
+  if r.width ≤ 0 then #[]
+  else
+    let upem : Int := if r.unitsPerEm == 0 then 1000 else r.unitsPerEm
+    let k : Int := r.size * 256
+    let y0 := -(roundScale r.dyUnits k upem) - Int.ediv (roundScale r.thicknessUnits k upem) 2
+    let y1 := y0 + roundScale r.thicknessUnits k upem
+    let tr := fun (lx ly : Int) =>
+      let u := u0 + lx
+      let v := v0 + ly
+      (⟨Fx.clamp (Int.ediv (nx + Int.ediv (cs * u - sn * v) 65536 + 128) 256),
+        Fx.clamp (Int.ediv (ny + Int.ediv (sn * u + cs * v) 65536 + 128) 256)⟩ : Pt)
+    #[.moveTo (tr 0 y0), .lineTo (tr r.width y0), .lineTo (tr r.width y1), .lineTo (tr 0 y1), .close]
+
 /-! ## Layout -/
 
 /-- One laid-out character. -/
@@ -522,10 +664,61 @@ structure Cluster where
   but keeping the two numbers distinct costs nothing and is exact either
   way). -/
   natWidth : Int := 0
+  /-- The `FontSet` index of the font this character's glyph comes from
+  (`assignFonts`), and of its span's base font, whose metrics place the
+  baseline and decorations. -/
+  font : Nat := 0
+  base : Nat := 0
   /-- Cleared by the `letter-spacing` rule that drops a cluster whose advance
   went to zero or below. -/
   dropped : Bool := false
+  /-- The cluster's first character, as an index into the chunk (what the
+  `x`/`dx`/`rotate` lists are read at): the cluster's own position unless
+  shaping reordered or merged characters (T93). -/
+  off : Nat := 0
+  /-- A shaped cluster's glyphs (T93): `(FontSet index, glyph id, x, y)`, the
+  offset from the cluster's pen position in that font's units (y up).  Empty
+  for the one-glyph-per-character layout, which draws `cp` with `font`. -/
+  glyphs : Array (Nat × Nat × Int × Int) := #[]
+  /-- `lengthAdjust="spacingAndGlyphs"`'s horizontal scale of the cluster's
+  outline (16.16; usvg's `pre_scale(factor, 1)` on the cluster transform). -/
+  sx : Int := 65536
 deriving Inhabited
+
+/-- `a[i] := Box.cover a[i] p`, growing `a` with `none` up to `i` (T90). -/
+def coverAt (a : Array (Option Box)) (i : Nat) (p : Pt) : Array (Option Box) := Id.run do
+  let mut a := a
+  for _ in [a.size : i + 1] do
+    a := a.push none
+  return a.modify i (Box.cover · p)
+
+/-- `n / d` rounded to nearest, ties away from zero (`d > 0`). -/
+def roundDivI (n : Int) (d : Nat) : Int :=
+  if d == 0 then 0
+  else if n ≥ 0 then Int.ediv (n + (d / 2 : Nat)) d else -(Int.ediv (-n + (d / 2 : Nat)) d)
+
+/-- A cluster's outline: its character's glyph in `f`, or (T93) its shaped
+glyphs, each moved by its offset through the same linear part (usvg's
+`glyph_ts` inside the cluster transform). -/
+def clusterCmds (fonts : Array (Option Font)) (f : Font) (c : Cluster) (la lb lc ld ox oy : Int) :
+    Array PathCmd := Id.run do
+  -- T116: a synthetic oblique skews the outline, not the glyph offsets
+  let sk := fun (k : Nat) => if Synth.oblique k c.props.italic then Synth.skew la lb lc ld else (la, lb, lc, ld)
+  if c.glyphs.isEmpty then
+    let (sa, sb, sc, sd) := sk c.font
+    return glyphCmdsLin f (Font.glyphId f c.cp) c.props.size sa sb sc sd ox oy
+  let mut out : Array PathCmd := #[]
+  for (fi, gid, xfu, yfu) in c.glyphs do
+    match fonts.getD fi none with
+    | some g =>
+      let upem := if g.unitsPerEm == 0 then 1000 else g.unitsPerEm
+      let lx := roundDivI (xfu * (c.props.size * 256)) upem
+      let ly := -(roundDivI (yfu * (c.props.size * 256)) upem)
+      let (sa, sb, sc, sd) := sk fi
+      out := out ++ glyphCmdsLin g gid c.props.size sa sb sc sd
+        (ox + Int.ediv (la * lx + lc * ly) 65536) (oy + Int.ediv (lb * lx + ld * ly) 65536)
+    | none => pure ()
+  return out
 
 /-- Lay out one `<text>` element.
 
@@ -557,12 +750,9 @@ rotation angle and a single pen position:
   `(ascent + descent) / 2` along local `y` before the rotation
   (`apply_writing_mode`'s "could not find a spec that explains this" shift,
   applied to every "Rotated" — i.e. not `Vertical_Orientation=Upright` —
-  character); Noto Sans is Latin-only and every codepoint outside the ranges
-  `unicode-vo` lists as `Upright` defaults to `Rotated` (all of Basic Latin
-  is: the table's lowest entry is U+00A7), so every glyph this renderer can
-  ever place in vertical text takes this branch and the `Upright` branch
-  (which counter-rotates a CJK-style glyph back to standing upright) is not
-  implemented — it would be dead code with no character able to reach it;
+  character); an `Upright` one (T96, `LeanSvg/VertOrient.lean`: CJK, kana,
+  hangul, ...) instead counter-rotates back to standing upright, centred on
+  the column (see the `upright` branch below);
 * the local-space point `(x, y)` a glyph would sit at in the horizontal
   layout maps to final position `(chunkX - y, chunkY + x)`, i.e. `(x, y)`
   rotated 90° about the origin (usvg: `rotate(90)` is `x' = -y, y' = x`)
@@ -572,9 +762,15 @@ rotation angle and a single pen position:
   but *not* rotated (usvg's `layout_text` does a plain
   `std::mem::swap(&mut curr_pos.0, &mut curr_pos.1)` on the chunk's final pen
   position, not the same 90° rotation every glyph gets — `tb-with-dx-on-
-  second-tspan.svg` exercises exactly this fallback). -/
-def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool) :
-    Array Placed × Nat × Option Box :=
+  second-tspan.svg` exercises exactly this fallback).
+
+`outK` (T96) scales every emitted outline and decoration by `outK` (the
+caller draws them through `ctm · scale(1 / outK)`), so text under a large
+`transform` keeps sub-`Fx` precision in its outlines
+(`textPath/dy-with-tiny-coordinates.svg`).  The returned boxes stay unscaled. -/
+def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool)
+    (outK : Int := 1) (doc : Array (Option Font × Array (Nat × Nat)) := #[]) :
+    Array Placed × Nat × Option Box × Array (Option Box) :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
   let mut texts : Array (Array Nat) := #[]
@@ -632,7 +828,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       ts := ts.setIfInBounds i (t.extract 0 (budget - used))
       used := budget
     else used := used + t.size
-  if used == 0 then return (#[], 0, none)
+  if used == 0 then return (#[], 0, none, #[])
   -- ---- 4. flatten to characters
   let mut chars : Array Nat := Array.emptyWithCapacity used
   let mut cStyle : Array Nat := Array.emptyWithCapacity used
@@ -679,11 +875,15 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     counts := counts.setIfInBounds o (off - offsets.getD o 0)
   let mut pos : Array CharPos := Array.replicate total {}
   let mut lastRot : Fx := 0
+  -- T114: characters that start an element carrying its own `x`/`y`/`dx`/`dy`
+  let mut ownStart : Array Bool := Array.replicate total false
   for j in [0:evs.size] do
     match evs.getD j default with
     | .open_ p | .openPath p _ _ _ =>
       let o := offsets.getD j 0
       let c := counts.getD j 0
+      if c > 0 && (p.xs.size > 0 || p.ys.size > 0 || p.dxs.size > 0 || p.dys.size > 0) then
+        ownStart := ownStart.setIfInBounds o true
       for k in [0:Nat.min p.xs.size c] do
         pos := pos.setIfInBounds (o + k) { pos.getD (o + k) {} with x := some (p.xs.getD k 0) }
       for k in [0:Nat.min p.ys.size c] do
@@ -700,23 +900,30 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           if k < p.rots.size then lastRot := a
           pos := pos.setIfInBounds (o + k) { pos.getD (o + k) {} with rot := a }
     | _ => pure ()
-  -- ---- 6. faces
-  let mut needR := false
-  let mut needB := false
-  let mut needI := false
-  for i in [0:total] do
-    if cRend.getD i true then
-      match (cProps.getD i default).face with
-      | .regular => needR := true
-      | .bold => needB := true
-      | .italic => needI := true
-  let faces := loadFaces needR needB needI
+  -- T102: the lists apply per grapheme, not per character: a nonspacing
+  -- mark's own `x`/`y`/`dx`/`dy` entries are ignored (not shifted onto the
+  -- next character), so it stays in its base's cluster and chunk
+  -- (`complex-graphemes-and-coordinates-list.svg`; usvg reads positions at
+  -- each cluster's first character).  T114: except a mark that is the first
+  -- character of an element with its own positions (matplotlib's mathtext
+  -- accents, `<tspan x=".." y="..">&#x302;</tspan>`): usvg starts a chunk
+  -- there and Chromium places it there too.
+  for i in [1:total] do
+    if Bidi.bidiClass (chars.getD i 0) == .NSM && !ownStart.getD i false then
+      pos := pos.setIfInBounds i { pos.getD i {} with x := none, y := none, dx := 0, dy := 0 }
+  -- ---- 6. fonts (T91): every font's coverage, for fallback; each font
+  -- itself is decoded and parsed the first time a character needs it
+  -- (T105: the document's own fonts, `doc`, follow at `FontSet.count + k`)
+  let covs : Array (Array (Nat × Nat)) :=
+    FontSet.entries.map (fun e => Font.decodeRanges e.coverage) ++ doc.map (·.2)
+  let mut fonts : Array (Option Font) := Array.replicate FontSet.count none ++ doc.map (·.1)
+  let mut loaded : Array Bool := Array.replicate FontSet.count false ++ doc.map (fun _ => true)
   -- ---- 7. the renderable characters, in order
   let mut rend : Array Nat := Array.emptyWithCapacity total
   for i in [0:total] do
     if cRend.getD i true then rend := rend.push i
   let rn := rend.size
-  if rn == 0 then return (#[], used, none)
+  if rn == 0 then return (#[], used, none, #[])
   -- ---- 8. chunk by chunk
   -- A decoration rectangle breaks more often than a glyph-outline run: usvg
   -- starts a new one not only where the style changes but at *any* character
@@ -733,6 +940,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   -- T81: the metric-box union, in the same `<text>` user space as `placed`'s
   -- outlines -- see "Text bounding box" above.
   let mut mbox : Option Box := none
+  -- T90: the same union per run style (`Placed.styleIdx`), for a layer on a
+  -- `tspan`/`textPath` that sizes against its own glyphs.
+  let mut sbox : Array (Option Box) := #[]
   let mut lastX : Int := 0
   let mut lastY : Int := 0
   let mut a : Nat := 0
@@ -748,29 +958,170 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       b := q + 1
     let fk := cFlow.getD (rend.getD a 0) 0
     let flow := if fk == 0 then none else flows[fk - 1]?
-    -- advances, with kerning
+    -- font fallback (T91): usvg shapes the whole chunk's text once per span
+    -- font and keeps each span's own glyphs, so each distinct base font is
+    -- resolved against every character of the chunk
+    let cps : Array Nat := (List.range (b - a)).toArray.map (fun q => chars.getD (rend.getD (a + q) 0) 0)
+    let bases : Array Nat := (List.range (b - a)).toArray.map (fun q =>
+      let pr := cProps.getD (rend.getD (a + q) 0) default
+      -- T116: a T106 family picks its italic face by the requested weight
+      if pr.italic && Synth.realWorld pr.family then FamilyMatch.pick pr.family pr.weight true matchWeight pr.stretch
+      else baseFont pr.family pr.face pr.stretch)
+    -- (T101: and each language tag, keyed `base · 4 + lang`)
+    let langs : Array Nat := (List.range (b - a)).toArray.map (fun q =>
+      (cProps.getD (rend.getD (a + q) 0) default).lang)
+    let mut perBase : Array (Nat × Array Nat) := #[]
+    for q in [0:b - a] do
+      let bf := bases.getD q 0
+      let lg := langs.getD q 0
+      if !perBase.any (·.1 == bf * 4 + lg) then
+        perBase := perBase.push (bf * 4 + lg, assignFonts covs bf cps lg)
+    let asgOf := fun (q : Nat) =>
+      let key := bases.getD q 0 * 4 + langs.getD q 0
+      ((perBase.find? (·.1 == key)).map (·.2)).getD #[]
+    let fis : Array Nat := (List.range (b - a)).toArray.map (fun q => (asgOf q).getD q (bases.getD q 0))
+    for k in fis ++ bases do
+      if !loaded.getD k true then
+        fonts := fonts.setIfInBounds k ((FontSet.entries[k]?).bind (fun e => e.font ()))
+        loaded := loaded.setIfInBounds k true
+    -- T93: a chunk with right-to-left text, or drawn with a font that
+    -- carries GSUB/GPOS, is shaped (`LeanSvg/ShapeText.lean`); every other
+    -- chunk keeps the one-glyph-per-character layout below.
+    let p0 := cProps.getD (rend.getD a 0) default
+    -- `direction`/`unicode-bidi` only in horizontal text: what `direction`
+    -- means in vertical text is an open spec question (w3c/svgwg#618), and
+    -- there we keep usvg's behaviour of ignoring it
+    let rtlPara := p0.rtl && !vertical
+    let override := p0.bidiOverride && !vertical
+    let shaped := rtlPara || override || ShapeText.needsShaping cps (fis ++ bases)
+      ((List.range (b - a)).any (fun q => (cProps.getD (rend.getD (a + q) 0) default).smallCaps))
+    -- T90: `font-size-adjust` rescales the used size by the x-height of
+    -- the span's base font (T91's fallback leaves the base font's metrics
+    -- in charge of the span, as usvg's resolved font is)
+    let sizeAdj := fun (fonts : Array (Option Font)) (pr : SpanProps) (base : Nat) =>
+      match pr.sizeAdjust, fonts.getD base none with
+      | some adj, some f =>
+        if f.xHeight ≤ 0 || f.unitsPerEm == 0 then pr
+        else { pr with size := Fx.clamp (Int.ediv (pr.size * adj * f.unitsPerEm) (f.xHeight * 256)) }
+      | _, _ => pr
     let mut cl : Array Cluster := Array.emptyWithCapacity (b - a)
-    for q in [a:b] do
-      let i := rend.getD q 0
-      let cp := chars.getD i 0
-      let pr := cProps.getD i default
-      let mut adv : Int := 0
-      match faces.get pr.face with
-      | some f =>
-        let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
-        let gid := Font.glyphId f cp
-        let mut fu : Int := Font.advance f gid
-        if pr.kerning && q + 1 < b then
-          let nextCp := chars.getD (rend.getD (q + 1) 0) 0
-          fu := fu + Font.kern f gid (Font.glyphId f nextCp)
-        adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
-      | none => pure ()
-      cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv, natWidth := adv }
+    if shaped then
+      -- usvg's spans: runs of characters sharing a base font, kerning and
+      -- small caps
+      let mut spans : Array (Nat × Nat × Nat × Bool × Bool) := #[]
+      for q in [0:b - a] do
+        let bf := bases.getD q 0
+        let kern := (cProps.getD (rend.getD (a + q) 0) default).kerning
+        let sc := (cProps.getD (rend.getD (a + q) 0) default).smallCaps
+        match spans.back? with
+        | some (s0, _, bf0, k0, sc0) =>
+          if bf0 == bf && k0 == kern && sc0 == sc then
+            spans := spans.setIfInBounds (spans.size - 1) (s0, q + 1, bf, kern, sc)
+          else spans := spans.push (q, q + 1, bf, kern, sc)
+        | none => spans := spans.push (q, q + 1, bf, kern, sc)
+      let (groups, cache) := ShapeText.processChunk ⟨fonts, loaded⟩ (covs.extract 0 FontSet.count) cps spans
+        (if rtlPara then 1 else 0) override
+      fonts := cache.fonts
+      loaded := cache.loaded
+      -- `form_glyph_clusters`
+      for (ci, gs) in groups do
+        let i := rend.getD (a + ci) 0
+        let pr := sizeAdj fonts (cProps.getD i default) (bases.getD ci 0)
+        let mut x : Int := 0
+        let mut adv : Int := 0
+        let mut width : Int := 0
+        let mut pg : Array (Nat × Nat × Int × Int) := #[]
+        for g in gs do
+          match fonts.getD g.font none with
+          | some f =>
+            let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+            let w := roundDivI (g.width * (pr.size * 256)) upem
+            adv := adv + w
+            width := max width w
+            pg := pg.push (g.font, g.gid, x + g.dx, g.dy)
+            x := x + g.width
+          | none => pure ()
+        cl := cl.push { cp := chars.getD i 0, styleIdx := cStyle.getD i 0, props := pr, adv := adv,
+                        width := width, natWidth := adv, font := (gs.getD 0 default).font,
+                        base := bases.getD ci 0, off := ci, glyphs := pg }
+    else
+      -- advances, with kerning: the pair is the next character as this
+      -- character's own base font's shaping pass saw it, kerned only when that
+      -- pass took both glyphs from the same font
+      for q in [a:b] do
+        let i := rend.getD q 0
+        let cp := chars.getD i 0
+        let pr := sizeAdj fonts (cProps.getD i default) (bases.getD (q - a) 0)
+        let fi := fis.getD (q - a) 0
+        let mut adv : Int := 0
+        match fonts.getD fi none with
+        | some f =>
+          let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+          let gid := Font.glyphId f cp
+          let mut fu : Int := Font.advance f gid
+          -- T112: the pair skips default-ignorables after this character, as
+          -- HarfBuzz's kerning does (`zero&#x200B;width` kerns o/w)
+          let mut nq := q + 1
+          for r in [q + 1:b] do
+            let c := chars.getD (rend.getD r 0) 0
+            nq := r
+            if !(c ≥ 0x80 && Shape.isDefaultIgnorable c) then break
+          if pr.kerning && nq < b && (asgOf (q - a)).getD (nq - a) fi == fi then
+            let nextCp := chars.getD (rend.getD nq 0) 0
+            fu := fu + Font.kern f gid (Font.glyphId f nextCp)
+          adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
+        | none => pure ()
+        -- T106: HarfBuzz hides a default-ignorable character (U+00AD soft
+        -- hyphen, ZWJ, ...) as the space glyph with no advance; drawn with
+        -- its own glyph, matplotlib's TeX-encoded `cmex10` U+00AD showed a
+        -- stray hyphen (`mathtext0_cm_03.svg`)
+        if cp ≥ 0x80 && Shape.isDefaultIgnorable cp then
+          match fonts.getD fi none with
+          | some f =>
+            cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := 0, width := 0,
+                            natWidth := 0, font := fi, base := bases.getD (q - a) 0, off := q - a,
+                            glyphs := #[(fi, Font.glyphId f 0x20, 0, 0)] }
+          | none => pure ()
+          continue
+        -- T96: a nonspacing mark joins the cluster before it (usvg shapes
+        -- every chunk, and a mark never starts a cluster), so it takes that
+        -- cluster's position-list slot and turns with its `rotate`
+        -- (`rotate-with-multiple-values-and-complex-text.svg`).  Without
+        -- GPOS anchors in our fonts it is centred over the base glyph's
+        -- extents, HarfBuzz's fallback mark position; a base with no outline
+        -- keeps the mark at the base's advance
+        let prev := cl.back?.getD default
+        if q > a && Bidi.bidiClass cp == .NSM && prev.font == fi && prev.styleIdx == cStyle.getD i 0 then
+          match fonts.getD fi none with
+          | some f =>
+            let gs := if prev.glyphs.isEmpty then #[(fi, Font.glyphId f prev.cp, (0 : Int), (0 : Int))]
+              else prev.glyphs
+            -- twice the centre of a glyph's `x` extents, if it has points
+            let mid2 := fun (g : Nat) => Id.run do
+              let mut lo : Option (Int × Int) := none
+              for ctr in Font.rawContours f g do
+                for (px, _, _) in ctr do
+                  lo := some (match lo with | some (l, h) => (min l px, max h px) | none => (px, px))
+              return lo.map (fun (l, h) => l + h)
+            let mg := Font.glyphId f cp
+            let xfu := match mid2 ((gs.getD 0 default).2.1), mid2 mg with
+              | some b2, some m2 => Int.ediv (b2 - m2) 2
+              | _, _ => gs.foldl (fun s (_, g, _, _) => s + Font.advance f g) 0
+            cl := cl.setIfInBounds (cl.size - 1)
+              { prev with adv := prev.adv + adv, width := prev.width + adv, natWidth := prev.natWidth + adv,
+                          glyphs := gs.push (fi, mg, xfu, 0) }
+          | none => pure ()
+          continue
+        cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := adv, width := adv,
+                        natWidth := adv, font := fi, base := bases.getD (q - a) 0, off := q - a }
     -- `letter-spacing`, then `word-spacing` (usvg applies each only when some
     -- span of the chunk actually asks for it)
     if cl.any (fun c => c.props.letterSpacing != 0) then
       for q in [0:cl.size] do
         let c := cl.getD q default
+        -- cursive scripts take no letter-spacing (`script_supports_letter_spacing`,
+        -- only reachable on the shaped path)
+        if shaped && ShapeText.noLetterSpacing c.cp then continue
         let adv := if q + 1 == cl.size then c.adv else c.adv + c.props.letterSpacing * 256
         cl := cl.setIfInBounds q
           (if adv ≤ 0 then { c with adv := 0, width := 0, dropped := true } else { c with adv := adv })
@@ -782,14 +1133,10 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     -- `textLength`/`lengthAdjust` (`apply_length_adjust`, "spacing" mode
     -- only), per maximal same-`styleIdx` run, not per chunk, since a
     -- `textLength` on one `tspan` must leave its neighbours' widths alone
-    -- (`textLength/on-a-single-tspan.svg`).  "spacingAndGlyphs" additionally
-    -- scales each glyph outline horizontally about a pen position that is
-    -- itself scaled by the *same* factor from the run's start — not just the
-    -- glyph in place — which needs the scale threaded into the chunk's own
-    -- x-accumulation, not just `glyphCmds`; approximated here by the same
-    -- "spacing" redistribution rather than left undone, since it reproduces
-    -- the dominant visual effect (the run ends up `textLength` wide) even
-    -- though the individual glyphs are not rescaled.
+    -- (`textLength/on-a-single-tspan.svg`).  "spacingAndGlyphs" (T93) scales
+    -- each cluster by `target / natural width` along the chunk's own x axis,
+    -- pen position and outline alike (`Cluster.sx`, applied where the glyph is
+    -- placed).
     if cl.any (fun c => c.props.textLength.isSome) then
       let mut i := 0
       for _ in [0:cl.size] do
@@ -806,14 +1153,35 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             let mut s : Int := 0
             for q in [i:j] do s := s + (cl.getD q default).natWidth
             return s
-          let factor : Int := if n > 1 then Int.ediv (target * 256 - natSum) (n - 1) else 0
-          for q in [i:j] do
-            let c := cl.getD q default
-            cl := cl.setIfInBounds q { c with adv := c.natWidth + factor, dropped := false }
+          if (cl.getD i default).props.lengthAdjustGlyphs then
+            -- "spacingAndGlyphs": every cluster's outline scales by
+            -- `target / natSum` about its own origin; advances stay, except
+            -- along a path, where they scale too (usvg's text-on-path hack)
+            if natSum > 0 then
+              let sx := Int.ediv (target * 256 * 65536) natSum
+              if sx * 1000 ≥ 65536 then
+                for q in [i:j] do
+                  let c := cl.getD q default
+                  let c := { c with sx := sx }
+                  cl := cl.setIfInBounds q (if flow.isSome then
+                    { c with adv := Int.ediv (c.adv * sx) 65536, width := Int.ediv (c.width * sx) 65536 }
+                    else c)
+          else
+            let factor : Int := if n > 1 then Int.ediv (target * 256 - natSum) (n - 1) else 0
+            for q in [i:j] do
+              let c := cl.getD q default
+              cl := cl.setIfInBounds q { c with adv := c.natWidth + factor, dropped := false }
         i := j
     -- anchored chunk: the whole run shifts by its own width
     let width := cl.foldl (fun w c => w + c.adv) 0
-    let anchor := (cl.getD 0 default).props.anchor
+    -- the chunk's anchor is its first character's; with `direction: rtl`
+    -- (T93, Chromium) `start` and `end` name the right and left edges; in
+    -- vertical text (T102, Chromium) the bottom and top ones, while the
+    -- glyphs still run top to bottom
+    let anchor : Anchor := match p0.anchor with
+      | .start => if p0.rtl then .atEnd else .start
+      | .atEnd => if p0.rtl then .start else .atEnd
+      | .middle => .middle
     let x0 : Int := match anchor with
       | .start => 0
       | .middle => -(Int.ediv width 2)
@@ -830,7 +1198,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         let mut offs : Array Int := Array.emptyWithCapacity cl.size
         for q in [0:cl.size] do
           let c := cl.getD q default
-          s := s + (pos.getD (a + q) {}).dx * 256
+          s := s + (pos.getD (a + c.off) {}).dx * 256
           offs := offs.push (s + Int.ediv c.width 2)
           s := s + c.adv
         return TextPath.normals tbl acc offs
@@ -864,6 +1232,8 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     -- (`underline-with-{dy,rotate}-list-2/4.svg`, both gradient-filled).
     let mut curStyle : Option Nat := none
     let mut curCmds : Array PathCmd := #[]
+    let mut boldCmds : Array PathCmd := #[]
+    let mut boldSize : Fx := 0
     let mut olIdx : Option Nat := none
     let mut ulIdx : Option Nat := none
     let mut thIdx : Option Nat := none
@@ -877,8 +1247,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       match r with | some r => cmds ++ decorRectCmds r | none => cmds
     let flushBuf := fun (placed : Array Placed) (idx? : Option Nat) (cmds : Array PathCmd) =>
       match idx? with
-      | some idx => if cmds.size > 0 then placed.push ⟨idx, cmds⟩ else placed
+      | some idx => if cmds.size > 0 then placed.push ⟨idx, cmds, 0⟩ else placed
       | none => placed
+    -- T116: a run's synthetic-bold outlines go under its own
+    let flushRun := fun (placed : Array Placed) (s : Nat) (cmds bold : Array PathCmd) (bsz : Fx) =>
+      let placed := if bold.size > 0 then placed.push ⟨s, bold, bsz⟩ else placed
+      if cmds.size > 0 then placed.push ⟨s, cmds, 0⟩ else placed
     for q in [0:cl.size] do
       let c := cl.getD q default
       -- usvg indexes `dx`/`dy`/`rotate` by the character's position among the
@@ -886,88 +1260,174 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       -- chunks' own text, which never contains a hidden span's characters),
       -- while chunk starts and `x`/`y` use the position among *all*
       -- characters.  `rotate-and-display-none.svg` pins this down.
-      let p := pos.getD (a + q) {}
-      let mut cmds : Array PathCmd := #[]
-      -- T55: where a decoration run anchors (the pen before this advance)
-      let mut ox : Int := chunkX + x
-      let mut oy : Int := chunkY + y
-      if flow.isSome then
-        -- off the path: hidden, and its `dy` is not accumulated either
-        match nrm.getD q none with
-        | none => pure ()
-        | some n =>
-          -- `y` accumulates `dy`, applied across the tangent
-          y := y + p.dy * 256
-          pathEnd := (n.x + c.adv, n.y)
-          if !c.dropped then
-            match faces.get c.props.face with
-            | some f =>
-              -- T(n) · R(tangent) · T(-width/2, dy + baseline-shift) · R(rotate)
-              --
-              -- T54's `resolveBaseline16` gives the same pen offset the
-              -- horizontal branch adds straight into `gy` (unrotated by the
-              -- character's own `rotate`); here the perpendicular-to-path
-              -- axis plays that role, so it folds into `y` exactly like `dy`
-              -- does, before the tangent rotation -- not into the
-              -- accumulator itself (`y` stays a pure `dy` running sum for
-              -- the next character), just this glyph's own translation.
-              let pr := c.props
-              let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
-                pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
-              let yEff := y + bshift
-              let (sr, cr) := if p.rot == 0 then ((0 : Int), (65536 : Int))
-                else sinCos16 (degToRad16 p.rot)
-              let hw := Int.ediv c.width 2
-              let la := Int.ediv (n.cos * cr - n.sin * sr) 65536
-              let lb := Int.ediv (n.sin * cr + n.cos * sr) 65536
-              let lc := Int.ediv (-(n.cos * sr) - n.sin * cr) 65536
-              let tox := n.x + Int.ediv (-(n.cos * hw) - n.sin * yEff) 65536
-              let toy := n.y + Int.ediv (n.cos * yEff - n.sin * hw) 65536
-              cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size la lb lc la tox toy
-              let adv16 := if c.adv ≤ 0 then 65536 else c.adv
-              let (top16, bot16) := metricTopBot f c.props.size
-              for pt in metricCorners la lb lc la tox toy adv16 top16 bot16 do
-                mbox := Box.cover mbox pt
-            | none => pure ()
-      else
-        if vertical then
-          y := y - p.dx * 256
-          x := x + p.dy * 256
-          adv := adv + p.dy * 256
-        else
-          x := x + p.dx * 256
-          y := y + p.dy * 256
-          adv := adv + p.dx * 256
-        ox := chunkX + x
-        oy := chunkY + y
-        if !c.dropped then
-          match faces.get c.props.face with
-          | some f =>
-            let (rot, gx, gy) :=
-              if vertical then
-                let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
-                -- centers the (rotated-sideways) glyph on the column, usvg's
-                -- `apply_writing_mode` shift, before the 90° chunk rotation
-                let half : Int := Int.ediv ((f.ascent + f.descent) * (c.props.size * 256))
-                  (2 * upem)
-                (p.rot + Fx.ofNat 90, chunkX - (y + half), chunkY + x)
-              else
-                -- T54 `resolve_baseline`: a per-span vertical offset
-                -- (`dominant-baseline`/`alignment-baseline`/`baseline-shift`),
-                -- added to the pen position only, never to `x`/`y`/`lastX`/`lastY`.
+      let p := pos.getD (a + c.off) {}
+      -- T98: this cluster's placement runs in its own `Id.run` so the
+      -- closures it compiles to never capture the run buffers below
+      -- (`curCmds`, ...): a captured buffer is shared, and every cluster's
+      -- `curCmds ++ cmds` then copied the whole run (quadratic per chunk).
+      let (cmds, ox, oy, x', y', adv', pathEnd', mbox', sbox', dec) := Id.run do
+        -- T102: this cluster's decoration pieces on a path (over, under, through)
+        let mut dec : Array PathCmd × Array PathCmd × Array PathCmd := (#[], #[], #[])
+        let mut x := x
+        let mut y := y
+        let mut adv := adv
+        let mut pathEnd := pathEnd
+        let mut mbox := mbox
+        let mut sbox := sbox
+        let mut cmds : Array PathCmd := #[]
+        -- T55: where a decoration run anchors (the pen before this advance)
+        let mut ox : Int := chunkX + x
+        let mut oy : Int := chunkY + y
+        if flow.isSome then
+          -- off the path: hidden, and its `dy` is not accumulated either
+          match nrm.getD q none with
+          | none => pure ()
+          | some n =>
+            -- `y` accumulates `dy`, applied across the tangent
+            y := y + p.dy * 256
+            pathEnd := (n.x + c.adv, n.y)
+            if !c.dropped then
+              match fonts.getD c.font none, fonts.getD c.base none with
+              | some f, some fb =>
+                -- T(n) · R(tangent) · T(-width/2, dy + baseline-shift) · R(rotate)
+                --
+                -- T54's `resolveBaseline16` gives the same pen offset the
+                -- horizontal branch adds straight into `gy` (unrotated by the
+                -- character's own `rotate`); here the perpendicular-to-path
+                -- axis plays that role, so it folds into `y` exactly like `dy`
+                -- does, before the tangent rotation -- not into the
+                -- accumulator itself (`y` stays a pure `dy` running sum for
+                -- the next character), just this glyph's own translation.
                 let pr := c.props
                 let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
-                  pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper f pr.size
-                (p.rot, chunkX + x, chunkY + y + bshift)
-            let (la, lb, lc, ld) := rotMat16 rot
-            cmds := glyphCmdsLin f (Font.glyphId f c.cp) c.props.size la lb lc ld gx gy
-            let adv16 := if c.adv ≤ 0 then 65536 else c.adv
-            let (top16, bot16) := metricTopBot f c.props.size
-            for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
-              mbox := Box.cover mbox pt
-          | none => pure ()
-        x := x + c.adv
-        adv := adv + c.adv
+                  pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
+                -- T102: vertical text on a path (Chromium): the path is the
+                -- column's centre line.  A sideways cluster sits like
+                -- horizontal path text, shifted by usvg's `(ascent +
+                -- descent) / 2`; an upright one (CJK) turns a further -90°,
+                -- its top against the path direction, and is centred on it.
+                let upright := vertical && VertOrient.isUpright c.cp
+                let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+                let half := Int.ediv ((f.ascent + f.descent) * (pr.size * 256)) (2 * upem)
+                let yEff := if vertical then y + half else y + bshift
+                let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int))
+                  else sinCos16 (degToRad16 p.rot)
+                -- the glyph's angle: `rotate`, less 90° when upright
+                let (sr, cr) := if upright then (-cs, sn) else (sn, cs)
+                let hw := Int.ediv c.width 2
+                -- the glyph origin, relative to the cluster's midpoint on
+                -- the path: `(-width/2, yEff)`, or for an upright cluster
+                -- the vertical layout's `R(rotate) · (w/2 + h, w/2)` from its
+                -- pen (see the non-path `upright` branch below)
+                let (ux, uy) := if upright then
+                    (Int.ediv (cs * (hw + half) - sn * hw) 65536 - hw,
+                     y + Int.ediv (sn * (hw + half) + cs * hw) 65536)
+                  else (-hw, yEff)
+                let la := Int.ediv (n.cos * cr - n.sin * sr) 65536
+                let lb := Int.ediv (n.sin * cr + n.cos * sr) 65536
+                let lc := Int.ediv (-(n.cos * sr) - n.sin * cr) 65536
+                let tox := n.x + Int.ediv (n.cos * ux - n.sin * uy) 65536
+                let toy := n.y + Int.ediv (n.sin * ux + n.cos * uy) 65536
+                let lsa := if upright then la else Int.ediv (la * c.sx) 65536
+                let lsb := if upright then lb else Int.ediv (lb * c.sx) 65536
+                cmds := clusterCmds fonts f c (lsa * outK) (lsb * outK) (lc * outK) (la * outK)
+                  (tox * outK) (toy * outK)
+                let adv16 := if c.adv ≤ 0 then 65536 else c.adv
+                let (top16, bot16) := if upright then (-hw, c.width - hw)
+                  else metricTopBot f c.props.size
+                for pt in metricCorners lsa lsb lc la tox toy adv16 top16 bot16 do
+                  mbox := Box.cover mbox pt
+                  sbox := coverAt sbox c.styleIdx pt
+                -- T102: decorations follow the path one cluster at a time
+                -- (Chromium), over the cluster's whole advance; in vertical
+                -- text either side of the path, as in a column
+                let piece := fun (idx? : Option Nat) (dyU : Int) (dsz : Fx) =>
+                  match idx? with
+                  | some idx =>
+                    decorRectOn { styleIdx := idx, width := c.adv * outK, unitsPerEm := fb.unitsPerEm,
+                                  size := (if dsz > 0 then dsz else pr.size) * outK, dyUnits := dyU,
+                                  thicknessUnits := fb.underlineThickness }
+                      (n.x * outK) (n.y * outK) n.cos n.sin (-hw * outK) (y * outK)
+                  | none => #[]
+                let halfH := Int.ediv (fb.ascent - fb.descent) 2
+                dec := (piece pr.overlineIdx (if vertical then halfH else fb.ascent) pr.overlineSize,
+                        piece pr.underlineIdx (if vertical then -halfH else fb.underlinePosition) pr.underlineSize,
+                        piece pr.throughIdx (if vertical then 0 else fb.strikeoutPosition) pr.throughSize)
+              | _, _ => pure ()
+        else
+          if vertical then
+            y := y - p.dx * 256
+            x := x + p.dy * 256
+            adv := adv + p.dy * 256
+          else
+            x := x + p.dx * 256
+            y := y + p.dy * 256
+            adv := adv + p.dx * 256
+          ox := chunkX + x
+          oy := chunkY + y
+          -- T96: `Vertical_Orientation=U` clusters (CJK) stand upright in
+          -- vertical text; every other one turns sideways (`apply_writing_mode`)
+          let upright := vertical && VertOrient.isUpright c.cp
+          -- usvg's `(ascent + descent) / 2`, the cluster's own font
+          let half : Int := match fonts.getD c.font none with
+            | some f =>
+              let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
+              Int.ediv ((f.ascent + f.descent) * (c.props.size * 256)) (2 * upem)
+            | none => 0
+          if vertical then
+            -- a decoration run starts at the cluster's own transform (without
+            -- an upright glyph's path transform), turned by the chunk's 90°
+            ox := chunkX - (y + (if upright then 0 else half))
+            oy := chunkY + x
+          if !c.dropped then
+            match fonts.getD c.font none, fonts.getD c.base none with
+            | some f, some fb =>
+              let (rot, gx, gy) :=
+                if upright then
+                  -- `path_transform = T(w/2, 0) · R(-90) · T(-w/2, h)` under the
+                  -- cluster's `T(x, y) · R(rotate)` and the chunk's `R(90)`: the
+                  -- linear part is just `R(rotate)`, the glyph's origin lands at
+                  -- `(x, y) + R(rotate) · (w/2 + h, w/2)` before the column turn
+                  let hw := Int.ediv c.width 2
+                  let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int))
+                    else sinCos16 (degToRad16 p.rot)
+                  let px := x + Int.ediv (cs * (hw + half) - sn * hw) 65536
+                  let py := y + Int.ediv (sn * (hw + half) + cs * hw) 65536
+                  (p.rot, chunkX - py, chunkY + px)
+                else if vertical then
+                  -- centers the (rotated-sideways) glyph on the column, usvg's
+                  -- `apply_writing_mode` shift, before the 90° chunk rotation
+                  (p.rot + Fx.ofNat 90, chunkX - (y + half), chunkY + Int.ediv (x * c.sx) 65536)
+                else
+                  -- T54 `resolve_baseline`: a per-span vertical offset
+                  -- (`dominant-baseline`/`alignment-baseline`/`baseline-shift`),
+                  -- added to the pen position only, never to `x`/`y`/`lastX`/`lastY`.
+                  let pr := c.props
+                  let bshift := resolveBaseline16 pr.dominantBaseline pr.alignmentBaseline
+                    pr.baselineShiftPx pr.baselineShiftSub pr.baselineShiftSuper fb pr.size
+                  (p.rot, chunkX + Int.ediv (x * c.sx) 65536, chunkY + y + bshift)
+              -- `spacingAndGlyphs` (T93): the chunk-local scale `S` sits outside the
+              -- glyph's own rotation, `S · R(rotate)` (then the 90° column turn)
+              let (la, lb, lc, ld) :=
+                if c.sx == 65536 || upright then rotMat16 rot
+                else
+                  let (sn, cs) := if p.rot == 0 then ((0 : Int), (65536 : Int)) else sinCos16 (degToRad16 p.rot)
+                  if vertical then (-sn, Int.ediv (cs * c.sx) 65536, -cs, -(Int.ediv (sn * c.sx) 65536))
+                  else (Int.ediv (cs * c.sx) 65536, sn, -(Int.ediv (sn * c.sx) 65536), cs)
+              cmds := clusterCmds fonts f c (la * outK) (lb * outK) (lc * outK) (ld * outK)
+                (gx * outK) (gy * outK)
+              let adv16 := if c.adv ≤ 0 then 65536 else c.adv
+              -- an upright cluster's metric box is `width` tall, centred
+              let (top16, bot16) := if upright then (-(Int.ediv c.width 2), c.width - Int.ediv c.width 2)
+                else metricTopBot f c.props.size
+              for pt in metricCorners la lb lc ld gx gy adv16 top16 bot16 do
+                mbox := Box.cover mbox pt
+                sbox := coverAt sbox c.styleIdx pt
+            | _, _ => pure ()
+          x := x + c.adv
+          adv := adv + c.adv
+        return (cmds, ox, oy, x, y, adv, pathEnd, mbox, sbox, dec)
+      x := x'; y := y'; adv := adv'; pathEnd := pathEnd'; mbox := mbox'; sbox := sbox'
       let styleChanged := curStyle != some c.styleIdx
       let shiftBreak := p.dx != 0 || p.dy != 0 || p.rot != 0
       if styleChanged then
@@ -979,11 +1439,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         placed := flushBuf placed olIdx olCmds
         placed := flushBuf placed ulIdx ulCmds
         placed := match curStyle with
-          | some s => if curCmds.size > 0 then placed.push ⟨s, curCmds⟩ else placed
+          | some s => flushRun placed s curCmds boldCmds boldSize
           | none => placed
         placed := flushBuf placed thIdx thCmds
         curStyle := some c.styleIdx
         curCmds := #[]
+        boldCmds := #[]
         olIdx := c.props.overlineIdx; ulIdx := c.props.underlineIdx; thIdx := c.props.throughIdx
         olCmds := #[]; ulCmds := #[]; thCmds := #[]
       else if shiftBreak then
@@ -993,29 +1454,42 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         ulCmds := closeSub ulCmds ulRun
         thCmds := closeSub thCmds thRun
       if styleChanged || shiftBreak then
-        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) =>
-          match idx?, faces.get c.props.face with
+        -- (on a path each cluster draws its own piece instead, `dec` above)
+        let mkRun := fun (idx? : Option Nat) (metric : Font → Int) (dsz : Fx) =>
+          match idx?, fonts.getD c.base none with
           | some idx, some f =>
-            some { styleIdx := idx, ox := ox, oy := oy, rot := p.rot, width := 0,
-                   unitsPerEm := f.unitsPerEm, size := c.props.size,
+            if flow.isSome then none else
+            some { styleIdx := idx, ox := ox * outK, oy := oy * outK,
+                   rot := if vertical then p.rot + Fx.ofNat 90 else p.rot, width := 0,
+                   unitsPerEm := f.unitsPerEm, size := (if dsz > 0 then dsz else c.props.size) * outK,
                    dyUnits := metric f, thicknessUnits := f.underlineThickness : DecorRun }
           | _, _ => none
-        olRun := mkRun olIdx (·.ascent)
-        ulRun := mkRun ulIdx (·.underlinePosition)
-        thRun := mkRun thIdx (·.strikeoutPosition)
+        -- T96: in vertical text usvg puts the lines half the font's height
+        -- (`ascent - descent`) either side of the column's centre line
+        let halfH := fun (f : Font) => Int.ediv (f.ascent - f.descent) 2
+        olRun := mkRun olIdx (if vertical then halfH else (·.ascent)) c.props.overlineSize
+        ulRun := mkRun ulIdx (if vertical then (fun f => -(halfH f)) else (·.underlinePosition))
+          c.props.underlineSize
+        thRun := mkRun thIdx (if vertical then (fun _ => 0) else (·.strikeoutPosition)) c.props.throughSize
       -- the run's width counts every character's advance, dropped or not,
       -- the same way the pen itself always moves on.
-      olRun := olRun.map (fun r => { r with width := r.width + c.adv })
-      ulRun := ulRun.map (fun r => { r with width := r.width + c.adv })
-      thRun := thRun.map (fun r => { r with width := r.width + c.adv })
+      olRun := olRun.map (fun r => { r with width := r.width + c.adv * outK })
+      ulRun := ulRun.map (fun r => { r with width := r.width + c.adv * outK })
+      thRun := thRun.map (fun r => { r with width := r.width + c.adv * outK })
       curCmds := curCmds ++ cmds
+      if Synth.bold c.font c.props.weight then
+        boldCmds := boldCmds ++ cmds
+        boldSize := c.props.size
+      olCmds := olCmds ++ dec.1
+      ulCmds := ulCmds ++ dec.2.1
+      thCmds := thCmds ++ dec.2.2
     olCmds := closeSub olCmds olRun
     ulCmds := closeSub ulCmds ulRun
     thCmds := closeSub thCmds thRun
     placed := flushBuf placed olIdx olCmds
     placed := flushBuf placed ulIdx ulCmds
     placed := match curStyle with
-      | some s => if curCmds.size > 0 then placed.push ⟨s, curCmds⟩ else placed
+      | some s => flushRun placed s curCmds boldCmds boldSize
       | none => placed
     placed := flushBuf placed thIdx thCmds
     if flow.isSome then
@@ -1029,7 +1503,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       lastX := chunkX + (if vertical then y else adv)
       lastY := chunkY + (if vertical then adv else y)
     a := b
-  return (placed, used, mbox)
+  return (placed, used, mbox, sbox)
 
 end Text
 end LeanSvg

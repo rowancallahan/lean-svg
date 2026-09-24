@@ -71,11 +71,12 @@ def time_runs(cmd, runs, out_path=None):
     for _ in range(runs):
         if out_path is not None:
             out_path.unlink(missing_ok=True)
+            Path(str(out_path) + ".warnings.txt").unlink(missing_ok=True)  # T98
         rc, ms, err, timed_out = run_renderer(cmd)
         if timed_out:
             return None, None, err, True
         samples.append(ms)
-        if rc != 0:
+        if rc not in (0, 2):  # T98b: lean-svg exits 2 on success with warnings
             return statistics.median(samples), rc, err, False
     return statistics.median(samples), rc, err, False
 
@@ -100,6 +101,7 @@ def measure_baseline(binary, tmp, runs):
     out = {}
     for key, (cmd, out_path) in cmds.items():
         out_path.unlink(missing_ok=True)
+        Path(str(out_path) + ".warnings.txt").unlink(missing_ok=True)  # T98
         run_renderer(cmd)  # warm-up, discarded
         ms, _, _, _ = time_runs(cmd, n, out_path)
         out[key] = ms or 0.0
@@ -155,7 +157,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
     # Not clamped: at small widths our render cost is below the process-start
     # baseline, and a small negative net says exactly that.
     cell["ours_net_ms"] = ms_ours - base_ours
-    if rc_ours != 0:
+    if rc_ours not in (0, 2):
         cell["status"] = "error"
         cell["note"] = "lean-svg failed: " + (err_ours or "rc=%s" % rc_ours)
         return cell
@@ -209,6 +211,7 @@ def run_cell(svg, width, binary, tmp, runs, base_ours, base_resvg):
     cell.update(metrics)
 
     ours_png.unlink(missing_ok=True)
+    Path(str(ours_png) + ".warnings.txt").unlink(missing_ok=True)  # T98
     ref_png.unlink(missing_ok=True)
     return cell
 

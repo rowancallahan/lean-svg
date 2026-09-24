@@ -1,0 +1,381 @@
+file,verdict,note,render_hash,at,status
+graphviz/circo_cycle.svg,pass,,1e6f3589e3d49559,2026-09-24T07:29:31.477Z,current
+graphviz/dot_bayes_net_asia.svg,pass,,6aa33f8517002ec7,2026-09-24T07:22:26.209Z,current
+graphviz/dot_binary_tree.svg,pass,,1928b5e2a5edfa6e,2026-09-24T07:24:29.125Z,current
+graphviz/dot_class_hierarchy.svg,pass,,2ba9053560825f0b,2026-09-24T07:22:00.671Z,current
+graphviz/dot_clusters_pipeline.svg,pass,,b0d9f11557260463,2026-09-24T07:25:58.438Z,current
+graphviz/dot_colors_styles.svg,pass,,c528801b467815f1,2026-09-24T07:23:14.057Z,current
+graphviz/dot_dag_causal.svg,pass,,6bfad62a69cc9856,2026-09-24T07:26:38.748Z,current
+graphviz/dot_flowchart.svg,pass,,0ae279b36f21e75c,2026-09-24T07:29:58.347Z,current
+graphviz/dot_gantt_like_ranks.svg,pass,,5d3c2fa3ef666d74,2026-09-24T07:24:19.182Z,current
+graphviz/dot_html_table.svg,pass,,0f62bdd2e3be7072,2026-09-24T07:21:20.677Z,current
+graphviz/dot_large_dependency.svg,pass,,4465cccfc6af49fd,2026-09-24T07:23:50.815Z,current
+graphviz/dot_mcmc_workflow.svg,pass,,95c59e0300da71f1,2026-09-24T07:30:59.373Z,current
+graphviz/dot_neural_net.svg,pass,,60db02be596a7682,2026-09-24T07:28:42.006Z,current
+graphviz/dot_ortho_splines.svg,pass,,cfed3e6895e2d5b5,2026-09-24T07:22:13.222Z,current
+graphviz/dot_plate_model.svg,pass,,17f5d201317cc301,2026-09-24T07:27:25.466Z,current
+graphviz/dot_record_struct.svg,pass,,d7b39e886ebb045d,2026-09-24T07:22:06.216Z,current
+graphviz/dot_state_machine.svg,pass,,b1c720a527c8af2d,2026-09-24T07:28:51.574Z,current
+graphviz/fdp_social.svg,pass,,eb5347b204a414b4,2026-09-24T07:22:08.755Z,current
+graphviz/neato_factor_graph.svg,pass,,8c49a1f2eaa94c53,2026-09-24T07:26:17.337Z,current
+graphviz/neato_graph_undirected.svg,pass,,c346f9d5dde95e59,2026-09-24T07:26:15.055Z,current
+graphviz/neato_markov_random_field.svg,pass,,692be7d486769858,2026-09-24T07:21:37.035Z,current
+graphviz/neato_molecule.svg,pass,,577376e5a0b15a17,2026-09-24T07:25:53.145Z,current
+graphviz/twopi_radial.svg,pass,,e3cf53982f37c5c3,2026-09-24T05:34:36.219Z,current
+matplotlib-text/bayes_factor_bars.svg,pass,,6e891658e17adc3a,2026-09-24T07:29:03.489Z,current
+matplotlib-text/beta_binomial_update.svg,pass,,eb116cac3a5a51da,2026-09-24T07:21:30.667Z,current
+matplotlib-text/contourf_colorbar.svg,pass,,f7a299d0038c02e8,2026-09-24T07:28:46.439Z,current
+matplotlib-text/dendrogram_like.svg,pass,,fe0156cb9d0d4f6e,2026-09-24T07:31:20.000Z,current
+matplotlib-text/hexbin_density.svg,pass,,ddf655db0d93c6c7,2026-09-24T07:20:31.071Z,current
+matplotlib-text/hierarchical_shrinkage.svg,pass,,518cb0ea283bc1cf,2026-09-24T07:31:23.368Z,current
+matplotlib-text/histogram_kde.svg,pass,,3c6c951316d2b466,2026-09-24T07:31:16.502Z,current
+matplotlib-text/mathtext_showcase.svg,fail,"tofu boxes somehow, fail",f640fea992af3c7a,2026-09-24T07:23:06.455Z,current
+matplotlib-text/mcmc_trace.svg,pass,,21ee94e8271292c7,2026-09-24T07:18:14.640Z,current
+matplotlib-text/pair_scatter.svg,pass,,fead34b8be1f57d7,2026-09-24T07:18:33.259Z,current
+matplotlib-text/poisson_pmf.svg,pass,,4280243a796de750,2026-09-24T07:31:27.908Z,current
+matplotlib-text/scatter_colormap_sizes.svg,pass,,ee81991cb9355ead,2026-09-24T07:19:52.809Z,current
+matplotlib-text/streamplot_field.svg,pass,,9577818b565a3fc9,2026-09-24T07:18:37.696Z,current
+matplotlib-text/twin_axes.svg,pass,,da881c206e9b1403,2026-09-24T07:23:28.215Z,current
+matplotlib/beta_binomial_update__ggplot.svg,pass,,b1f65f6833e98be0,2026-09-24T05:25:52.133Z,current
+matplotlib/boxplot_violin.svg,pass,,23eed5246cd4e324,2026-09-24T05:26:06.531Z,current
+matplotlib/contour_density.svg,pass,,49b0e93efc4e0061,2026-09-24T05:17:56.858Z,current
+matplotlib/contourf_colorbar.svg,pass,,62ead4276b4ce8d7,2026-09-24T05:25:40.487Z,current
+matplotlib/corner_plot.svg,pass,,64ba23c50fa88145,2026-09-24T05:26:15.068Z,current
+matplotlib/corner_plot__sns-whitegrid.svg,pass,,da716d95ee7134e5,2026-09-24T05:26:20.066Z,current
+matplotlib/dirichlet_simplex.svg,pass,,831535f684b5deb3,2026-09-24T05:09:57.763Z,current
+matplotlib/ecdf.svg,pass,,85e684b1b6b5559c,2026-09-24T05:27:00.433Z,current
+matplotlib/fill_between_regions.svg,pass,,3e02c7b45ae4d517,2026-09-24T05:40:02.779Z,current
+matplotlib/gaussian_process.svg,pass,,f0d230b334ace49c,2026-09-24T05:25:31.548Z,current
+matplotlib/hatch_bars.svg,pass,,1662a450b5eb5f2d,2026-09-24T05:09:18.318Z,current
+matplotlib/heatmap_annot.svg,pass,,f380b9eaf1e070d8,2026-09-24T05:15:25.725Z,current
+matplotlib/heatmap_annot__fivethirtyeight.svg,pass,,74061d146bdc253e,2026-09-24T05:15:31.345Z,current
+matplotlib/hexbin_density.svg,pass,,16238668d83a0978,2026-09-24T05:14:43.634Z,current
+matplotlib/histogram_kde__classic.svg,pass,,0d68cff806593ca7,2026-09-24T05:10:07.055Z,current
+matplotlib/horizontal_bar.svg,pass,,5df56c81104e44ee,2026-09-24T05:17:02.415Z,current
+matplotlib/image_colormap.svg,pass,,131a1a7bcb1dc0a4,2026-09-24T05:25:34.063Z,current
+matplotlib/log_axes.svg,pass,,7c9b03856f17f347,2026-09-24T05:02:33.175Z,current
+matplotlib/mathtext_showcase.svg,pass,these all look good somehow,d00ffb3f99ff5a66,2026-09-24T05:26:51.413Z,current
+matplotlib/mcmc_autocorr.svg,pass,,33ceba145ddef44d,2026-09-24T05:20:33.539Z,current
+matplotlib/mcmc_trace.svg,pass,,d1c93d35ad9ac665,2026-09-24T05:07:58.566Z,current
+matplotlib/mcmc_trace__bmh.svg,pass,"fonts somehow look ok here not sure why, i think this one is pretty good somehow",79ffc95ff8dbe12c,2026-09-24T05:07:43.745Z,current
+matplotlib/pair_scatter.svg,pass,,d58e2353abbda4d3,2026-09-24T05:08:44.808Z,current
+matplotlib/phase_portrait.svg,pass,,29aec2dd336a2e9d,2026-09-24T05:10:16.876Z,current
+matplotlib/poisson_pmf.svg,pass,,72ada696b9d51452,2026-09-24T05:26:10.205Z,current
+matplotlib/posterior_predictive__dark_background.svg,pass,,874ec964371b9b44,2026-09-24T05:25:38.333Z,current
+matplotlib/prior_sensitivity_grid.svg,pass,,610af70a2d30a77d,2026-09-24T05:15:07.400Z,current
+matplotlib/qq_plot.svg,pass,,96018671c351fd9c,2026-09-24T05:27:10.852Z,current
+matplotlib/quiver_field.svg,pass,,e0471d2efa334038,2026-09-24T05:25:25.680Z,current
+matplotlib/rank_plot.svg,pass,fonts seem ok here somehow,43429b8c89ea7693,2026-09-24T05:08:11.052Z,current
+matplotlib/regression_residuals__bmh.svg,pass,,c6e40d2d8b4bb818,2026-09-24T05:16:51.168Z,current
+matplotlib/ridge_plot.svg,pass,,c37596bc583eb1da,2026-09-24T05:15:19.530Z,current
+matplotlib/roc_curves.svg,pass,,54eec36f5ffabf8d,2026-09-24T05:25:45.338Z,current
+matplotlib/scatter_colormap_sizes.svg,pass,,16f7ef5255f64403,2026-09-24T05:11:29.733Z,current
+matplotlib/sine_cosine_basic.svg,pass,,a76893c7d42347f2,2026-09-24T05:26:58.022Z,current
+matplotlib/sine_cosine_basic__dark_background.svg,pass,,4e5da0d53757869a,2026-09-24T05:25:58.752Z,current
+matplotlib/streamplot_field.svg,pass,font ok here somehow,ff28f7be22056d2a,2026-09-24T05:09:13.752Z,current
+matplotlib/surface_3d.svg,pass,,7bf452a6f0bdbd5c,2026-09-24T05:17:10.299Z,current
+matplotlib/time_series_bands.svg,pass,,3886423f070b96d9,2026-09-24T05:26:32.616Z,current
+matplotlib/wireframe_3d.svg,pass,,11327eb659d26f77,2026-09-24T05:09:25.924Z,current
+mermaid/class_distributions.svg,pass,,37ffbd8b94d9539a,2026-09-24T07:24:00.397Z,current
+mermaid/er_schema.svg,pass,,742e2cf791c96c17,2026-09-24T07:19:12.517Z,current
+mermaid/flowchart_mcmc.svg,pass,,704922922eaf7b40,2026-09-24T07:30:32.024Z,current
+mermaid/gantt_project.svg,pass,,0a769fc97fefc23b,2026-09-24T07:33:23.017Z,current
+mermaid/mindmap_bayes.svg,pass,,c34a357b727166bc,2026-09-24T07:23:17.031Z,current
+mermaid/pie_budget.svg,pass,,1ed312038f6d5ee6,2026-09-24T07:26:22.330Z,current
+mermaid/sequence_inference.svg,pass,,d6423bf80d110e17,2026-09-24T07:21:42.195Z,current
+mermaid/state_chain.svg,pass,,6a6497a5be2ad1ba,2026-09-24T07:22:17.425Z,current
+mpl-tests/test_artist/clip_path_clipping.svg,pass,[judged at 300 px],3d4c9e7c3fb5cd29,2026-09-24T04:10:10.025Z,current
+mpl-tests/test_artist/hatching.svg,pass,,bdfa28d647178fe0,2026-09-24T05:10:29.076Z,current
+mpl-tests/test_axes/canonical.svg,pass,,3bc62dd60715dfbd,2026-09-24T04:27:56.426Z,current
+mpl-tests/test_axes/contour_colorbar.svg,pass,,b533374332730397,2026-09-24T04:25:23.138Z,current
+mpl-tests/test_axes/contour_hatching.svg,pass,[judged at 300 px],f0b5450412f83456,2026-09-24T04:10:15.833Z,current
+mpl-tests/test_axes/dash_offset.svg,pass,[judged at 300 px],1d069f6e5e042ff8,2026-09-24T04:10:29.716Z,current
+mpl-tests/test_axes/imshow.svg,pass,,2b36be9cca987cf9,2026-09-24T06:13:08.456Z,current
+mpl-tests/test_axes/imshow_clip.svg,pass,,f07ac1421f5c010f,2026-09-24T06:11:23.256Z,current
+mpl-tests/test_axes/mixed_collection.svg,pass,,b91659efb0ad511f,2026-09-24T06:12:51.387Z,current
+mpl-tests/test_axes/nonfinite_limits.svg,pass,,4f35fe2e38451417,2026-09-24T04:31:03.178Z,current
+mpl-tests/test_axes/offset_points.svg,pass,,22630ebeb8383e84,2026-09-24T04:28:50.181Z,current
+mpl-tests/test_axes/pcolormesh.svg,pass,,c6f279ffc84fa619,2026-09-24T04:26:46.477Z,current
+mpl-tests/test_axes/rgba_markers.svg,pass,,485e53a3a62dbb79,2026-09-24T06:11:21.120Z,current
+mpl-tests/test_axes/scatter.svg,pass,,afa2f1111bbb085a,2026-09-24T06:12:26.120Z,current
+mpl-tests/test_axes/single_point.svg,pass,,f309922cebfd0ed5,2026-09-24T04:25:52.894Z,current
+mpl-tests/test_axes/step_linestyle.svg,pass,,67eda355d3ab3332,2026-09-24T04:31:13.848Z,current
+mpl-tests/test_axes/test_alpha.svg,pass,,26fbfc435ce70b09,2026-09-24T06:11:29.629Z,current
+mpl-tests/test_axes/transparent_markers.svg,pass,,991fb98d365ded02,2026-09-24T06:13:45.025Z,current
+mpl-tests/test_backend_svg/bold_font_output.svg,pass,,e7695eabf74e0300,2026-09-24T04:28:25.727Z,current
+mpl-tests/test_backend_svg/bold_font_output_with_none_fonttype.svg,pass,,091c47114ae95711,2026-09-24T07:31:57.039Z,current
+mpl-tests/test_backend_svg/multi_font_aspath.svg,pass,,31781288a46a1341,2026-09-24T04:25:39.726Z,current
+mpl-tests/test_backend_svg/multi_font_astext.svg,pass,maybe we add basic emojis if its not too big of a thing to add idk,a4a096a862ca2f3e,2026-09-24T07:33:01.226Z,current
+mpl-tests/test_backends_rendering/blend_groups_svg.svg,pass,,0294ba8a7006694b,2026-09-24T06:13:30.904Z,current
+mpl-tests/test_backends_rendering/blend_groups_svg_rasterized.svg,pass,,84b90dca6c82eb87,2026-09-24T06:14:29.603Z,current
+mpl-tests/test_backends_rendering/blend_modes_svg.svg,pass,,601a1a7ab1b2137a,2026-09-24T04:26:07.215Z,current
+mpl-tests/test_backends_rendering/fill_rules.svg,pass,,303eedea60cf6b75,2026-09-24T06:11:16.608Z,current
+mpl-tests/test_bbox_tight/bbox_inches_tight.svg,pass,,562816f2655ca102,2026-09-24T05:14:02.972Z,current
+mpl-tests/test_bbox_tight/bbox_inches_tight_clipping.svg,pass,,08e04ffef3b73053,2026-09-24T06:13:11.839Z,current
+mpl-tests/test_bbox_tight/bbox_inches_tight_raster.svg,pass,,73f6bca0fb89e279,2026-09-24T04:31:08.388Z,current
+mpl-tests/test_bbox_tight/bbox_inches_tight_suptile_legend.svg,pass,,011c773eaddc078f,2026-09-24T06:11:12.041Z,current
+mpl-tests/test_compare_images/simple.svg,pass,,350daa23e8bbe838,2026-09-24T06:10:06.892Z,current
+mpl-tests/test_constrainedlayout/constrained_layout4.svg,pass,,5cf26ffcd675c156,2026-09-24T04:27:48.854Z,current
+mpl-tests/test_contour/contour_log_locator.svg,pass,,0f75b690c429927c,2026-09-24T04:26:50.978Z,current
+mpl-tests/test_contour/contour_manual_labels.svg,pass,,7393d2a397d3f8cb,2026-09-24T06:07:15.136Z,current
+mpl-tests/test_figure/alpha_background.svg,pass,,b2fbed489b3a48fb,2026-09-24T06:15:18.807Z,current
+mpl-tests/test_figure/figure_align_labels.svg,pass,,29f648f254d733ac,2026-09-24T04:26:01.765Z,current
+mpl-tests/test_figure/tightbbox_box_aspect.svg,pass,,c6026a5b5ae43b3b,2026-09-24T04:27:06.152Z,current
+mpl-tests/test_ft2font/last_resort.svg,pass,[judged at 300 px],56814eed42457e75,2026-09-24T04:10:26.369Z,current
+mpl-tests/test_image/bbox_image_inverted.svg,pass,,fb83bb12a6a6bc89,2026-09-24T06:10:18.414Z,current
+mpl-tests/test_image/image_clip.svg,pass,,5f5c55094c023a0a,2026-09-24T04:28:08.920Z,current
+mpl-tests/test_image/image_cliprect.svg,pass,,29068532bdaa1217,2026-09-24T06:11:37.508Z,current
+mpl-tests/test_image/image_composite_background.svg,pass,,7add48039cf37097,2026-09-24T06:11:24.682Z,current
+mpl-tests/test_image/image_placement.svg,pass,,ad0a911dcc227988,2026-09-24T06:07:08.459Z,current
+mpl-tests/test_image/image_shift.svg,pass,,7415c803c0121013,2026-09-24T06:13:55.947Z,current
+mpl-tests/test_image/imshow_masked_interpolation.svg,pass,,90c5a78db09d33d2,2026-09-24T04:26:12.905Z,current
+mpl-tests/test_image/interp_nearest_vs_none.svg,pass,,5a1eb89cd16e2832,2026-09-24T04:27:01.690Z,current
+mpl-tests/test_image/rasterize_10dpi.svg,pass,,552f37eba39b3d80,2026-09-24T05:19:15.863Z,current
+mpl-tests/test_image/rotate_image.svg,pass,,b64066c91468f4f4,2026-09-24T06:13:47.920Z,current
+mpl-tests/test_legend/framealpha.svg,pass,,df487c1f7382de05,2026-09-24T04:31:27.908Z,current
+mpl-tests/test_legend/hatching.svg,pass,,2a35aca50be16d24,2026-09-24T04:25:00.918Z,current
+mpl-tests/test_lines/line_collection_dashes.svg,pass,,3ed1486a67ede8d5,2026-09-24T04:25:30.959Z,current
+mpl-tests/test_lines/scaled_lines.svg,pass,[judged at 300 px],6a135f2ae67809a2,2026-09-24T04:09:55.814Z,current
+mpl-tests/test_mathtext/mathtext0_cm_03.svg,pass,close enough just fonts maybe but we want self contained fonts for now,00e880f344bd80cc,2026-09-24T07:32:41.472Z,current
+mpl-tests/test_mathtext/mathtext0_dejavusans_04.svg,pass,,ebdc6748981632ee,2026-09-24T07:28:14.212Z,current
+mpl-tests/test_mathtext/mathtext0_dejavusans_05.svg,pass,,ec954e68602f4c0e,2026-09-24T07:19:40.158Z,current
+mpl-tests/test_mathtext/mathtext_cm_05.svg,pass,,7522a02776c1fa72,2026-09-24T06:12:23.042Z,current
+mpl-tests/test_mathtext/mathtext_cm_18.svg,pass,,6248886f368fe179,2026-09-24T06:07:58.414Z,current
+mpl-tests/test_mathtext/mathtext_cm_20.svg,pass,,786ddfeea2fef70e,2026-09-24T06:12:33.404Z,current
+mpl-tests/test_mathtext/mathtext_cm_27.svg,pass,,016b946691270d12,2026-09-24T06:13:39.549Z,current
+mpl-tests/test_mathtext/mathtext_cm_37.svg,pass,,2015c0e9bba0c31f,2026-09-24T06:08:14.430Z,current
+mpl-tests/test_mathtext/mathtext_cm_41.svg,pass,,167e278d23d0b618,2026-09-24T04:29:13.181Z,current
+mpl-tests/test_mathtext/mathtext_cm_52.svg,pass,,ea64db197b28582d,2026-09-24T04:31:20.688Z,current
+mpl-tests/test_mathtext/mathtext_cm_53.svg,pass,,33ecb994e15c0c2c,2026-09-24T06:09:52.740Z,current
+mpl-tests/test_mathtext/mathtext_cm_54.svg,pass,,33b0531e8124f37c,2026-09-24T06:12:06.824Z,current
+mpl-tests/test_mathtext/mathtext_cm_68.svg,pass,,866e3ea06e1ef3a7,2026-09-24T06:10:36.112Z,current
+mpl-tests/test_mathtext/mathtext_cm_70.svg,pass,,7744f2b718fb7330,2026-09-24T06:09:46.005Z,current
+mpl-tests/test_mathtext/mathtext_cm_74.svg,pass,,311508606a5b4e75,2026-09-24T06:11:04.670Z,current
+mpl-tests/test_mathtext/mathtext_cm_80.svg,pass,,4299aedab8ecf6f9,2026-09-24T06:10:39.902Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_18.svg,pass,,20d46fee293647e5,2026-09-24T06:08:20.779Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_23.svg,pass,,ceff593cc32e96a3,2026-09-24T06:12:59.445Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_37.svg,pass,,728c1e3c0af9cf11,2026-09-24T04:26:31.932Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_41.svg,pass,,54f4304bf86fc45c,2026-09-24T06:10:27.211Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_53.svg,pass,[judged at 300 px],08975db132a529f9,2026-09-24T04:10:06.211Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_68.svg,pass,,4bb712c352f1e694,2026-09-24T06:09:42.289Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_70.svg,pass,,1774493ccb111dc5,2026-09-24T06:10:32.039Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_75.svg,pass,,f7079287dfde2faa,2026-09-24T06:09:57.991Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_18.svg,pass,,0d27794149a563c2,2026-09-24T06:08:03.280Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_20.svg,pass,,94dce389c7c8ac2a,2026-09-24T06:12:19.305Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_23.svg,pass,,249e84a61a2a7332,2026-09-24T06:13:00.630Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_26.svg,pass,,bf93b06064058549,2026-09-24T06:13:37.644Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_39.svg,pass,,ebd592b3ddba43fa,2026-09-24T06:13:34.060Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_52.svg,pass,,70128dc30891aa81,2026-09-24T04:30:56.572Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_53.svg,pass,,f37584ea2f1443ab,2026-09-24T06:08:53.371Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_54.svg,pass,,60ffe1f729fb3fc7,2026-09-24T06:11:54.340Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_68.svg,pass,,a3212edbc773212a,2026-09-24T04:27:52.620Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_70.svg,pass,,6c6b54bacbd4fc07,2026-09-24T06:10:04.564Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_80.svg,pass,,8588336bba393dc3,2026-09-24T06:10:02.477Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_82.svg,pass,,9eb8a58f5d719ac0,2026-09-24T06:13:27.059Z,current
+mpl-tests/test_mathtext/mathtext_stix_40.svg,pass,,7700ab3f09ec94e0,2026-09-24T06:13:04.591Z,current
+mpl-tests/test_mathtext/mathtext_stix_53.svg,pass,[judged at 300 px],9612a6589a5314c6,2026-09-24T04:10:32.058Z,current
+mpl-tests/test_mathtext/mathtext_stix_54.svg,pass,,571860e0b5dcb4ff,2026-09-24T06:12:12.654Z,current
+mpl-tests/test_mathtext/mathtext_stix_68.svg,pass,,d686eacaf2daf77a,2026-09-24T06:10:51.117Z,current
+mpl-tests/test_mathtext/mathtext_stix_74.svg,pass,,b407f5aa6e1adad2,2026-09-24T04:29:31.036Z,current
+mpl-tests/test_mathtext/mathtext_stix_75.svg,pass,,c692baa97dba6a3f,2026-09-24T06:10:48.424Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_18.svg,pass,,9d2af1ef0172c0f0,2026-09-24T06:09:32.854Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_37.svg,pass,,6fd038565ec0b18f,2026-09-24T06:08:50.141Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_41.svg,pass,,0d82c7d7697d409b,2026-09-24T04:29:18.239Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_47.svg,pass,,3e286bf204514923,2026-09-24T06:14:15.395Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_53.svg,pass,,bf0fe2e2483e9229,2026-09-24T06:09:50.958Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_70.svg,pass,,b770a8ae3a458659,2026-09-24T06:10:28.559Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_75.svg,pass,,ebcc0511561ab61b,2026-09-24T06:10:56.000Z,current
+mpl-tests/test_patches/all_quadrants_arcs.svg,pass,,40719ac6db7ca925,2026-09-24T04:28:14.336Z,current
+mpl-tests/test_patches/autoscale_arc.svg,pass,,c5e55c78afc08737,2026-09-24T04:27:15.437Z,current
+mpl-tests/test_patches/multi_color_hatch.svg,pass,[judged at 300 px],4e84c8b225a388e9,2026-09-24T04:09:31.771Z,current
+mpl-tests/test_patches/patch_alpha_coloring.svg,pass,,63ab62751c7153f9,2026-09-24T04:29:04.519Z,current
+mpl-tests/test_patches/patch_custom_linestyle.svg,pass,,15174b1616a1be2d,2026-09-24T04:28:44.268Z,current
+mpl-tests/test_patches/wedge_range.svg,pass,,2b6a1c18f74cfc14,2026-09-24T06:11:41.346Z,current
+mpl-tests/test_path/path_clipping.svg,pass,,4eb5d9514447e27a,2026-09-24T04:28:05.191Z,current
+mpl-tests/test_patheffects/collection.svg,pass,,b6744c5a69e07ad9,2026-09-24T04:25:04.765Z,current
+mpl-tests/test_patheffects/patheffect1.svg,pass,,4db147cea140ab1e,2026-09-24T04:25:44.389Z,current
+mpl-tests/test_patheffects/patheffect2.svg,pass,,423477c55b3c3f89,2026-09-24T04:26:10.060Z,current
+mpl-tests/test_patheffects/patheffect3.svg,pass,,d9bfdfaef3a2195f,2026-09-24T04:28:02.429Z,current
+mpl-tests/test_simplification/clipping.svg,pass,,268a6f42b2e3ac47,2026-09-24T06:12:29.442Z,current
+mpl-tests/test_simplification/clipping_with_nans.svg,pass,,11999484b02ac9b4,2026-09-24T04:30:51.046Z,current
+mpl-tests/test_simplification/hatch_simplify.svg,pass,,5cf80ff8dbd4d741,2026-09-24T04:25:54.764Z,current
+mpl-tests/test_text/features.svg,pass,[judged at 300 px],34b3d3df99db2aee,2026-09-24T04:10:00.611Z,current
+mpl-tests/test_text/font_styles.svg,pass,,80f7ade0db8009c9,2026-09-24T06:10:43.399Z,current
+mpl-tests/test_text/language.svg,pass,,5298bc01d0de7ab3,2026-09-24T04:28:56.574Z,current
+mpl-tests/test_text/multiline.svg,pass,,bfaffa19f867ef90,2026-09-24T04:27:11.932Z,current
+mpl-tests/test_text/multiline2.svg,pass,[judged at 300 px],51caaec3a6712f2c,2026-09-24T04:10:39.223Z,current
+mpl-tests/test_text/text_alignment.svg,pass,,96b89e9b5e6ec32c,2026-09-24T04:26:42.967Z,current
+mpl-tests/test_text/text_as_path_opacity.svg,pass,,47f6e8bc6aeba93a,2026-09-24T06:15:23.607Z,current
+mpl-tests/test_text/text_as_text_opacity.svg,pass,,19f92e15be032e50,2026-09-24T07:32:44.810Z,current
+mpl-tests/test_text/text_bboxclip.svg,pass,,507645f2be852089,2026-09-24T04:31:17.159Z,current
+mpl-tests/test_text/titles.svg,pass,,71743ef038480f6c,2026-09-24T06:11:47.898Z,current
+mpl-tests/test_tightlayout/tight_layout1.svg,pass,,ef7ca8d5271e4eff,2026-09-24T06:09:38.308Z,current
+mpl-tests/test_tightlayout/tight_layout2.svg,pass,,ec22d4075fd584dd,2026-09-24T04:26:36.505Z,current
+mpl-tests/test_tightlayout/tight_layout3.svg,pass,,4497e7d3f4134408,2026-09-24T04:26:57.984Z,current
+mpl-tests/test_tightlayout/tight_layout4.svg,pass,,9b230630afea89e5,2026-09-24T04:26:17.442Z,current
+mpl-tests/test_tightlayout/tight_layout6.svg,pass,,c058d3da5c59e094,2026-09-24T04:26:03.080Z,current
+mpl-tests/test_tightlayout/tight_layout7.svg,pass,,255a16bc0e87497d,2026-09-24T06:09:36.636Z,current
+mpl-tests/test_tightlayout/tight_layout9.svg,pass,,d15118b6c06abc49,2026-09-24T06:08:32.927Z,current
+mpl-tests/test_transforms/pre_transform_data.svg,pass,[judged at 300 px],de0b887bfd064f93,2026-09-24T04:09:53.193Z,current
+plantuml/activity_pipeline.svg,pass,,a6a7a03c6f4c1f49,2026-09-24T07:31:35.383Z,current
+plantuml/class_model.svg,pass,,a58bf2c4033b5cb5,2026-09-24T07:25:08.655Z,current
+plantuml/component_arch.svg,pass,,fa01c53f82f38db4,2026-09-24T07:31:42.432Z,current
+plantuml/mindmap_topics.svg,pass,,7c776db70c51a215,2026-09-24T07:28:20.655Z,current
+plantuml/sequence_auth.svg,pass,,75e96382f58fd9c6,2026-09-24T07:26:24.588Z,current
+plantuml/state_sampler.svg,pass,,9dc88e87ca59426e,2026-09-24T07:31:39.394Z,current
+plantuml/timing_gantt.svg,pass,,7eb1e8996c080843,2026-09-24T07:30:21.938Z,current
+plantuml/usecase_system.svg,pass,,918f4c574e6542f9,2026-09-24T07:23:24.225Z,current
+tikz-fonts/arrows_meta_showcase.svg,pass,,1f7a9d179354bfd4,2026-09-24T07:20:43.381Z,current
+tikz-fonts/automaton_dfa.svg,pass,,868dce46620b2970,2026-09-24T07:25:43.835Z,current
+tikz-fonts/automaton_markov_chain.svg,pass,,e99deb8e4c549ab8,2026-09-24T07:23:36.769Z,current
+tikz-fonts/automaton_pushdown.svg,pass,,928f5e0ec8c59f8e,2026-09-24T07:20:58.185Z,current
+tikz-fonts/bayesnet_hmm.svg,pass,,4f6b14a9949cdf12,2026-09-24T07:22:03.247Z,current
+tikz-fonts/bayesnet_plate.svg,pass,,b78a2b800650f614,2026-09-24T07:21:00.391Z,current
+tikz-fonts/bayesnet_regression_dag.svg,pass,,1ca7fe9288804718,2026-09-24T07:24:14.305Z,current
+tikz-fonts/bayesnet_sprinkler.svg,pass,,744c18d3caf72b2a,2026-09-24T07:21:10.714Z,current
+tikz-fonts/cd_adjunction.svg,pass,,b10e808e3d513682,2026-09-24T07:29:48.773Z,current
+tikz-fonts/cd_cube.svg,pass,,245129388107a4ca,2026-09-24T07:27:30.431Z,current
+tikz-fonts/cd_exact_sequence.svg,pass,,12f5f5edad675525,2026-09-24T07:25:24.304Z,current
+tikz-fonts/cd_natural_transformation.svg,pass,,c4697daaae0947b6,2026-09-24T07:25:27.729Z,current
+tikz-fonts/cd_pullback.svg,pass,,7edd8c95f92799e8,2026-09-24T07:27:21.471Z,current
+tikz-fonts/cd_snake_lemma.svg,pass,,fabcbf13fd9c5b3d,2026-09-24T07:24:52.051Z,current
+tikz-fonts/cd_square.svg,pass,,212af0988f53c301,2026-09-24T07:25:30.228Z,current
+tikz-fonts/circuit_opamp.svg,pass,,d080382c26a7a877,2026-09-24T07:29:10.304Z,current
+tikz-fonts/circuit_rlc.svg,pass,,9813626d9b77a171,2026-09-24T07:25:40.438Z,current
+tikz-fonts/complex_plane_roots.svg,pass,,93870f3d10085e00,2026-09-24T07:24:05.524Z,current
+tikz-fonts/feynman_annihilation.svg,pass,,6749c5b529de8ec7,2026-09-24T07:25:11.277Z,current
+tikz-fonts/feynman_gluon_loop.svg,pass,,a92713383766742e,2026-09-24T07:24:38.539Z,current
+tikz-fonts/feynman_higgs.svg,pass,,7a0d5a0ab89468f9,2026-09-24T07:25:18.243Z,current
+tikz-fonts/feynman_moller.svg,pass,,d5d11e49f6521d9a,2026-09-24T07:25:34.044Z,current
+tikz-fonts/feynman_qed_vertex.svg,pass,,ae21b9668f791e03,2026-09-24T07:29:53.613Z,current
+tikz-fonts/flowchart_algorithm.svg,pass,,c5e615d0cc9659ab,2026-09-24T07:22:46.713Z,current
+tikz-fonts/function_graph_limits.svg,pass,,7bce1ae911121d19,2026-09-24T07:26:04.865Z,current
+tikz-fonts/geom_3d_axes.svg,pass,,d0f010181d828c6e,2026-09-24T07:27:33.343Z,current
+tikz-fonts/geom_conic_sections.svg,pass,,5f63a957d4445362,2026-09-24T07:24:33.172Z,current
+tikz-fonts/geom_fractal_sierpinski.svg,pass,,dce32f820bf8b878,2026-09-24T05:22:50.547Z,current
+tikz-fonts/geom_inscribed_angle.svg,pass,,3bedd373dbfae980,2026-09-24T07:29:39.877Z,current
+tikz-fonts/geom_polyhedron.svg,pass,,00c567a3a8f9c585,2026-09-24T05:21:13.597Z,current
+tikz-fonts/geom_pythagoras.svg,fail,,3e771414dc603c5d,2026-09-24T05:23:17.176Z,current
+tikz-fonts/geom_unit_circle.svg,pass,,6d7b2ee76f4a7fbb,2026-09-24T07:23:55.565Z,current
+tikz-fonts/graph_grid_torus.svg,pass,,6a4156b344b57e78,2026-09-24T05:20:47.334Z,current
+tikz-fonts/graph_k5_k33.svg,pass,,0d769f2b74a61b66,2026-09-24T07:28:06.387Z,current
+tikz-fonts/graph_petersen.svg,pass,,54b2747cb3a3af10,2026-09-24T05:21:11.773Z,current
+tikz-fonts/graph_weighted_dijkstra.svg,pass,,6062478eeaabe560,2026-09-24T07:28:39.566Z,current
+tikz-fonts/knot_trefoil.svg,fail,this looks like neither are rendering tbh its just showing a circle and should be a trefoil i think,21f651fee1341803,2026-09-24T05:23:38.506Z,current
+tikz-fonts/lattice_subgroups.svg,pass,,093d8eaa69b7a340,2026-09-24T07:29:51.642Z,current
+tikz-fonts/matrix_block.svg,pass,,05afc9fead733111,2026-09-24T07:28:56.321Z,current
+tikz-fonts/mindmap_stats.svg,pass,,6fa5ef0b18db686b,2026-09-24T07:26:08.183Z,current
+tikz-fonts/nn_attention.svg,pass,,bc7406fb523c0d23,2026-09-24T07:22:23.658Z,current
+tikz-fonts/nn_conv_blocks.svg,pass,,267d8576538fc993,2026-09-24T07:24:16.701Z,current
+tikz-fonts/nn_mlp.svg,pass,,d1d0504f4995da8a,2026-09-24T07:20:28.631Z,current
+tikz-fonts/nn_rnn_unrolled.svg,pass,,8256b59759fdc6e3,2026-09-24T07:28:59.459Z,current
+tikz-fonts/patterns_fill.svg,pass,,6ff8cc6004a1757f,2026-09-24T05:02:26.322Z,current
+tikz-fonts/plot_pgf_3d_surface.svg,pass,,6ecb9a62efe1c180,2026-09-24T07:19:27.259Z,current
+tikz-fonts/plot_pgf_bar.svg,pass,,0f37173f9cdf122c,2026-09-24T07:19:44.055Z,current
+tikz-fonts/plot_pgf_contour_scatter.svg,pass,,da0918bd768a0126,2026-09-24T07:25:47.837Z,current
+tikz-fonts/plot_pgf_functions.svg,pass,,8ce5723a4e1884d8,2026-09-24T07:23:32.479Z,current
+tikz-fonts/plot_pgf_histogram.svg,pass,,7762c66520b8b14f,2026-09-24T07:30:49.616Z,current
+tikz-fonts/plot_pgf_loglog_errors.svg,pass,,dc12b834f6ad7f6e,2026-09-24T07:18:56.133Z,current
+tikz-fonts/plot_pgf_normal_shaded.svg,pass,,a1fbc34e27e4fe48,2026-09-24T07:25:21.417Z,current
+tikz-fonts/plot_pgf_polar.svg,pass,,218b2ac7e176fd05,2026-09-24T07:30:47.088Z,current
+tikz-fonts/plot_pgf_posterior.svg,pass,,71dcc07aaa7480d5,2026-09-24T07:21:48.533Z,current
+tikz-fonts/riemann_sums.svg,pass,,7f4170eb8afb233d,2026-09-24T07:24:48.765Z,current
+tikz-fonts/shading_gradients.svg,pass,,ba8da90206f1b2d8,2026-09-24T05:23:19.820Z,current
+tikz-fonts/timeline_calendar.svg,pass,,73d77df438f35df2,2026-09-24T07:28:04.479Z,current
+tikz-fonts/tree_binary_search.svg,pass,,009f198a1d6a508e,2026-09-24T07:24:24.457Z,current
+tikz-fonts/tree_forest_parse.svg,pass,,3a59a1ca47bdf6eb,2026-09-24T07:25:15.263Z,current
+tikz-fonts/tree_probability.svg,pass,,a3b5e61a05437ebf,2026-09-24T07:26:33.942Z,current
+tikz-fonts/tree_qtree_decision.svg,pass,,5c15ca2aa1a3ef04,2026-09-24T07:30:01.541Z,current
+tikz-fonts/vector_field_tikz.svg,pass,,25319079b8edcc5b,2026-09-24T05:22:22.967Z,current
+tikz-fonts/venn_even_odd.svg,pass,,2da14dc63a16b2d6,2026-09-24T07:21:50.429Z,current
+tikz-fonts/venn_three.svg,pass,,13eaf4370fa138b5,2026-09-24T07:27:27.879Z,current
+tikz/arrows_meta_showcase.svg,pass,[judged at 300 px],85b6e37dc786a8ab,2026-09-24T04:05:02.726Z,current
+tikz/automaton_markov_chain.svg,pass,,b3430460563b86d7,2026-09-24T05:36:16.592Z,current
+tikz/automaton_pushdown.svg,pass,,7e74874c29da98e2,2026-09-24T05:35:40.632Z,current
+tikz/bayesnet_hmm.svg,pass,,29d1b69c5c3e6d2c,2026-09-24T05:36:28.790Z,current
+tikz/bayesnet_plate.svg,pass,,43c8cd99a090fe88,2026-09-24T05:19:21.046Z,current
+tikz/bayesnet_regression_dag.svg,pass,,6dcad343491083d0,2026-09-24T05:36:55.372Z,current
+tikz/bayesnet_sprinkler.svg,pass,[judged at 300 px],466f61864cb85d87,2026-09-24T04:04:57.603Z,current
+tikz/cd_adjunction.svg,pass,,8c5935ae6b6419ca,2026-09-24T05:38:40.737Z,current
+tikz/cd_cube.svg,pass,,ec81b0ce9e29f4b9,2026-09-24T05:38:29.129Z,current
+tikz/cd_exact_sequence.svg,pass,[judged at 300 px],ec52d5bcedb10d4f,2026-09-24T04:07:17.623Z,current
+tikz/cd_natural_transformation.svg,pass,,8ea25449f4c9ed9f,2026-09-24T05:37:18.180Z,current
+tikz/cd_pullback.svg,pass,,747f63ed92c2e042,2026-09-24T05:38:17.804Z,current
+tikz/cd_snake_lemma.svg,pass,[judged at 300 px],89726ff86af7e823,2026-09-24T04:07:37.077Z,current
+tikz/cd_square.svg,pass,,2389a868800855ed,2026-09-24T05:37:29.448Z,current
+tikz/circuit_opamp.svg,pass,,4de41342aa856ca4,2026-09-24T05:36:48.858Z,current
+tikz/circuit_rlc.svg,pass,[judged at 300 px],c902e1dd8a5d7b51,2026-09-24T04:07:40.256Z,current
+tikz/complex_plane_roots.svg,pass,[judged at 300 px],377999faac253533,2026-09-24T04:08:32.363Z,current
+tikz/feynman_annihilation.svg,pass,[judged at 300 px],50ddb078e64055e6,2026-09-24T04:08:23.246Z,current
+tikz/feynman_gluon_loop.svg,pass,,6c4ec74e64c61a54,2026-09-24T05:37:02.598Z,current
+tikz/feynman_higgs.svg,pass,,b78eb6de6f1c0270,2026-09-24T05:37:11.558Z,current
+tikz/feynman_moller.svg,pass,,db92c3bf4790567d,2026-09-24T05:37:21.953Z,current
+tikz/feynman_qed_vertex.svg,pass,,8ab6e491a2ae9b88,2026-09-24T05:38:34.079Z,current
+tikz/flowchart_algorithm.svg,pass,[judged at 300 px],4d6afba3c91f53bf,2026-09-24T04:06:52.372Z,current
+tikz/function_graph_limits.svg,pass,,a2a4d417d6ce2e9f,2026-09-24T05:39:14.859Z,current
+tikz/geom_conic_sections.svg,pass,,b8ced8b8db64be6a,2026-09-24T05:37:05.317Z,current
+tikz/geom_fractal_sierpinski.svg,pass,,dce32f820bf8b878,2026-09-24T05:37:08.111Z,current
+tikz/geom_polyhedron.svg,pass,[judged at 300 px],00c567a3a8f9c585,2026-09-24T04:07:02.885Z,current
+tikz/geom_pythagoras.svg,pass,[judged at 300 px],9ef96493e0f62a44,2026-09-24T04:09:14.327Z,current
+tikz/geom_unit_circle.svg,pass,,2541cfc4cd5fbaa3,2026-09-24T05:36:33.722Z,current
+tikz/graph_grid_torus.svg,pass,,6a4156b344b57e78,2026-09-24T05:35:42.031Z,current
+tikz/graph_k5_k33.svg,pass,[judged at 300 px],f8a333e283e8c52b,2026-09-24T04:06:33.119Z,current
+tikz/graph_petersen.svg,pass,,54b2747cb3a3af10,2026-09-24T05:35:55.848Z,current
+tikz/graph_weighted_dijkstra.svg,pass,,cb7f7d3a8f00ad75,2026-09-24T05:36:03.179Z,current
+tikz/knot_trefoil.svg,fail,are we sure that there doesn't need to be a trefoil here? its just a circle,21f651fee1341803,2026-09-24T05:38:54.387Z,current
+tikz/lattice_subgroups.svg,pass,,c13c103f92821a17,2026-09-24T05:38:37.943Z,current
+tikz/matrix_block.svg,pass,[judged at 300 px],df9d599aa858bf56,2026-09-24T04:06:54.523Z,current
+tikz/mindmap_stats.svg,pass,,404b5b9be69dc796,2026-09-24T05:39:09.446Z,current
+tikz/nn_attention.svg,pass,fixed looks good now,ff37c5c77551a451,2026-09-24T05:36:13.873Z,current
+tikz/nn_conv_blocks.svg,pass,,dbc50106b1cab408,2026-09-24T05:36:41.442Z,current
+tikz/nn_mlp.svg,pass,[judged at 300 px],805e24dfedd4d54f,2026-09-24T04:04:45.996Z,current
+tikz/nn_rnn_unrolled.svg,pass,,1b6014fec09a289d,2026-09-24T04:24:32.524Z,current
+tikz/patterns_fill.svg,pass,,6ff8cc6004a1757f,2026-09-24T05:02:23.010Z,current
+tikz/plot_pgf_3d_surface.svg,pass,good now,acb4d4bce3bd8f92,2026-09-24T07:43:37.791Z,current
+tikz/plot_pgf_bar.svg,pass,somehow this font is fixed now looks good,4ac1a830ee88c4f9,2026-09-24T05:11:27.030Z,current
+tikz/plot_pgf_contour_scatter.svg,pass,[judged at 300 px],99fbb34fc4352f55,2026-09-24T04:08:29.092Z,current
+tikz/plot_pgf_functions.svg,pass,,926fcd78c615cd79,2026-09-24T05:36:24.582Z,current
+tikz/plot_pgf_histogram.svg,pass,[judged at 300 px],48f590fb039d3c59,2026-09-24T04:06:47.175Z,current
+tikz/plot_pgf_loglog_errors.svg,pass,[judged at 300 px],64ef868d2577ecd0,2026-09-24T04:07:30.853Z,current
+tikz/plot_pgf_normal_shaded.svg,pass,,6d50c680966662f3,2026-09-24T05:37:14.459Z,current
+tikz/plot_pgf_polar.svg,pass,[judged at 300 px],1f7983d8319fbb87,2026-09-24T04:04:40.487Z,current
+tikz/plot_pgf_posterior.svg,pass,font fixed here looks good,2ec58670138cfae4,2026-09-24T05:35:52.269Z,current
+tikz/riemann_sums.svg,pass,[judged at 300 px],6de5b4dfaefa6231,2026-09-24T04:08:07.537Z,current
+tikz/shading_gradients.svg,pass,,ba8da90206f1b2d8,2026-09-24T05:38:20.835Z,current
+tikz/timeline_calendar.svg,pass,[judged at 300 px],d4b4fda320f61bdd,2026-09-24T04:04:31.862Z,current
+tikz/tree_binary_search.svg,pass,,aee011b357b9b4eb,2026-09-24T05:37:00.471Z,current
+tikz/tree_forest_parse.svg,pass,[judged at 300 px],62b5ceffada5c5db,2026-09-24T04:08:50.337Z,current
+tikz/tree_probability.svg,pass,[judged at 300 px],bdabeddf25309675,2026-09-24T04:08:19.753Z,current
+tikz/tree_qtree_decision.svg,pass,,3dc36b60f75573e3,2026-09-24T05:39:00.598Z,current
+tikz/vector_field_tikz.svg,pass,[judged at 300 px],25319079b8edcc5b,2026-09-24T04:08:16.279Z,current
+tikz/venn_even_odd.svg,pass,[judged at 300 px],852b0018c2f85210,2026-09-24T04:07:12.924Z,current
+tikz/venn_three.svg,pass,,1818e74250c915ee,2026-09-24T05:38:24.854Z,current
+web-tikz/2d-convolution.svg,pass,good,2a720d78d8212b7f,2026-09-24T05:09:42.873Z,current
+web-tikz/chain-homology.svg,pass,,78041b9e47346a0d,2026-09-24T05:14:52.620Z,current
+web-tikz/complex-sign-function.svg,pass,,3fcea28d234ebe18,2026-09-24T05:16:14.388Z,current
+web-tikz/dft-jacobs-ladder.svg,pass,,eff56e17e3c8ce2f,2026-09-24T04:33:53.988Z,current
+web-tikz/dna-double-helix.svg,pass,,ebd772bcc5f17b51,2026-09-24T05:12:13.577Z,current
+web-tikz/euler-angles.svg,pass,,cc601cdaca94c539,2026-09-24T04:34:03.175Z,current
+web-tikz/ferroelectric-response.svg,pass,,3f0bf78a1074bd58,2026-09-24T04:34:14.989Z,current
+web-tikz/k-nearest-neighbors.svg,pass,,c488a2b2a15ab131,2026-09-24T04:33:47.134Z,current
+web-tikz/kohn-sham-cycle.svg,pass,fonts look good here,c8f25e260f02add8,2026-09-24T05:18:22.756Z,current
+web-tikz/long-short-term-memory.svg,pass,,25482d57b1382cf8,2026-09-24T05:16:05.348Z,current
+web-tikz/materials-informatics.svg,pass,fixed,1220a092693810f2,2026-09-24T05:29:53.699Z,current
+web-tikz/maximum-flow-problem.svg,pass,,39c693e50648fbf1,2026-09-24T05:31:24.356Z,current
+web-tikz/multilayer-perceptron.svg,pass,,052238bd01aeeae9,2026-09-24T05:11:52.494Z,current
+web-tikz/operator-orderings.svg,pass,,557beded1679831e,2026-09-24T05:19:02.566Z,current
+web-tikz/risk-opportunity-matrix.svg,pass,,bcdef9b4ed4e6441,2026-09-24T04:32:51.699Z,current
+web-tikz/torus-fundamental-domain.svg,pass,,6994d90c3a479afb,2026-09-24T05:15:01.412Z,current
+web-vega/area_density.svg,pass,,812c880e08a20b20,2026-09-24T07:28:27.717Z,current
+web-vega/area_density_stacked.svg,pass,,b106e47da394d4d9,2026-09-24T07:28:36.107Z,current
+web-vega/boxplot_2D_vertical.svg,pass,,dacbfa08f968f506,2026-09-24T07:26:28.622Z,current
+web-vega/boxplot_minmax_2D_horizontal.svg,pass,,ebc00411715745cd,2026-09-24T07:30:38.717Z,current
+web-vega/circle_bubble_health_income.svg,pass,,306d424fd7825158,2026-09-24T07:33:27.690Z,current
+web-vega/connected_scatterplot.svg,pass,,b7225d7447d37585,2026-09-24T07:21:53.388Z,current
+web-vega/errorband_2d_vertical_borders.svg,pass,,5a75afaf144f881b,2026-09-24T07:33:40.259Z,current
+web-vega/histogram_nonlinear.svg,pass,,8aa5f045299e1900,2026-09-24T07:33:52.664Z,current
+web-vega/layer_candlestick.svg,pass,,38c84d205a7c092c,2026-09-24T07:20:34.478Z,current
+web-vega/layer_dual_axis.svg,pass,,9785d1757e32dabe,2026-09-24T07:33:35.206Z,current
+web-vega/layer_likert.svg,pass,,86d39eb1c1dc04ad,2026-09-24T07:19:33.290Z,current
+web-vega/rect_heatmap.svg,pass,,c0c41e62f1ff0ca3,2026-09-24T07:33:48.920Z,current
+web-vega/trellis_area.svg,pass,,8a5007eb49180cfd,2026-09-24T07:33:31.982Z,current

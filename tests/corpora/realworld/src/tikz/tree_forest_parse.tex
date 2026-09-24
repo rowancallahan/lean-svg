@@ -1,0 +1,11 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{forest}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{forest}
+for tree={edge={thick}, l sep=10pt, s sep=8pt}
+[S [NP [Det [the]] [N [cat]]] [VP [V [sat]] [PP [P [on]] [NP [Det [the]] [N [mat]]]]]]
+\end{forest}
+\end{document}

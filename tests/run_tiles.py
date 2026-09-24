@@ -61,6 +61,7 @@ def render(binary, svg, out, extra):
     """
     out = Path(out)
     out.unlink(missing_ok=True)
+    Path(str(out) + ".warnings.txt").unlink(missing_ok=True)  # T98
     cmd = [str(binary), str(svg), str(out)] + [str(a) for a in extra]
     start = time.perf_counter()
     try:
@@ -70,7 +71,7 @@ def render(binary, svg, out, extra):
     except subprocess.TimeoutExpired:
         raise RenderError("timed out after %ds: %s" % (RENDER_TIMEOUT, " ".join(cmd)))
     elapsed = (time.perf_counter() - start) * 1000.0
-    if proc.returncode != 0:
+    if proc.returncode not in (0, 2):  # T98b: 2 = PNG written, with warnings
         raise RenderError(
             "%s\n      %s" % (proc.stderr.decode("utf-8", "replace").strip(), " ".join(cmd))
         )

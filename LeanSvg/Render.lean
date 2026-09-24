@@ -1,6 +1,8 @@
 import LeanSvg.Mask
+import LeanSvg.DashSeg
 import LeanSvg.Clip
 import LeanSvg.FilterApply
+import LeanSvg.FilterFrame
 import LeanSvg.Marker
 import LeanSvg.Filter.ImageRender
 import LeanSvg.PatternRender
@@ -120,17 +122,22 @@ def canvasSetup (root : RootInfo) (opts : Options) :
     | none => Mat.identity
   let baseW := Nat.max 1 (Fx.round wFx).toNat
   let baseH := Nat.max 1 (Fx.round hFx).toNat
-  let (W, H, zoom16) : Nat × Nat × Int :=
+  -- T104: `--width` sizes as resvg's CLI does (`IntSize::scale_to_width` on
+  -- the rounded size: `H = ⌈w·baseH/baseW⌉`) and scales each axis by its own
+  -- `new/base` ratio (`fit_to_transform`).  Rounding `hFx·z` instead came out
+  -- one row short for most fractional sizes.
+  let (W, H, zoom16, zoomY) : Nat × Nat × Int × Int :=
     match opts.width, opts.zoom with
     | some w, _ =>
       let z : Int := Int.ediv ((w : Int) * 65536) baseW
-      (w, Nat.max 1 (Int.ediv (hFx * z + 32768 * 256) (65536 * 256)).toNat, z)
+      let h := Nat.max 1 ((w * baseH + baseW - 1) / baseW)
+      (w, h, z, Int.ediv ((h : Int) * 65536) baseH)
     | none, some z =>
       let z16 := z * 256
       (Nat.max 1 (Int.ediv (wFx * z16 + 32768 * 256) (65536 * 256)).toNat,
-       Nat.max 1 (Int.ediv (hFx * z16 + 32768 * 256) (65536 * 256)).toNat, z16)
-    | none, none => (baseW, baseH, 65536)
-  let mat := (Mat.scale16 zoom16 zoom16).mul vbMat
+       Nat.max 1 (Int.ediv (hFx * z16 + 32768 * 256) (65536 * 256)).toNat, z16, z16)
+    | none, none => (baseW, baseH, 65536, 65536)
+  let mat := (Mat.scale16 zoom16 zoomY).mul vbMat
   match opts.viewport with
   | none => return (W, H, mat, ⟨0, 0, W, H, 0, 0⟩)
   | some (vx, vy, vw, vh) =>
@@ -319,7 +326,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
         -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
         -- actually inked, before stroking, so every dash end gets a cap.  The
         -- fill above uses the undashed polylines; dashes are a stroke property.
-        let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
+        let polys := if st.dashes.isEmpty then polys else dashPath st.dashes st.dashOffset ctm s.cmds
         -- `treat_as_hairline` refuses whenever `!paint.anti_alias`, so a crisp
         -- stroke never takes the hairline shortcut, however thin.
         match (if st.crisp then none else hairCoverage ctm st.strokeWidth) with
@@ -497,6 +504,9 @@ structure Layer where
   cache : Clip.Cache := {}
   lx : Int := 0
   ly : Int := 0
+  /-- T90: set for a filter layer in a local (rotated/skewed) frame, which is
+  resampled back into the enclosing frame instead of cropped. -/
+  back : Option FilterFrame.Back := none
 deriving Inhabited
 
 /-- Largest filter layer, in pixels.  resvg lets the region reach 2× the canvas
@@ -667,6 +677,44 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
           -- size past every edge) — and, past `maxFilterPixels`, to the canvas
           -- being painted, which bounds it by what already exists.
           let dev := curRoot.mul g.filterCtm
+          -- T90: only where the axis-aligned layer would differ: a filter that
+          -- is `sensitive`, or a region that cuts the content (its local box,
+          -- found with a margin `m` around the region, reaches past it).
+          let cuts := fun (p : FilterFrame.Plan) =>
+            let m := p.w + p.h
+            match nodeBox ((Mat.translate (m * 256) (m * 256)).mul p.root) nodes i
+                { x0 := 0, y0 := 0, x1 := p.w + 3 * m, y1 := p.h + 3 * m } with
+            | none => false
+            | some c => c.x0 + 2 < m || c.y0 + 2 < m || c.x1 > m + p.w + 2 || c.y1 > m + p.h + 2
+          match (FilterFrame.plan curClip.vx curClip.vy dev g.filterCtm g.filters maxFilterPixels).filter
+              (fun p => FilterFrame.sensitive g.filters || cuts p) with
+          | some p =>
+            -- T90: rotated or skewed, the layer is the filter's user space.
+            let nprims := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
+            filterWork := filterWork + nprims * p.w * p.h
+            if nprims * p.w * p.h > maxFilterWork || filterWork > maxFilterTotal then
+              err := some "filter budget"
+              break
+            if livePixels + p.w * p.h > maxLayerPixels then
+              err := some "layer budget"
+              break
+            livePixels := livePixels + p.w * p.h
+            stack := stack.push
+              { cv := cur, ox := curOx, oy := curOy, clip := curClip,
+                opacity := opacityF32 g.opacity, opacityQ := opacityQ g.opacity,
+                blend := g.blend, clips := chain, masks := steps, maskMat,
+                filters := g.filters, fts := p.fts, root := curRoot,
+                fw := curW, fh := curH, cache, back := some p.back }
+            passStack := passStack.push false
+            cur := Canvas.new p.w p.h none
+            curRoot := p.root
+            curW := p.w
+            curH := p.h
+            curClip := { curClip with x0 := 0, y0 := 0, x1 := p.w, y1 := p.h, vx := 0, vy := 0 }
+            curOx := 0
+            curOy := 0
+            cache := {}
+          | none =>
           match filterBox dev g.filters with
           | none => skipDepth := 1
           | some (fx0, fy0, fx1, fy1) =>
@@ -676,16 +724,26 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
             let mut by0 := max fy0 my0
             let mut bx1 := min fx1 (mx0 + 5 * (fullW : Int))
             let mut by1 := min fy1 (my0 + 5 * (fullH : Int))
+            let nprims : Nat := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
             if bx1 > bx0 && by1 > by0 && (bx1 - bx0) * (by1 - by0) > (maxFilterPixels : Int) then
               bx0 := max bx0 curOx
               by0 := max by0 curOy
               bx1 := min bx1 (curOx + cur.w)
               by1 := min by1 (curOy + cur.h)
+            -- T115: a region whose work would pass `maxFilterWork` is cut to the
+            -- whole image (not the tile, so tiles stay identical) before the
+            -- budget is checked: PlantUML's 300% drop-shadow regions on tall
+            -- diagrams at 1000 px.
+            if bx1 > bx0 && by1 > by0 &&
+                (nprims : Int) * (bx1 - bx0) * (by1 - by0) > (maxFilterWork : Int) then
+              bx0 := max bx0 (mx0 + 2 * (fullW : Int))
+              by0 := max by0 (my0 + 2 * (fullH : Int))
+              bx1 := min bx1 (mx0 + 3 * (fullW : Int))
+              by1 := min by1 (my0 + 3 * (fullH : Int))
             if bx1 ≤ bx0 || by1 ≤ by0 then skipDepth := 1
             else
               let lw := (bx1 - bx0).toNat
               let lh := (by1 - by0).toNat
-              let nprims := g.filters.foldl (fun n f => f.prims.foldl (· + ·.cost) n) 0
               filterWork := filterWork + nprims * lw * lh
               if nprims * lw * lh > maxFilterWork || filterWork > maxFilterTotal then
                 err := some "filter budget"
@@ -820,11 +878,16 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
             if parent.filters.isEmpty then some (cur, curOx, curOy, curClip)
             else
               let out := fs.foldl (fun c f => FilterApply.run f parent.fts c) cur
+              let put := fun (c : Canvas) (ax ay : Nat) =>
+                (c, ax, ay, { parent.clip with x0 := ax, y0 := ay, x1 := ax + c.w, y1 := ay + c.h })
+              match parent.back with
+              | some b =>
+                (FilterFrame.resample b out parent.ox parent.oy parent.cv.w parent.cv.h).map
+                  fun (c, ax, ay) => put c ax ay
+              | none =>
               (cropTo out (parent.lx - parent.ox) (parent.ly - parent.oy)
                   parent.cv.w parent.cv.h).map fun (c, nx, ny) =>
-                let ax := nx + parent.ox
-                let ay := ny + parent.oy
-                (c, ax, ay, { parent.clip with x0 := ax, y0 := ay, x1 := ax + c.w, y1 := ay + c.h })
+                put c (nx + parent.ox) (ny + parent.oy)
           if !parent.filters.isEmpty then
             curRoot := parent.root
             curW := parent.fw
@@ -861,7 +924,7 @@ def renderNodes (doc : Svg.Doc) (w h fullW fullH : Nat) : (fuel : Nat) → (root
                 filterWork := fw'
                 let mcv := Clip.applyToCanvas
                   #[Mask.regionMask parent.fw parent.fh parent.maskMat st.region] mcv lox loy
-                covs := covs.push (Mask.toClipMask mcv lox loy e.alpha)
+                covs := covs.push (Mask.toClipMask mcv lox loy e.alpha e.linear)
             if err.isSome then break
             done := Clip.applyToCanvas covs.reverse done lox loy
             -- Popped *before* the composite so that the parent's pixel array is
@@ -985,17 +1048,32 @@ def renderBands (opts : Options) (doc : Svg.Doc) (w h k : Nat) :
     | .ok (_, _, b) => out := out ++ b
   return out
 
+/-- T92: the full output canvas size (`canvasSetup` without the tile
+`viewport`) from the root `<svg>`'s own attributes, before `interpret`: what
+the viewport units (`vw`, ...) resolve against.  `none` when the root has no
+usable size (`RootFit` refits it later; the units then use the natural
+size, like a nested document). -/
+def outSize (events : Array Xml.Event) (opts : Options) : Option (Nat × Nat) :=
+  match events.find? (fun e => match e with | .open_ _ _ => true | _ => false) with
+  | some (.open_ "svg" attrs) =>
+    match canvasSetup (Svg.parseRoot attrs) { opts with viewport := none } with
+    | .ok (w, h, _, _) => some (w, h)
+    | .error _ => none
+  | _ => none
+
 end Render
 
-/-- Render SVG bytes to PNG bytes, or fail with a message.
+/-- Render SVG bytes to PNG bytes and the render's warnings (`Warn`, T98),
+or fail with a message.
 
 With `opts.threads ≥ 2` the canvas is cut into bands of rows that are rendered
 in parallel and concatenated; the bytes are the same either way (see
 `Render.renderBands`).  The PNG encoding stays serial: Adler-32 is sequential. -/
-def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
+def renderWithWarnings (opts : Options) (input : ByteArray) :
+    Except String (ByteArray × Array String) := do
   if input.size > maxInput then throw s!"input {input.size} bytes exceeds the {maxInput} byte limit"
   let events ← Xml.parse input
-  let doc ← Svg.interpret events
+  let doc ← Svg.interpretWith { outSize := Render.outSize events opts } events
   -- T52: marker instancing happens once here, after `interpret` has resolved
   -- every element's style and every `<marker>`'s own content, and before
   -- anything below (size checks, band splitting, `drawShape`) sees `doc` --
@@ -1014,6 +1092,11 @@ def render (opts : Options) (input : ByteArray) : Except String ByteArray := do
       (·.2.2) <$> Render.renderRgba opts doc
     else
       Render.renderBands opts doc w h k
-  return Png.encode w h rgba
+  return (Png.encode w h rgba, doc.warnings)
+
+/-- Render SVG bytes to PNG bytes, or fail with a message: `renderWithWarnings`
+without the warnings. -/
+def render (opts : Options) (input : ByteArray) : Except String ByteArray :=
+  (·.1) <$> renderWithWarnings opts input
 
 end LeanSvg

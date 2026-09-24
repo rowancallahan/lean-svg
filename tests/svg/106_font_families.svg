@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="330" viewBox="0 0 400 330">
+  <!-- T106: families matched like Chromium on Linux (exact name, alias,
+       generic; FamilyMatch).  resvg's reference, pinned to the suite's font
+       directory, has none of these families, so compare with Chromium. -->
+  <rect width="400" height="330" fill="white"/>
+  <g font-size="22">
+    <text x="10" y="30" font-family="'DejaVu Sans', sans-serif">DejaVu Sans ∑∫∣ θ</text>
+    <text x="10" y="60" font-family="DejaVu Sans" font-weight="bold">DejaVu Sans Bold</text>
+    <text x="10" y="90" font-family="DejaVu Sans" font-style="oblique">DejaVu Sans Oblique</text>
+    <text x="10" y="120" font-family="Times,serif">Times → Tinos ⟨x⟩ ≤ ∞</text>
+    <text x="10" y="150" font-family="Times,serif" font-style="italic" font-weight="bold">Times bold italic</text>
+    <text x="10" y="180" font-family="Helvetica,sans-Serif">Helvetica → Arimo</text>
+    <text x="10" y="210" font-family="Courier,monospace">Courier → Cousine</text>
+    <text x="10" y="240" font-family="monospace">monospace → DejaVu Mono</text>
+    <text x="10" y="270"><tspan font-family="cmr10">cmr10 (</tspan><tspan font-family="cmmi10">x</tspan><tspan font-family="cmr10">) </tspan><tspan font-family="STIXGeneral">STIX</tspan></text>
+    <text x="10" y="300" font-family="STIXSizeOneSym">∑ ∏ ∫ ⨁</text>
+  </g>
+</svg>

@@ -1,0 +1,6 @@
+graph fg {
+  layout=neato; overlap=false; sep="+10";
+  node [shape=circle]; x1; x2; x3; x4;
+  node [shape=box, style=filled, fillcolor=black, width=0.15, height=0.15, label=""]; fa; fb; fc; fd;
+  x1 -- fa -- x2; x2 -- fb -- x3; x2 -- fc -- x4; x3 -- fd -- x4; x1 -- fc;
+}

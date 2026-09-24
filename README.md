@@ -50,8 +50,20 @@ lake build
 .lake/build/bin/lean-svg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
 ```
 
-Exit codes: 0 success, 1 render error (message on stderr, no file written) —
-including refusing to overwrite an existing output file — 2 bad arguments.
+lean-svg prints nothing, ever: no stdout, no stderr. Its only outputs are
+the output file(s) and the exit code:
+
+| code | meaning |
+|---|---|
+| 0 | success, no warnings; the PNG is written |
+| 2 | success with warnings (e.g. a `font-family` drawn in Noto Sans instead); the PNG is written. By default the warnings are dropped and this code is the only signal. With `--warnings` they are also written to `<output>.warnings.txt` |
+| 1 | failure, nothing written: bad arguments, unreadable input, the output path (or, with `--warnings`, `<output>.warnings.txt`) already exists, or a render error |
+
+Flags: `--width N`, `--zoom Z`, `--background COLOR`, `--viewport X Y W H`
+(render only the W×H window at (X, Y) of the zoomed image; X, Y may be
+negative; zoom above 4096× is clamped), `--threads N` (horizontal bands,
+byte-identical output; 0 or 1 = serial), `--warnings` (opt in to the
+warnings file).
 
 ## Test
 
@@ -93,14 +105,36 @@ files and package manifests on 2026-09-21.
 
 | component | licence |
 |---|---|
-| **Noto Sans** Regular, Bold and Italic — Latin subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1. Copyright 2015 Google Inc. All Rights Reserved. Noto is a trademark of Google Inc.; trademarks are not licensed under the OFL. Version 2.000 (GOOG). Full text and copyright notice in `LeanSvg/Fonts/LICENSE-OFL.txt`. The faces are subsetted, which the OFL permits; Noto declares no Reserved Font Name. |
+| **Noto Sans** Regular, Bold, Italic, Thin, Light, Black and ExtraCondensed (Latin/Greek/Cyrillic), **Mplus 1p**, **Noto Sans SC/KR/Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari**, **Amiri** — subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1, all of them. Copyright 2015 Google Inc. (Noto Sans; Noto is a trademark of Google Inc., not licensed under the OFL), 2016 The M+ Project Authors (Mplus 1p), 2014-2021 Adobe with Reserved Font Name 'Source' (Noto Sans SC/KR), 2022 The Noto Project Authors (Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari), 2010-2016 Khaled Hosny (Amiri). Versions, sources and licence texts: `LeanSvg/Fonts/README.md` and `LeanSvg/Fonts/LICENSE-OFL*.txt`. The fonts are subsetted and instanced, which the OFL permits; no embedded font uses a Reserved Font Name. |
+| **DejaVu Sans** (Regular, Bold, Oblique), **DejaVu Sans Mono**, **DejaVu Serif** 2.37 — subsets in `LeanSvg/Fonts/*.lean` | Bitstream Vera / Arev licence (permissive). Bitstream Vera Fonts Copyright (c) 2003 Bitstream, Inc.; Arev Fonts Copyright (c) 2006 Tavmjong Bah; DejaVu changes are public domain. `LeanSvg/Fonts/LICENSE-DejaVu.txt`. |
+| **Arimo**, **Tinos**, **Cousine**, **STIX Two Math/Text**, **CMU Serif/Serif Italic/Sans Serif/Typewriter Text** — subsets in `LeanSvg/Fonts/*.lean` | SIL Open Font License 1.1. Copyright 2020-2026 The Arimo/Tinos/Cousine Project Authors; 2001-2021 The STIX Fonts Project Authors (Reserved Font Name "TM Math", not used; STIX Fonts is a trademark of the IEEE); 2003-2009 Andrey V. Panov and the authors of the original METAFONT fonts (Reserved Font Family Name "Computer Modern Unicode fonts", not used). `LeanSvg/Fonts/LICENSE-OFL-{Croscore,STIXTwo,CMU}.txt`. |
+| **Brotli static dictionary, transforms and context tables** (brotli 1.2.0), generated into `LeanSvg/BrotliData.lean` | MIT. Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors. `LeanSvg/LICENSE-brotli.txt`. |
 | **Original artwork and renders** — `tests/svg/*.svg`, `docs/readme/*.svg`, and the PNG images in this README | Apache-2.0. Authored for this project. |
+
+Fonts embedded in an input SVG (`@font-face` with a `data:` URL) are decoded
+only to render that one file. They are never stored, cached, written out or
+used for any other file, and lean-svg does not redistribute them; their
+licences are the concern of whoever made the SVG.
+
+### Real-world test corpus (committed, test data only)
+
+`tests/corpora/realworld/` holds 848 chart SVGs used only as test inputs; none
+is compiled into the binary. `SOURCES.csv` records the source, author and
+licence of every downloaded file; the licence texts are in
+`tests/corpora/realworld/LICENSES/`.
+
+| component | licence |
+|---|---|
+| **matplotlib test-suite baseline SVGs** (`mpl-tests/`, 515 files) | Matplotlib License (PSF-based, BSD-compatible). Copyright (c) 2012- Matplotlib Development Team; 2002-2011 John D. Hunter. `LICENSE-matplotlib.txt`. |
+| **janosh/diagrams** (`web-tikz/`, 50 files) | MIT. Copyright (c) 2021 Janosh Riebesell. `LICENSE-janosh-diagrams-MIT.txt`. |
+| **Vega-Lite examples** (`web-vega/`, 31 files) | BSD-3-Clause. Copyright (c) 2015, University of Washington Interactive Data Lab. `LICENSE-vega-lite-BSD-3-Clause.txt`. |
+| **Generated charts** (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib/`, `matplotlib-text/`) and their sources in `src/` | Apache-2.0, authored for this project. The TikZ SVGs contain glyphs of the AMS Type 1 Computer Modern and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm), embedded by dvisvgm as the SIL Open Font License 1.1 permits for fonts embedded in documents. |
 
 ### Not redistributed
 
-The test corpora are cloned locally by the test harnesses, are excluded by
-`.gitignore`, and are neither committed to this repository nor included in any
-release artifact.
+The other test corpora are cloned locally by the test harnesses, are excluded
+by `.gitignore`, and are neither committed to this repository nor included in
+any release artifact.
 
 | component | licence |
 |---|---|
@@ -115,6 +149,7 @@ release artifact.
 | component | licence |
 |---|---|
 | **tiny-skia** — [linebender/tiny-skia](https://github.com/linebender/tiny-skia) | BSD-3-Clause. Copyright (c) 2011 Google Inc.; Copyright (c) 2020 Yevhenii Reizner. tiny-skia is a port of Skia, and its licence carries both notices. |
+| **Brotli** decoder — RFC 7932, checked against [google/brotli](https://github.com/google/brotli) 1.2.0 | MIT. `LeanSvg/Brotli.lean` is written from the RFC; no C source is included. |
 
 The anti-aliased scan converter, hairline stroking, cubic and quadratic
 subdivision counts, dash-splitting rules, `lowp` blend arithmetic, `f32`

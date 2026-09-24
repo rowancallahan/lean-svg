@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" font-family="Noto Sans" font-size="24">
+  <!-- T91: non-Latin text with the embedded fonts and usvg-style fallback -->
+  <text x="12" y="36" fill="#1d3557">Привет, мир! Ёжик</text>
+  <text x="12" y="72" fill="#1d3557" font-weight="bold">Καλημέρα κόσμε</text>
+  <text x="12" y="108" fill="#1d3557" font-style="italic">Съешь же ещё</text>
+  <!-- Noto Sans lacks kana/kanji: the whole chunk falls back to Mplus 1p -->
+  <text x="12" y="146" fill="#457b9d">日本語のテキスト</text>
+  <!-- mixed chunk: Latin stays Noto Sans, kanji falls back -->
+  <text x="12" y="184" fill="#e63946">Tokyo 東京 AVA</text>
+  <!-- Mplus 1p selected directly (quoted: an unquoted `Mplus 1p` is invalid) -->
+  <text x="12" y="222" fill="#2a9d8f" font-family="'Mplus 1p'">ひらがな Latin</text>
+  <text x="200" y="252" font-size="16" text-anchor="middle" fill="#264653">й и&#x306; ǅ ﬁ</text>
+</svg>

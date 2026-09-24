@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" font-family="Noto Sans" font-size="28">
+  <!-- T101: a Han character's fallback font follows the nearest xml:lang/lang -->
+  <text x="10" y="40">刃直海角骨入</text>
+  <text x="10" y="80" xml:lang="ja">刃直海角骨入</text>
+  <g lang="zh-Hans"><text x="10" y="120">刃直<tspan xml:lang="ko">海角</tspan>骨入</text></g>
+  <text x="10" y="152" font-size="20" xml:lang="JA-jp">漢字 かな ABC</text>
+</svg>

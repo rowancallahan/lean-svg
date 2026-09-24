@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200">
+  <!-- T106: default-ignorable characters (U+00AD soft hyphen, U+200B zero
+       width space, U+2060 word joiner) draw nothing and take no advance -->
+  <rect width="400" height="200" fill="white"/>
+  <text x="20" y="60" font-family="Noto Sans" font-size="36">soft&#xAD;hy&#xAD;phen</text>
+  <text x="20" y="110" font-family="Noto Sans" font-size="36">zero&#x200B;width&#x2060;join</text>
+  <text x="20" y="160" font-family="Noto Sans" font-size="36" fill="steelblue">a&#xAD;&#xAD;b</text>
+</svg>

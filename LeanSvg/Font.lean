@@ -76,6 +76,9 @@ structure Font where
   cmapOff : Nat
   /-- `4`, `12`, or `0` for "no usable cmap". -/
   cmapFormat : Nat
+  /-- The chosen subtable passes `isCmapSorted`, so lookups binary-search it
+  (T94). -/
+  cmapSorted : Bool := false
   numberOfHMetrics : Nat
   hmtxOff : Nat
   /-- Cap on points per glyph: `maxp.maxPoints` if present, else `10000`. -/
@@ -98,6 +101,14 @@ structure Font where
   exercised by the three embedded faces (all three carry a real `OS/2`). -/
   strikeoutPosition : Int
   data : ByteArray
+  /-- T94: the rest of an embedded font, from byte `data.size` on, as base64
+  chunks of `tailChunkBytes` bytes each, `tailLen` bytes in all
+  (`parseEmbedded`).  The generator puts `loca`, `hmtx`, `vmtx` and `glyf`
+  there, which are read a few bytes per glyph (`byteAt`, `glyphRecord`); every
+  other table is in `data`.  `#[]` for a font parsed from a whole file. -/
+  tailChunks : Array String := #[]
+  tailChunkBytes : Nat := 0
+  tailLen : Nat := 0
 
 namespace Font
 
@@ -169,10 +180,11 @@ structure Tables where
 
 /-- Scan the `numTables` 16-byte directory records starting at byte 12,
 recording `(offset, length)` for the tables this parser needs. A record past
-`bs.size`, or a table whose offset is past `bs.size`, is skipped; a length
-that overruns `bs.size` is clamped. Bounded by `numTables ≤ 65535` (it is a
+`bs.size`, or a table whose offset is past the font's `size` (`bs.size`, or
+more for an embedded font whose tail is kept apart, T94), is skipped; a
+length that overruns `size` is clamped. Bounded by `numTables ≤ 65535` (it is a
 `u16`). -/
-def scanTables (bs : ByteArray) (numTables : Nat) : Tables := Id.run do
+def scanTables (bs : ByteArray) (numTables size : Nat) : Tables := Id.run do
   let mut t : Tables := {}
   for i in [0:numTables] do
     let dirOff := 12 + 16 * i
@@ -180,8 +192,8 @@ def scanTables (bs : ByteArray) (numTables : Nat) : Tables := Id.run do
       let tag := u32 bs dirOff
       let off := u32 bs (dirOff + 8)
       let len := u32 bs (dirOff + 12)
-      if off ≤ bs.size then
-        let clen := Nat.min len (bs.size - off)
+      if off ≤ size then
+        let clen := Nat.min len (size - off)
         if tag == tagHead then t := { t with head := some (off, clen) }
         else if tag == tagMaxp then t := { t with maxp := some (off, clen) }
         else if tag == tagCmap then t := { t with cmap := some (off, clen) }
@@ -228,6 +240,24 @@ def resolveCmap (bs : ByteArray) (cOff cLen : Nat) : Nat × Nat := Id.run do
   if bestScore == 0 then return (0, 0)
   return (bestOff, u16 bs bestOff)
 
+/-- How many format 12 groups a lookup may read. `numGroups` is a `u32` and
+cannot be trusted directly (a malicious font could claim billions), so it is
+capped at whatever the subtable could actually hold given `bs.size`, and at a
+further constant `100000` — generous for any real font. -/
+def format12Cap (bs : ByteArray) (so : Nat) : Nat :=
+  let groupsOff := so + 16
+  let byAvail := if bs.size > groupsOff then (bs.size - groupsOff) / 12 else 0
+  Nat.min (u32 bs (so + 12)) (Nat.min 100000 byAvail)
+
+/-- The glyph format 4 segment `i` (starting at `sc`) maps `codepoint` to. -/
+@[inline] def format4Glyph (bs : ByteArray) (idDeltaOff idRangeOff i sc codepoint : Nat) : Nat :=
+  let delta := i16 bs (idDeltaOff + 2 * i)
+  let iro := u16 bs (idRangeOff + 2 * i)
+  if iro == 0 then (Int.emod ((codepoint : Int) + delta) 65536).toNat
+  else
+    let g := u16 bs (idRangeOff + 2 * i + iro + 2 * (codepoint - sc))
+    if g == 0 then 0 else (Int.emod ((g : Int) + delta) 65536).toNat
+
 /-- Format 4 `cmap` lookup: BMP-only, segmented by `endCode`/`startCode`.
 Linear scan over `segCount ≤ 32767` (`segCountX2` is a `u16`). -/
 def glyphIdFormat4 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
@@ -241,29 +271,54 @@ def glyphIdFormat4 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run
     let ec := u16 bs (endCodeOff + 2 * i)
     let sc := u16 bs (startCodeOff + 2 * i)
     if sc ≤ codepoint && codepoint ≤ ec then
-      let delta := i16 bs (idDeltaOff + 2 * i)
-      let iro := u16 bs (idRangeOff + 2 * i)
-      if iro == 0 then
-        return (Int.emod ((codepoint : Int) + delta) 65536).toNat
-      else
-        let addr := idRangeOff + 2 * i + iro + 2 * (codepoint - sc)
-        let g := u16 bs addr
-        if g == 0 then return 0
-        else return (Int.emod ((g : Int) + delta) 65536).toNat
+      return format4Glyph bs idDeltaOff idRangeOff i sc codepoint
+  return 0
+
+/-- Whether a format 4 subtable's segments, or a format 12 subtable's groups
+(as many as `glyphIdFormat12` would scan), are sorted and disjoint: every
+`start ≤ end` and every `end` below the next `start`.  Then at most one
+segment holds any codepoint, so a binary search finds the same one the
+linear scan finds first (T94).  Checked once, when the font is parsed. -/
+def isCmapSorted (bs : ByteArray) (so fmt : Nat) : Bool := Id.run do
+  let (n, startOff, endOff, stride) :=
+    if fmt == 4 then
+      let segCount := u16 bs (so + 6) / 2
+      (segCount, so + 14 + segCount * 2 + 2, so + 14, 2)
+    else if fmt == 12 then (format12Cap bs so, so + 16, so + 20, 12)
+    else (0, 0, 0, 0)
+  let get := fun (off : Nat) => if fmt == 4 then u16 bs off else u32 bs off
+  let mut prevEnd : Int := -1
+  for i in [0:n] do
+    let sc := get (startOff + stride * i)
+    let ec := get (endOff + stride * i)
+    if (sc : Int) ≤ prevEnd || ec < sc then return false
+    prevEnd := ec
+  return true
+
+/-- `glyphIdFormat4` by binary search, for a subtable `isCmapSorted` accepts. -/
+def glyphIdFormat4Sorted (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
+  if codepoint > 0xFFFF then return 0
+  let segCount := u16 bs (so + 6) / 2
+  let endCodeOff := so + 14
+  let startCodeOff := endCodeOff + segCount * 2 + 2
+  let idDeltaOff := startCodeOff + segCount * 2
+  let idRangeOff := idDeltaOff + segCount * 2
+  let mut lo := 0
+  let mut hi := segCount
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let sc := u16 bs (startCodeOff + 2 * mid)
+    if codepoint < sc then hi := mid
+    else if codepoint > u16 bs (endCodeOff + 2 * mid) then lo := mid + 1
+    else return format4Glyph bs idDeltaOff idRangeOff mid sc codepoint
   return 0
 
 /-- Format 12 `cmap` lookup: contiguous `(startChar, endChar, startGlyph)`
-groups. `numGroups` is a `u32` and cannot be trusted directly (a malicious
-font could claim billions), so the scan is capped at whatever the subtable
-could actually hold given `bs.size`, and at a further constant `100000` —
-generous for any real font, and cheap even so since this runs once per
-character. -/
+groups, scanned up to `format12Cap`. -/
 def glyphIdFormat12 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
-  let numGroups := u32 bs (so + 12)
   let groupsOff := so + 16
-  let byAvail := if bs.size > groupsOff then (bs.size - groupsOff) / 12 else 0
-  let cap := Nat.min numGroups (Nat.min 100000 byAvail)
-  for i in [0:cap] do
+  for i in [0:format12Cap bs so] do
     let go := groupsOff + 12 * i
     let startChar := u32 bs go
     let endChar := u32 bs (go + 4)
@@ -272,11 +327,30 @@ def glyphIdFormat12 (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.ru
       return startGlyph + (codepoint - startChar)
   return 0
 
+/-- `glyphIdFormat12` by binary search, for a subtable `isCmapSorted` accepts. -/
+def glyphIdFormat12Sorted (bs : ByteArray) (so : Nat) (codepoint : Nat) : Nat := Id.run do
+  let groupsOff := so + 16
+  let mut lo := 0
+  let mut hi := format12Cap bs so
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let go := groupsOff + 12 * mid
+    let startChar := u32 bs go
+    if codepoint < startChar then hi := mid
+    else if codepoint > u32 bs (go + 4) then lo := mid + 1
+    else return u32 bs (go + 8) + (codepoint - startChar)
+  return 0
+
 /-- Glyph id for a Unicode codepoint via the font's chosen `cmap` subtable.
 `0` (`.notdef`) if there is none, or the codepoint is not mapped. -/
 def glyphId (f : Font) (codepoint : Nat) : Nat :=
-  if f.cmapFormat == 4 then glyphIdFormat4 f.data f.cmapOff codepoint
-  else if f.cmapFormat == 12 then glyphIdFormat12 f.data f.cmapOff codepoint
+  if f.cmapFormat == 4 then
+    if f.cmapSorted then glyphIdFormat4Sorted f.data f.cmapOff codepoint
+    else glyphIdFormat4 f.data f.cmapOff codepoint
+  else if f.cmapFormat == 12 then
+    if f.cmapSorted then glyphIdFormat12Sorted f.data f.cmapOff codepoint
+    else glyphIdFormat12 f.data f.cmapOff codepoint
   else 0
 
 /-! ## Legacy `kern` table (format 0, horizontal) -/
@@ -472,6 +546,69 @@ def kern (f : Font) (left right : Nat) : Int := Id.run do
       | none => pure ()
   return 0
 
+/-! ## Base64 (T91/T94): the embedded fonts' encoding -/
+
+/-- Value of a base64 digit (RFC 4648 standard alphabet), or 64 for any
+other byte.  A plain `UInt32` rather than an `Option`: this runs once per
+character of ~25 MB of embedded fonts, and an `Option` allocates. -/
+@[inline] def b64Digit (c : UInt8) : UInt32 :=
+  if 65 ≤ c && c ≤ 90 then c.toUInt32 - 65
+  else if 97 ≤ c && c ≤ 122 then c.toUInt32 - 71
+  else if 48 ≤ c && c ≤ 57 then c.toUInt32 + 4
+  else if c == 43 then 62
+  else if c == 47 then 63
+  else 64
+
+/-- The value of the base64 digit at byte `i` of `s`, or 64 past its end. -/
+@[inline] def b64At (s : String) (i : Nat) : UInt32 :=
+  if h : (⟨i⟩ : String.Pos.Raw) < s.rawEndPos then b64Digit (s.getUTF8Byte ⟨i⟩ h) else 64
+
+/-- Bytes `[start, start + len)` of the data that base64 `chunks` encode, each
+chunk encoding `per` bytes (a multiple of 3, so every chunk starts on a quad):
+byte `n` is in chunk `n / per`, in the quad at character `4 * (n % per / 3)`.
+Reads the chunk strings in place, so a glyph costs its own bytes, not its
+chunk's (T94).  Past the end of the data the bytes are garbage (`=` padding)
+or zero; callers stay within the length they were generated with. -/
+def base64Range (chunks : Array String) (per start len : Nat) : ByteArray := Id.run do
+  let mut out := ByteArray.emptyWithCapacity len
+  for k in [0:len] do
+    let n := start + k
+    let s := chunks.getD (n / per) ""
+    let j := n % per
+    let i := 4 * (j / 3)
+    let r := j % 3
+    let v : UInt32 :=
+      if r == 0 then b64At s i <<< 2 ||| b64At s (i + 1) >>> 4
+      else if r == 1 then (b64At s (i + 1) &&& 15) <<< 4 ||| b64At s (i + 2) >>> 2
+      else (b64At s (i + 2) &&& 3) <<< 6 ||| b64At s (i + 3)
+    out := out.push v.toUInt8
+  return out
+
+/-! ## Reading an embedded font's tail (T94) -/
+
+/-- The font's size in bytes: `data` plus the tail. -/
+def extent (f : Font) : Nat := f.data.size + f.tailLen
+
+/-- Byte `off` of the font, from `data` or the tail; 0 past `extent`. -/
+@[inline] def byteAt (f : Font) (off : Nat) : Nat :=
+  if off < f.data.size || f.tailChunks.isEmpty then u8 f.data off
+  else if off < f.extent then
+    let n := off - f.data.size
+    let s := f.tailChunks.getD (n / f.tailChunkBytes) ""
+    let j := n % f.tailChunkBytes
+    let i := 4 * (j / 3)
+    let r := j % 3
+    let v : UInt32 :=
+      if r == 0 then b64At s i <<< 2 ||| b64At s (i + 1) >>> 4
+      else if r == 1 then (b64At s (i + 1) &&& 15) <<< 4 ||| b64At s (i + 2) >>> 2
+      else (b64At s (i + 2) &&& 3) <<< 6 ||| b64At s (i + 3)
+    (v &&& 255).toNat
+  else 0
+
+/-- `u16`/`u32` over `byteAt`. -/
+@[inline] def tu16 (f : Font) (off : Nat) : Nat := byteAt f off * 256 + byteAt f (off + 1)
+@[inline] def tu32 (f : Font) (off : Nat) : Nat := tu16 f off * 65536 + tu16 f (off + 2)
+
 /-! ## `hmtx`: advance widths -/
 
 /-- Advance width in font units. Glyphs at or past `numberOfHMetrics` share
@@ -479,17 +616,17 @@ the last recorded width, as the spec requires. `0` for an out-of-range
 glyph id or a font with no metrics. -/
 def advance (f : Font) (gid : Nat) : Nat :=
   if gid ≥ f.numGlyphs || f.numberOfHMetrics == 0 then 0
-  else if gid < f.numberOfHMetrics then u16 f.data (f.hmtxOff + 4 * gid)
-  else u16 f.data (f.hmtxOff + 4 * (f.numberOfHMetrics - 1))
+  else if gid < f.numberOfHMetrics then tu16 f (f.hmtxOff + 4 * gid)
+  else tu16 f (f.hmtxOff + 4 * (f.numberOfHMetrics - 1))
 
 /-! ## `loca` / `glyf`: locating a glyph's own bytes -/
 
 def locaOffset (f : Font) (i : Nat) : Nat :=
-  if f.indexToLocFormat == 1 then u32 f.data (f.locaOff + 4 * i)
-  else 2 * u16 f.data (f.locaOff + 2 * i)
+  if f.indexToLocFormat == 1 then tu32 f (f.locaOff + 4 * i)
+  else 2 * tu16 f (f.locaOff + 2 * i)
 
 /-- The `(absoluteOffset, length)` of glyph `gid`'s own record in `glyf`,
-clamped to the table's own extent and to `f.data.size`. `none` for an
+clamped to the table's own extent and to `f.extent`. `none` for an
 out-of-range glyph id or non-monotonic `loca` entries (corrupt font); `some
 (_, 0)` for a glyph with an empty outline (e.g. space), which is a normal,
 valid case. -/
@@ -501,9 +638,9 @@ def glyphSpan (f : Font) (gid : Nat) : Option (Nat × Nat) :=
     if o1 < o0 then none
     else
       let off := f.glyfOff + o0
-      if off > f.data.size then none
+      if off > f.extent then none
       else
-        let tableEnd := Nat.min f.data.size (f.glyfOff + f.glyfLen)
+        let tableEnd := Nat.min f.extent (f.glyfOff + f.glyfLen)
         let len := if off > tableEnd then 0 else Nat.min (o1 - o0) (tableEnd - off)
         some (off, len)
 
@@ -525,6 +662,12 @@ def parseSimpleGlyph (bs : ByteArray) (off len numberOfContours maxPointsCap : N
     endPts := endPts.push (u16 bs (endPtsOff + 2 * i))
   let numPoints := endPts.getD (numberOfContours - 1) 0 + 1
   if numPoints == 0 || numPoints > maxPointsCap then return #[]
+  -- `endPtsOfContours` must increase strictly (the spec requires it).  A
+  -- corrupt glyph whose end points go back down would otherwise let every
+  -- contour below re-copy up to `numPoints` points: 25 603 contours × 10 000
+  -- points in the T91 fuzz run on Noto Sans KR.
+  for i in [1:numberOfContours] do
+    if endPts.getD i 0 ≤ endPts.getD (i - 1) 0 then return #[]
   let instructionLength := u16 bs (endPtsOff + 2 * numberOfContours)
   let flagsOff := endPtsOff + 2 * numberOfContours + 2 + instructionLength
   -- flags, expanding REPEAT_FLAG (bit 0x08) runs; exactly `numPoints` iterations.
@@ -589,33 +732,66 @@ def parseSimpleGlyph (bs : ByteArray) (off len numberOfContours maxPointsCap : N
 
 /-! ## `glyf`: composite glyphs, and the shared resolver -/
 
+/-- Component visits one glyph's composite resolution may make in total (T91).
+Real fonts use a handful (the most in any embedded font is 21, in Noto Sans;
+Noto Sans KR and SC have no composites); this only has to stop corrupted data. -/
+def compositeBudget : Nat := 256
+
+/-- A composite stops taking components once it holds more points than this
+(T91): 4× the per-simple-glyph cap. -/
+def compositePointCap : Nat := 40000
+
+/-- The bytes holding the glyph record at `(off, len)` (from `glyphSpan`) and
+the record's offset within them: `data` itself for a font parsed from a whole
+file, or, for an embedded font (T94), just those `len` bytes decoded from
+its tail.  A corrupt record that claims more bytes than `len` would read
+the following glyph's bytes in the first case and zeros in the second; every
+embedded glyph is well-formed (`tests/check_font.py --all --via-embedded`). -/
+def glyphRecord (f : Font) (off len : Nat) : ByteArray × Nat :=
+  if off < f.data.size || f.tailChunks.isEmpty then (f.data, off)
+  else (base64Range f.tailChunks f.tailChunkBytes (off - f.data.size) len, 0)
+
 /-- Resolve glyph `gid`'s contours to `(x, y, onCurve)` points in font units,
 following composite references with `fuel` levels of recursion left (each
 component uses one). `fuel = 0` stops and yields `#[]` for whatever
 composite is left unresolved — a safe, total fallback for a maliciously (or
 accidentally) self-referential font, never an infinite loop. The recursive
 call always passes the statically smaller `fuel` from the `fuel + 1` match,
-so this is ordinary structural recursion. -/
-def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int × Bool))
-  | 0 => #[]
-  | fuel + 1 =>
+so this is ordinary structural recursion.
+
+Fuel alone bounds the depth but not the work: 64 components per level over 8
+levels is 64^8 calls, which a corrupted large font reached in the T91 fuzz
+run (`tests/fuzz_font.py` on Noto Sans KR timed out).  So the recursion also
+threads `budget`, the number of components the whole glyph may still visit
+(each one costs 1, and the remainder comes back with the result), and a
+composite stops adding components once it holds more than `compositePointCap`
+points. -/
+def resolvedContours (f : Font) (gid : Nat) :
+    Nat → Nat → Array (Array (Int × Int × Bool)) × Nat
+  | 0, budget => (#[], budget)
+  | fuel + 1, budget =>
     match glyphSpan f gid with
-    | none => #[]
-    | some (off, len) =>
-      if len < 10 then #[]
+    | none => (#[], budget)
+    | some (off0, len) =>
+      if len < 10 then (#[], budget)
       else
-        let numberOfContours := i16 f.data off
+        let (bs, off) := glyphRecord f off0 len
+        let numberOfContours := i16 bs off
         if numberOfContours ≥ 0 then
-          parseSimpleGlyph f.data off len numberOfContours.toNat f.maxPointsCap
+          (parseSimpleGlyph bs off len numberOfContours.toNat f.maxPointsCap, budget)
         else Id.run do
           -- composite: a sequence of component records, capped at 64 components.
           let mut out : Array (Array (Int × Int × Bool)) := #[]
+          let mut points := 0
+          let mut budget := budget
           let mut p := off + 10
           let endOff := off + len
           for _ in [0:64] do
+            if budget == 0 || points > compositePointCap then break
+            budget := budget - 1
             if p + 4 ≤ endOff then
-              let flags := u16 f.data p
-              let glyphIndex := u16 f.data (p + 2)
+              let flags := u16 bs p
+              let glyphIndex := u16 bs (p + 2)
               let wordArgs := flags &&& 0x0001 != 0
               let xyValues := flags &&& 0x0002 != 0
               let mut q := p + 4
@@ -623,11 +799,11 @@ def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int �
               let mut dy : Int := 0
               if xyValues then
                 if wordArgs then
-                  dx := i16 f.data q
-                  dy := i16 f.data (q + 2)
+                  dx := i16 bs q
+                  dy := i16 bs (q + 2)
                 else
-                  dx := i8 f.data q
-                  dy := i8 f.data (q + 1)
+                  dx := i8 bs q
+                  dy := i8 bs (q + 1)
               -- else: point-matching args (ARGS_ARE_XY_VALUES clear); treated as
               -- offset (0, 0), noted as a limitation in the task's Report.
               q := q + (if wordArgs then 4 else 2)
@@ -636,21 +812,23 @@ def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int �
               let mut c : Int := 0
               let mut d : Int := 16384
               if flags &&& 0x0008 != 0 then           -- WE_HAVE_A_SCALE
-                a := i16 f.data q
+                a := i16 bs q
                 d := a
                 q := q + 2
               else if flags &&& 0x0040 != 0 then       -- WE_HAVE_AN_X_AND_Y_SCALE
-                a := i16 f.data q
-                d := i16 f.data (q + 2)
+                a := i16 bs q
+                d := i16 bs (q + 2)
                 q := q + 4
               else if flags &&& 0x0080 != 0 then       -- WE_HAVE_A_TWO_BY_TWO
-                a := i16 f.data q
-                b := i16 f.data (q + 2)
-                c := i16 f.data (q + 4)
-                d := i16 f.data (q + 6)
+                a := i16 bs q
+                b := i16 bs (q + 2)
+                c := i16 bs (q + 4)
+                d := i16 bs (q + 6)
                 q := q + 8
-              let sub := resolvedContours f glyphIndex fuel
+              let (sub, rest) := resolvedContours f glyphIndex fuel budget
+              budget := rest
               for contour in sub do
+                points := points + contour.size
                 let mut tc : Array (Int × Int × Bool) := Array.emptyWithCapacity contour.size
                 for pt in contour do
                   let nx := roundDiv14 (a * pt.1 + c * pt.2.1) + dx
@@ -660,16 +838,17 @@ def resolvedContours (f : Font) (gid : Nat) : Nat → Array (Array (Int × Int �
               p := q
               if flags &&& 0x0020 == 0 then break       -- no MORE_COMPONENTS
             else break
-          return out
+          return (out, budget)
 
 /-- Raw quadratic contours of glyph `gid`, in font units: each contour is an
 array of `(x, y, onCurve)` points, exactly as `glyf` encodes them (composite
 glyphs are resolved and their components' points transformed and
 concatenated, matching what `fontTools`' `Glyph.getCoordinates` returns).
 `#[]` for `.notdef`-like/empty glyphs, an out-of-range id, or anything the
-parser gave up on. Composite recursion gets fuel `8`. -/
+parser gave up on. Composite recursion gets fuel `8` and a budget of
+`compositeBudget` component visits. -/
 def rawContours (f : Font) (gid : Nat) : Array (Array (Int × Int × Bool)) :=
-  resolvedContours f gid 8
+  (resolvedContours f gid 8 compositeBudget).1
 
 /-! ## Quadratic contours → cubic `PathCmd`s -/
 
@@ -751,20 +930,25 @@ def outline (f : Font) (gid : Nat) : Array PathCmd := Id.run do
 /-! ## Top-level parse -/
 
 /-- Parse a TrueType font. `none` for anything this parser cannot make sense
-of: too large (over 8 MiB), too small to hold an offset table, an
+of: too large (over 16 MiB — T91 raised it from 8 MiB for the embedded
+Noto Sans SC, 10.4 MB), too small to hold an offset table, an
 unrecognised `sfnt` version (only `0x00010000` and `'true'`, i.e. `glyf`-based
 TrueType outlines — not `OTTO`/CFF, not a `ttcf` collection), or missing one
 of the tables `outline`/`advance`/`rawContours` need (`head`, `maxp`, `hhea`,
 `hmtx`, `loca`, `glyf`). `cmap`/`kern`/`GPOS` are optional: their absence
-just makes `glyphId`/`kern` return `0`. -/
-def parse (bs : ByteArray) : Option Font :=
-  if bs.size > 8 * 1024 * 1024 || bs.size < 12 then none
+just makes `glyphId`/`kern` return `0`.
+
+`size` is the whole font's size, of which `bs` holds the first bytes: every
+table this function reads must be among them (T94's `parseEmbedded` keeps
+only `loca`, `hmtx`, `vmtx` and `glyf` apart). -/
+def parseSized (bs : ByteArray) (size : Nat) : Option Font :=
+  if size > 16 * 1024 * 1024 || bs.size < 12 then none
   else
     let version := u32 bs 0
     if version != 0x00010000 && version != 0x74727565 then none
     else
       let numTables := u16 bs 4
-      let t := scanTables bs numTables
+      let t := scanTables bs numTables size
       match t.head, t.maxp, t.hhea, t.hmtx, t.loca, t.glyf with
       | some (hOff, hLen), some (mOff, mLen), some (heOff, heLen), some (htOff, _),
         some (lOff, _), some (gOff, gLen) =>
@@ -864,6 +1048,7 @@ def parse (bs : ByteArray) : Option Font :=
             glyfLen := gLen
             cmapOff := cmapOff
             cmapFormat := cmapFormat
+            cmapSorted := isCmapSorted bs cmapOff cmapFormat
             numberOfHMetrics := u16 bs (heOff + 34)
             hmtxOff := htOff
             maxPointsCap := maxPointsCap
@@ -912,6 +1097,92 @@ def hexDecodeChunks (chunks : Array String) : ByteArray := Id.run do
   for c in chunks do
     out := out.append (hexDecode c)
   return out
+
+/-- The byte at `i` of `s`'s UTF-8, or 0 past its end. -/
+@[inline] def strByte (s : String) (i : Nat) : UInt8 :=
+  if h : (⟨i⟩ : String.Pos.Raw) < s.rawEndPos then s.getUTF8Byte ⟨i⟩ h else 0
+
+/-- Append the bytes padded base64 `s` encodes to `out`, four characters (three
+bytes) at a time, reading `s` in place (T94: no `toUTF8` copy).  Total: a
+quad with an invalid character stops decoding, and `=` padding in the
+third/fourth place emits only the bytes that precede it (T91: the embedded
+fonts are base64, 4/3 of the binary size instead of hex's 2×). -/
+def base64DecodeInto (out : ByteArray) (s : String) : ByteArray := Id.run do
+  let mut out := out
+  for q in [0:s.utf8ByteSize / 4] do
+    let i := 4 * q
+    let a := b64Digit (strByte s i)
+    let b := b64Digit (strByte s (i + 1))
+    let c := b64Digit (strByte s (i + 2))
+    let d := b64Digit (strByte s (i + 3))
+    if a ≥ 64 || b ≥ 64 then break
+    out := out.push ((a <<< 2 ||| b >>> 4).toUInt8)
+    if c ≥ 64 then break
+    out := out.push (((b &&& 15) <<< 4 ||| c >>> 2).toUInt8)
+    if d ≥ 64 then break
+    out := out.push (((c &&& 3) <<< 6 ||| d).toUInt8)
+  return out
+
+/-- Decode padded base64 into bytes (`base64DecodeInto` from empty). -/
+def base64Decode (s : String) : ByteArray :=
+  base64DecodeInto (ByteArray.emptyWithCapacity (s.utf8ByteSize / 4 * 3)) s
+
+/-- `base64Decode` over chunks, each a whole number of quads, into one buffer
+sized for all of them. -/
+def base64DecodeChunks (chunks : Array String) : ByteArray := Id.run do
+  let total := chunks.foldl (fun n c => n + c.utf8ByteSize / 4 * 3) 0
+  let mut out := ByteArray.emptyWithCapacity total
+  for c in chunks do
+    out := base64DecodeInto out c
+  return out
+
+/-- Parse a font held as a whole file (`parseSized` over all of it). -/
+def parse (bs : ByteArray) : Option Font := parseSized bs bs.size
+
+/-- An embedded font (T94): `front` is base64 of its first bytes, every table
+but `loca`, `hmtx`, `vmtx` and `glyf`, which the generator places after them
+(`glyf` last), and `tail` is the rest as base64 chunks of `per` bytes,
+`tailLen` bytes in all.  Only `front` is decoded here; the tail is read a few
+bytes at a time as `advance`/`outline` ask for them.  `none`, like `parse`,
+for anything inconsistent: `front` does not parse, `loca`/`hmtx`/`glyf` are
+not in the tail or `glyf` does not end it, or `tailLen` does not fit the
+chunk count. -/
+def parseEmbedded (front tail : Array String) (per tailLen : Nat) : Option Font :=
+  let bs := base64DecodeChunks front
+  if per == 0 || per % 3 != 0 || tailLen > tail.size * per || tailLen + per ≤ tail.size * per then
+    none
+  else
+    match parseSized bs (bs.size + tailLen) with
+    | none => none
+    | some f =>
+      if f.locaOff < bs.size || f.hmtxOff < bs.size || f.glyfOff < bs.size ||
+          f.glyfOff + f.glyfLen != bs.size + tailLen then none
+      else some { f with tailChunks := tail, tailChunkBytes := per, tailLen := tailLen }
+
+/-- A font's codepoint coverage as sorted, disjoint, inclusive ranges, decoded
+from the generator's packed form: 6 bytes per range (24-bit big-endian first,
+then last codepoint), base64. -/
+def decodeRanges (s : String) : Array (Nat × Nat) := Id.run do
+  let bs := base64Decode s
+  let mut out : Array (Nat × Nat) := Array.emptyWithCapacity (bs.size / 6)
+  for k in [0:bs.size / 6] do
+    let i := 6 * k
+    out := out.push (u16 bs i * 256 + u8 bs (i + 2), u16 bs (i + 3) * 256 + u8 bs (i + 5))
+  return out
+
+/-- Whether `cp` lies in one of the sorted ranges: binary search, 32 halvings
+cover any array a `ByteArray` can produce. -/
+def inRanges (rs : Array (Nat × Nat)) (cp : Nat) : Bool := Id.run do
+  let mut lo := 0
+  let mut hi := rs.size
+  for _ in [0:32] do
+    if lo ≥ hi then break
+    let mid := (lo + hi) / 2
+    let (a, b) := rs.getD mid (0, 0)
+    if cp < a then hi := mid
+    else if cp > b then lo := mid + 1
+    else return true
+  return false
 
 end Font
 end LeanSvg

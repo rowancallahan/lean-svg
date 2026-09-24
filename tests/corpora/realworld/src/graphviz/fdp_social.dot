@@ -1,0 +1,6 @@
+graph social {
+  layout=fdp; node [style=filled, fillcolor="#ffffdd"];
+  subgraph cluster_a { label="team A"; Ann; Bob; Cid; Ann -- Bob -- Cid -- Ann; }
+  subgraph cluster_b { label="team B"; Dee; Eve; Fay; Dee -- Eve; Eve -- Fay; }
+  Cid -- Dee; Bob -- Fay; Gil -- Ann; Gil -- Eve;
+}

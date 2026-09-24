@@ -8,14 +8,92 @@ Licences verified against upstream licence files and package manifests on
 
 REDISTRIBUTED BY THIS PROJECT
 
-Noto Sans — https://github.com/notofonts/latin-greek-cyrillic
-  Copyright 2015 Google Inc. All Rights Reserved.
-  Noto is a trademark of Google Inc.; trademarks are not licensed under the
-  SIL Open Font License. Version 2.000 (GOOG). Latin subsets of the Regular,
-  Bold and Italic faces are embedded in the binary as LeanSvg/Fonts/*.lean.
-  SIL Open Font License 1.1; full text and copyright notice in
-  LeanSvg/Fonts/LICENSE-OFL.txt. The faces are subsetted, which the OFL
-  permits; Noto declares no Reserved Font Name.
+Embedded fonts — SIL Open Font License 1.1 except DejaVu (Bitstream Vera /
+  Arev licence, permissive), subsetted (and variable fonts
+  pinned to one static instance), which the OFL permits. Embedded in the
+  binary as LeanSvg/Fonts/*.lean; names, versions, sizes and sources are in
+  LeanSvg/Fonts/README.md, licence texts next to them.
+  Noto Sans Regular/Bold/Italic/Thin/Light/Black/ExtraCondensed 2.000 —
+    https://github.com/notofonts/latin-greek-cyrillic
+    Copyright 2015 Google Inc. All Rights Reserved. Noto is a trademark of
+    Google Inc.; trademarks are not licensed under the OFL. Noto declares no
+    Reserved Font Name. LeanSvg/Fonts/LICENSE-OFL.txt.
+  Mplus 1p Regular 1.061 — https://github.com/google/fonts/tree/main/ofl/mplus1p
+    Copyright 2016 The M+ Project Authors. LeanSvg/Fonts/LICENSE-OFL-Mplus1p.txt.
+  Noto Sans SC and Noto Sans KR 2.004 —
+    https://github.com/google/fonts/tree/main/ofl/notosans{sc,kr}
+    Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name
+    'Source'; the embedded modified versions do not use that name.
+    LeanSvg/Fonts/LICENSE-OFL-NotoSansCJK.txt.
+  Noto Sans Thai 2.002, Armenian 2.008, Georgian 2.005, Ethiopic 2.102 —
+    https://github.com/google/fonts/tree/main/ofl/notosans{thai,armenian,
+    georgian,ethiopic}. Copyright 2022 The Noto Project Authors
+    (https://github.com/notofonts/{thai,armenian,georgian,ethiopic}).
+    LeanSvg/Fonts/LICENSE-OFL-NotoScripts.txt.
+  Noto Sans Hebrew 3.001 (https://github.com/google/fonts/tree/main/ofl/
+    notosanshebrew) and Noto Sans Devanagari 2.003 (the resvg test suite's
+    copy) — Copyright 2022 The Noto Project Authors
+    (https://github.com/notofonts/{hebrew,devanagari}).
+    LeanSvg/Fonts/LICENSE-OFL-NotoScripts.txt.
+  Amiri 000.109 (the resvg test suite's copy) — Copyright (c) 2010-2016,
+    Khaled Hosny; portions copyright (c) 2010, Sebastian Kosch. No Reserved
+    Font Name. LeanSvg/Fonts/LICENSE-OFL-Amiri.txt.
+
+  DejaVu Sans, Sans Mono and Serif 2.37 (T106) —
+    https://github.com/dejavu-fonts/dejavu-fonts. Bitstream Vera Fonts
+    Copyright (c) 2003 by Bitstream, Inc.; Arev Fonts Copyright (c) 2006 by
+    Tavmjong Bah; DejaVu changes are in the public domain. Permissive
+    Bitstream Vera / Arev licence, LeanSvg/Fonts/LICENSE-DejaVu.txt.
+  Arimo 1.341, Tinos 1.340, Cousine 1.241 (T106; OFL 1.1) —
+    https://github.com/google/fonts/tree/main/ofl/{arimo,tinos,cousine}.
+    Copyright 2020-2026 The Arimo/Tinos/Cousine Project Authors
+    (https://github.com/googlefonts/{arimo,tinos,cousine}).
+    LeanSvg/Fonts/LICENSE-OFL-Croscore.txt.
+  STIX Two Math 2.12, STIX Two Text 2.13 (T106; OFL 1.1) —
+    https://github.com/google/fonts/tree/main/ofl/{stixtwomath,stixtwotext}.
+    Copyright 2001-2021 The STIX Fonts Project Authors
+    (https://github.com/stipub/stixfonts), with Reserved Font Name
+    "TM Math" (not used). STIX Fonts is a trademark of The Institute of
+    Electrical and Electronics Engineers, Inc. LeanSvg/Fonts/LICENSE-OFL-STIXTwo.txt.
+  CMU Serif/Serif Italic/Sans Serif/Typewriter Text 0.7.0 (T106; OFL 1.1) —
+    https://sourceforge.net/projects/cm-unicode/. Copyright (C) 2003-2009
+    Andrey V. Panov, with Reserved Font Family Name "Computer Modern Unicode
+    fonts" (not used), and the authors of the original METAFONT fonts
+    (Donald E. Knuth et al., listed in the licence file).
+    LeanSvg/Fonts/LICENSE-OFL-CMU.txt.
+
+Unicode and shaping tables (T93) — generated data, not code:
+  harfrust 0.12.0 — https://github.com/harfbuzz/harfrust. MIT, Copyright (c)
+    HarfBuzz developers. LeanSvg/ShapeData.lean (general category, combining
+    class, script, Arabic joining type, Indic category, decompositions) and
+    the mirroring table in LeanSvg/Bidi.lean. LeanSvg/LICENSE-harfrust.txt.
+    harfrust's tables are themselves derived from the Unicode Character
+    Database (Unicode License v3).
+  unicode-bidi 0.3.18 — https://github.com/servo/unicode-bidi. MIT OR
+    Apache-2.0, Copyright (c) 2015 The Rust Project Developers. The Bidi_Class
+    and bracket-pair tables in LeanSvg/Bidi.lean.
+    LeanSvg/LICENSE-unicode-bidi.txt.
+
+Brotli static data (T105) — generated data, not code:
+  brotli 1.2.0 — https://github.com/google/brotli. MIT, Copyright (c) 2009,
+    2010, 2013-2016 by the Brotli Authors. The RFC 7932 static dictionary,
+    word transforms and context lookup table in LeanSvg/BrotliData.lean
+    (tests/gen_brotli_data.py). LeanSvg/LICENSE-brotli.txt.
+
+Font subsets in tests/svg/105_font_face.svg (T105) — WOFF 2.0/WOFF/TrueType
+  subsets of the resvg test suite's Noto Serif, Noto Sans and Noto Sans Bold,
+  SIL OFL 1.1 as above.
+
+Real-world test corpus — tests/corpora/realworld/ (test inputs only, not in
+  the binary; per-file source and licence in SOURCES.csv, licence texts in
+  tests/corpora/realworld/LICENSES/):
+  matplotlib test-suite baseline SVGs (mpl-tests/) — Matplotlib License.
+    Copyright (c) 2012- Matplotlib Development Team; 2002-2011 John D. Hunter.
+  janosh/diagrams (web-tikz/) — MIT. Copyright (c) 2021 Janosh Riebesell.
+  Vega-Lite examples (web-vega/) — BSD-3-Clause. Copyright (c) 2015,
+    University of Washington Interactive Data Lab.
+  TikZ SVGs embed glyphs of the AMS Type 1 Computer Modern / AMS fonts
+    (SIL OFL 1.1, fonts embedded in documents).
 
 Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
   README.md. Apache-2.0, authored for this project.
@@ -30,6 +108,25 @@ tiny-skia — https://github.com/linebender/tiny-skia
   layer-compositing pipeline and gradient evaluation in
   LeanSvg/{Raster,Geom,Canvas,Shader}.lean are fixed-point Lean
   re-implementations of its algorithms. No Rust or C++ source is included.
+
+HarfBuzz / harfrust — https://github.com/harfbuzz/harfrust
+  MIT. The OpenType layout engine, normaliser and Arabic/Hebrew/Indic
+  shapers in LeanSvg/{Shape,ShapeRun}.lean are Lean re-implementations of
+  harfrust 0.12.0's algorithms (itself a port of HarfBuzz). No Rust or C++
+  source is included.
+
+unicode-bidi — https://github.com/servo/unicode-bidi
+  MIT OR Apache-2.0. LeanSvg/Bidi.lean re-implements its UAX #9 algorithm.
+
+Brotli — RFC 7932 and https://github.com/google/brotli
+  MIT. LeanSvg/Brotli.lean is a Lean decoder written from RFC 7932, checked
+  against the brotli 1.2.0 C decoder's tables. No C source is included.
+
+WOFF 2.0 — https://www.w3.org/TR/WOFF2/ and fontTools
+  (https://github.com/fonttools/fonttools, MIT). The glyf/loca and hmtx
+  reconstruction in LeanSvg/Woff.lean follows the W3C specification;
+  fontTools' woff2 module was the reference for the triplet decoding. No
+  Python source is included.
 
 BEHAVIOURAL REFERENCES
 

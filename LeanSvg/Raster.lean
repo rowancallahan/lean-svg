@@ -500,6 +500,8 @@ The scheme (`scan/hairline_aa.rs::do_anti_hairline`, `scan/hairline.rs`):
   the axis-parallel `HLine` skips that pixel, `VLine` clamps it to 0, and the
   two oblique ones clamp with `max(i,1)-1` and then write the pair at that row
   and the next — so a line grazing the top/left edge is nudged inward by one.
+  T104 deviates: the oblique flavours skip the `-1` pixel and `fy` is not
+  pinned, as Chromium draws it (the nudge showed as a notch atop circles at the edge).
 * There are no joins: `stroke_path_impl` hands every flattened segment to the
   converter *independently* and the blitter composites, so a pixel shared by
   two segments is blended twice.  Caps are the only geometry: `extend_pts`
@@ -560,14 +562,7 @@ bounded by `bw` or `bh`; everything else is straight-line arithmetic.
 
 `vx`/`vy` say where the canvas' pixel `(0, 0)` sits in the whole zoomed image —
 `(0, 0)` for an ordinary render, the tile's origin for a `--viewport` tile or a
-parallel band.  The two clamps below are the reason they have to be passed in
-rather than assumed zero: `do_anti_hairline` pins a sample that falls above the
-*image* to its top row, and a tile that starts at row `y0` would otherwise pin
-to its own first row instead, which is a different pixel.  Worse, the pin is
-written back into the running `fy`, so every later step of that segment is
-displaced too — one segment entering a band from above used to differ for the
-whole of its length.  `Grad.build` solves the same problem the same way (T18);
-with `vx = vy = 0` this is the code it always was. -/
+parallel band, so that `FDot6` truncation matches the full render. -/
 def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (vx vy : Int) (cov : Array Nat)
     (p q : Pt) : Array Nat := Id.run do
   -- `toFDot6` truncates *toward zero*, which is what `fdot6::from_f32` does but
@@ -614,10 +609,11 @@ def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (vx vy : Int) (cov : Array N
     sStop := 0
   if istart ≥ istop then return cov
   let n := (istop - istart).toNat
-  -- where the canvas' minor axis starts in the whole image: the clamps below
-  -- are the image's top (or left) edge, not this canvas'
-  let off : Int := if horiz then vy else vx
-  let fyMin : Int := -(off * 65536)
+  -- T104: no oblique clamp at the image's top/left edge.  tiny-skia pins `fy`
+  -- at 0 and moves an upper pixel of `-1` into the image (`max(i,1)-1`),
+  -- which shifts a hairline grazing the top row down by one pixel: the top of
+  -- a circle touching the edge showed a notch.  Chromium draws the geometry;
+  -- so do we: an upper pixel outside the image is dropped, as `HLine` does.
   let mut fy : Int := fstart + 32768
   let mut cov := cov
   for k in [0:n] do
@@ -625,16 +621,13 @@ def hairSeg (bw bh a8 covScale : Nat) (mx my : Nat) (vx vy : Int) (cov : Array N
       if k == 0 then sStart
       else if k + 1 == n && sStop > 0 then sStop
       else 64
-    if fy < fyMin then fy := fyMin
     let ly := Int.ediv fy 65536
     let a := Int.emod (Int.ediv fy 256) 256
     let aLo := (Int.ediv (a * m64) 64).toNat
     let aHi := (Int.ediv ((255 - a) * m64) 64).toNat
-    -- index of the "upper" minor pixel: `HLine` drops a -1, the others clamp
-    -- (to the image's first row/column, `-off` in canvas coordinates)
-    let hiI := if flat && horiz then ly - 1
-      else (if ly + off < 1 then -off else ly - 1)
-    let loI := if flat then ly else hiI + 1
+    -- `VLine` still clamps a `-1` column to the image's first one
+    let hiI := if flat && !horiz && ly + vx < 1 then -vx else ly - 1
+    let loI := ly
     let i := istart + k
     if horiz then
       cov := hairPx cov bw bh a8 covScale (i - mx) (hiI - my) aHi

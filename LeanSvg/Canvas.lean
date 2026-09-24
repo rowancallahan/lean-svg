@@ -723,6 +723,37 @@ fill path shows just as clearly (T44's report, §5).
 Both skip a transparent layer pixel without arithmetic: with `s = sa = 0`
 every formula collapses to `d` exactly, in f32 as much as in integers. -/
 
+/-- T109: is `n / opDen` exactly half-way between two levels?  There
+`storeQ`'s round-half-to-even and the f32 pipeline disagree about a third of
+the time (the f32 sum lands an ulp either side of the half), which is one
+alpha level on every odd-alpha pixel of a layer at `opacity="0.5"` and far
+more than one level once `toRgbaBytes` divides it back out (`masking/mask/
+with-opacity-*.svg`).  Only a group opacity below one can produce a tie. -/
+@[inline] def isTie (n : Nat) : Bool :=
+  let t := n >>> 8
+  let q := div65025 t
+  2 * ((t - q * 65025) * 256 + (n &&& 255)) == opDen
+
+open F32 in
+/-- One channel of `blendPixel .normal` at opacity `op`: `c`, `d` and `sa` are
+the layer channel, the destination channel and the layer alpha. -/
+def tieChan (c d sa : Nat) (op : F32) : Nat :=
+  toU8 (add (mul (mul (ofNat d) inv255) (sub one (mul (mul (ofNat sa) inv255) op)))
+            (mul (mul (ofNat c) inv255) op))
+
+/-- `blendOverScaled`, except that a channel on an exact tie is recomputed in
+the f32 pipeline (`tieChan`) at `op`, the opacity `opQ` stands for. -/
+@[inline] def blendOverScaledT (dst s opQ k : Nat) (op : F32) : Nat :=
+  let sa := s &&& 255
+  let inv := opDen - sa * opQ
+  let ch := fun (c d : Nat) =>
+    let n := c * k + d * inv
+    if isTie n then tieChan c d sa op else Nat.min 255 (storeQ n)
+  pack (ch ((s >>> 24) &&& 255) ((dst >>> 24) &&& 255))
+       (ch ((s >>> 16) &&& 255) ((dst >>> 16) &&& 255))
+       (ch ((s >>> 8) &&& 255) ((dst >>> 8) &&& 255))
+       (ch sa (dst &&& 255))
+
 /-- `compositeLayer` for `.normal`: the integer source-over, at group opacity
 `opQ` on the `opGrid` grid.  At full opacity an opaque pixel is the source
 itself, so that case is a copy. -/
@@ -737,6 +768,8 @@ def compositeNormal (cv layer : Canvas) (ox oy opQ : Nat) : Canvas := Id.run do
   -- `255 · opQ`, the source's multiplier, hoisted out of the pixel loop.
   let k := 255 * opQ
   let copyOpaque := opQ == opGrid
+  -- T109: the binary32 opacity, for `blendOverScaledT`'s ties
+  let op := F32.ofRat opQ opGrid
   let mut px := cv.px
   for ly in [0:layer.h] do
     let y := oy + ly
@@ -753,7 +786,7 @@ def compositeNormal (cv layer : Canvas) (ox oy opQ : Nat) : Canvas := Id.run do
       if copyOpaque && sa == 255 then
         px := px.setIfInBounds idx s
       else
-        px := px.setIfInBounds idx (blendOverScaled (px.getD idx 0) s opQ k)
+        px := px.setIfInBounds idx (blendOverScaledT (px.getD idx 0) s opQ k op)
   return ⟨w, h, px⟩
 
 /-- `compositeLayer` for every mode but `.normal`: the f32 pipeline, through

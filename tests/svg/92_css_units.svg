@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200" font-family="Noto Sans" font-size="16">
+  <!-- T92: CSS Values 4 units. Viewport units are % of the output canvas
+       (300x200 at natural size); font units use Noto Sans metrics. -->
+  <g fill="green">
+    <rect x="1vw" y="1vh" width="10vw" height="10vh"/>
+    <rect x="12vmin" y="2vmax" width="5vmax" height="10vmin"/>
+    <rect x="2vi" y="15vb" width="8svw" height="10lvh"/>
+    <rect x="20dvw" y="15svh" width="5dvmax" height="5lvmin"/>
+  </g>
+  <g fill="navy" font-size="10">
+    <rect x="1ch" y="12ch" width="4ch" height="2ic"/>
+    <rect x="8cap" y="15cap" width="3cap" height="2lh"/>
+  </g>
+  <g fill="maroon" font-size="40">
+    <rect x="5rch" y="4rcap" width="3rch" height="2rlh"/>
+    <rect x="8rex" y="10ric" width="2ric" height="1rex"/>
+  </g>
+  <g fill="none" stroke="orange">
+    <circle cx="80vmin" cy="20vh" r="1lh" stroke-width="0.5ch" stroke-dasharray="1ch 0.5ch"/>
+    <line x1="60vw" y1="80vh" x2="95vw" y2="95vh" stroke-width="1cap"/>
+  </g>
+  <text x="50vw" y="60vh" font-size="4vmin" letter-spacing="0.2ch" fill="purple">vw 0ch</text>
+  <text x="50vw" y="72vh" font-size="1.5rem" word-spacing="1ic" fill="purple">r em</text>
+</svg>

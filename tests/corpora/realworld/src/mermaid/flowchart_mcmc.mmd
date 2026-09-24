@@ -1,0 +1,8 @@
+flowchart TD
+    A[Choose prior] --> B{Prior predictive OK?}
+    B -- no --> A
+    B -- yes --> C[Run sampler]
+    C --> D{R-hat < 1.01?}
+    D -- no --> E[Reparameterise] --> C
+    D -- yes --> F[(Posterior draws)]
+    F --> G([Report])

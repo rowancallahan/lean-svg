@@ -173,6 +173,21 @@ def getPrevVertex (segs : Array Seg) (idx : Nat) : Pt :=
   | .cubicTo _ _ p => p
   | .close => getSubpathStart segs idx
 
+/-- T102: where the first segment of the subpath open before `idx` heads:
+its end for a line, its first control point for a curve (its end when that
+control point sits on the start). -/
+def subpathFirstOut (segs : Array Seg) (idx : Nat) : Pt := Id.run do
+  for j in [0:idx] do
+    let i := idx - 1 - j
+    match segs.getD i default with
+    | .moveTo pm =>
+      return match segs.getD (i + 1) default with
+        | .lineTo p => p
+        | .cubicTo c1 _ p => if c1.x == pm.x && c1.y == pm.y then p else c1
+        | _ => pm
+    | _ => pure ()
+  return ⟨0, 0⟩
+
 /-- `calc_vertex_angle`, as a 16.16 `(cos, sin)` pair (never itself converted
 to degrees, since every caller only ever wants a rotation matrix from it). -/
 def calcVertexAngle (segs : Array Seg) (idx : Nat) : Int × Int :=
@@ -203,6 +218,13 @@ def calcVertexAngle (segs : Array Seg) (idx : Nat) : Int × Int :=
     | _, .close => (65536, 0)
   else
     match segs.getD idx default, segs.getD (idx + 1) default with
+    | .close, _ =>
+      -- T102: a mid closepath vertex (Chromium): the closing line in, the
+      -- subpath's first segment out.
+      let prev := getPrevVertex segs idx
+      let st := getSubpathStart segs idx
+      let out := subpathFirstOut segs idx
+      calcAngle4 prev.x prev.y st.x st.y st.x st.y out.x out.y
     | .moveTo pm, .lineTo p => calcLineAngle pm.x pm.y p.x p.y
     | .moveTo pm, .cubicTo p1 _ _ => calcLineAngle pm.x pm.y p1.x p1.y
     | .lineTo p1, .lineTo p2 =>
@@ -234,7 +256,6 @@ def calcVertexAngle (segs : Array Seg) (idx : Nat) : Int × Int :=
       let next := getSubpathStart segs idx
       calcLineAngle prev.x prev.y next.x next.y
     | _, .moveTo _ => (65536, 0)
-    | .close, _ => (65536, 0)
 
 /-! ## `draw_markers`: which vertices get a marker -/
 
@@ -252,7 +273,13 @@ def midVertices (segs : Array Seg) : Array (Pt × Nat) := Id.run do
     | .moveTo p => out := out.push (p, i)
     | .lineTo p => out := out.push (p, i)
     | .cubicTo _ _ p => out := out.push (p, i)
-    | .close => pure ()
+    -- T102: a closepath that ends a subpath before another starts is a
+    -- vertex too, at its subpath's start, as in Chromium (usvg skips it;
+    -- repeated closes, `M L L Z Z Z`, stay skipped as in both).
+    | .close =>
+      match segs.getD (i + 1) default with
+      | .moveTo _ => out := out.push (getSubpathStart segs i, i)
+      | _ => pure ()
   return out
 
 def endVertex (segs : Array Seg) : Option (Pt × Nat) :=
@@ -308,6 +335,28 @@ renderer (`Svg.maxLayerDepth`, `Render.maxLayerPixels`, `Clip.maxDepth`),
 never an error. -/
 def maxMarkerNodes : Nat := 200000
 
+/-- T95: what `context-fill`/`context-stroke` resolve to in marker content:
+the referencing shape's fill and stroke (colour alpha dropped, as for `use`)
+with their `Doc.ctxUses` slots.  `default` (no paint) at the top level. -/
+structure MarkerCtx where
+  fill : Paint := .none
+  fillSlot : Option Nat := none
+  stroke : Paint := .none
+  strokeSlot : Option Nat := none
+deriving Inhabited
+
+/-- Substitute a content shape's paint when it was `context-*` (`kind`). -/
+def MarkerCtx.pick (c : MarkerCtx) (kind : Option Bool) (p : Paint) (slot : Option Nat) :
+    Paint × Option Nat :=
+  match kind with
+  | some true => (c.stroke, c.strokeSlot)
+  | some false => (c.fill, c.fillSlot)
+  | none => (p, slot)
+
+def noAlpha : Paint → Paint
+  | .solid c => .solid { c with a := 255 }
+  | p => p
+
 def buildIdMap (markers : Array MarkerEntry) : Std.HashMap String Nat := Id.run do
   let mut m : Std.HashMap String Nat := {}
   for i in [0:markers.size] do
@@ -335,13 +384,15 @@ through and decremented once per `Node` emitted while `insideMarker`; a
 top-level `Node` is never budget-gated, so an ordinary document without
 markers is untouched by this function irrespective of its size. -/
 def expandContentList (doc : Doc) (idMap : Std.HashMap String Nat) :
-    (fuel : Nat) → (active : Array Nat) → (extraCtm : Mat) → (nodesIn : Array Node) →
-    (usesAcc : Array ClipUse) → (budget : Nat) → Array Node × Array ClipUse × Nat
-  | 0, _, _, _, usesAcc, budget => (#[], usesAcc, budget)
-  | fuel + 1, active, extraCtm, nodesIn, usesAcc, budget => Id.run do
+    (fuel : Nat) → (active : Array Nat) → (extraCtm : Mat) → (ctx : MarkerCtx) →
+    (nodesIn : Array Node) → (usesAcc : Array ClipUse) → (ctxAcc : Array CtxUse) →
+    (budget : Nat) → Array Node × Array ClipUse × Array CtxUse × Nat
+  | 0, _, _, _, _, usesAcc, ctxAcc, budget => (#[], usesAcc, ctxAcc, budget)
+  | fuel + 1, active, extraCtm, ctx, nodesIn, usesAcc, ctxAcc, budget => Id.run do
     let insideMarker := !active.isEmpty
     let mut outNodes : Array Node := #[]
     let mut usesAcc := usesAcc
+    let mut ctxAcc := ctxAcc
     let mut budget := budget
     for node in nodesIn do
       if insideMarker && budget == 0 then
@@ -357,17 +408,38 @@ def expandContentList (doc : Doc) (idMap : Std.HashMap String Nat) :
       | .shape s =>
         let s' : Shape :=
           if insideMarker then
-            { s with style := { s.style with ctm := extraCtm.mul s.style.ctm, clips := #[] } }
+            let (fill, fillCtx) := ctx.pick s.style.fillCtxKind s.style.fill s.style.fillCtx
+            let (stroke, strokeCtx) := ctx.pick s.style.strokeCtxKind s.style.stroke s.style.strokeCtx
+            { s with style := { s.style with ctm := extraCtm.mul s.style.ctm, clips := #[],
+                                             fill, fillCtx, stroke, strokeCtx } }
           else s
-        outNodes := outNodes.push (.shape s')
-        if insideMarker then budget := budget - 1
         let hasMarkerRef :=
           s'.style.markerStartId.isSome || s'.style.markerMidId.isSome || s'.style.markerEndId.isSome
-        if s'.markerable && hasMarkerRef && (!insideMarker || budget > 0) then
+        let mut marks : Array Node := #[]
+        let withMarks := s'.markerable && hasMarkerRef && (!insideMarker || budget > 1)
+        if withMarks then
+          -- The shape itself is counted before its markers, as it always was.
+          if insideMarker then budget := budget - 1
+          -- `marker_state.context_element`: this shape's fill and stroke, a
+          -- paint server tied to this shape's CTM and box unless it is
+          -- already tied to an outer context (whose space it keeps).
+          let server := fun (p : Paint) => match p with
+            | .gradient .. | .pattern _ => true
+            | _ => false
+          let box := (cmdsBox s'.cmds).filter Box.nonZero
+          let slotFor := fun (acc : Array CtxUse) (p : Paint) (own : Option Nat) =>
+            match own with
+            | some k => (some k, acc)
+            | none => if server p then (some acc.size, acc.push ⟨s'.style.ctm, box⟩) else (none, acc)
+          let (fSlot, acc1) := slotFor ctxAcc s'.style.fill s'.style.fillCtx
+          let (sSlot, acc2) := slotFor acc1 s'.style.stroke s'.style.strokeCtx
+          ctxAcc := acc2
+          let innerCtx : MarkerCtx := ⟨noAlpha s'.style.fill, fSlot, noAlpha s'.style.stroke, sSlot⟩
           let segs := toSegments s'.cmds
           let targets : Array (Bool × Option String × Array (Pt × Nat)) :=
             #[(true, s'.style.markerStartId, match startVertex segs with | some p => #[(p, 0)] | none => #[]),
-              (false, s'.style.markerMidId, midVertices segs),
+              (false, s'.style.markerMidId,
+                (midVertices segs).filter fun (_, i) => !s'.style.arcJoins.contains i),
               (false, s'.style.markerEndId, match endVertex segs with | some pi => #[pi] | none => #[])]
           for (isStart, idOpt, verts) in targets do
             match idOpt with
@@ -389,20 +461,39 @@ def expandContentList (doc : Doc) (idMap : Std.HashMap String Nat) :
                       let rotMat := orientMat segs idx isStart entry.orient
                       let ts := instanceTransform entry strokeScale p rotMat
                       let instanceCtm := s'.style.ctm.mul ts
-                      let (inner, usesAcc', budget') :=
-                        expandContentList doc idMap fuel (active.push mIdx) instanceCtm entry.content
-                          usesAcc budget
+                      let (inner, usesAcc', ctxAcc', budget') :=
+                        expandContentList doc idMap fuel (active.push mIdx) instanceCtm innerCtx
+                          entry.content usesAcc ctxAcc budget
                       usesAcc := usesAcc'
+                      ctxAcc := ctxAcc'
                       budget := budget'
                       match entry.clipEntryIdx with
                       | some ceIdx =>
-                        usesAcc := usesAcc.push ⟨"", some ceIdx, instanceCtm, none⟩
+                        usesAcc := usesAcc.push ⟨"", some ceIdx, instanceCtm, none, none, none⟩
                         let useIdx := usesAcc.size - 1
-                        outNodes := outNodes.push (.groupBegin { opacity := opacityOne, blend := .normal, isolate := false, clips := #[useIdx] })
-                        outNodes := outNodes ++ inner
-                        outNodes := outNodes.push .groupEnd
-                      | none => outNodes := outNodes ++ inner
-    return (outNodes, usesAcc, budget)
+                        marks := marks.push (.groupBegin { opacity := opacityOne, blend := .normal, isolate := false, clips := #[useIdx] })
+                        marks := marks ++ inner
+                        marks := marks.push .groupEnd
+                      | none => marks := marks ++ inner
+        else if insideMarker then budget := budget - 1
+        -- `paint-order` (T95): usvg pushes the marker group before the
+        -- path, between a fill-only and a stroke-only copy of it, or after
+        -- it; the split only happens when the shape has markers at all.
+        if withMarks && s'.style.markersPos == 0 then
+          outNodes := (outNodes ++ marks).push (.shape s')
+        else if withMarks && s'.style.markersPos == 1 then
+          let fillOnly : Shape := { s' with style := { s'.style with stroke := .none } }
+          let strokeOnly : Shape := { s' with style := { s'.style with fill := .none } }
+          let (first, last) := if s'.style.strokeFirst then (strokeOnly, fillOnly) else (fillOnly, strokeOnly)
+          let push1 := fun (out : Array Node) (sh : Shape) =>
+            if sh.style.fill matches .none then
+              if sh.style.stroke matches .none then out else out.push (.shape sh)
+            else out.push (.shape sh)
+          outNodes := push1 (push1 outNodes first ++ marks) last
+          if insideMarker then budget := budget - 1
+        else
+          outNodes := (outNodes.push (.shape s')) ++ marks
+    return (outNodes, usesAcc, ctxAcc, budget)
 
 /-- Resolve every `marker-start`/`marker-mid`/`marker-end` reference in
 `doc.nodes` and splice in the referenced marker's content, once per vertex.
@@ -414,9 +505,10 @@ all of it, so no shape or group is otherwise modified either). -/
 def expand (doc : Doc) : Doc :=
   if doc.markers.isEmpty then doc else
   let idMap := buildIdMap doc.markers
-  let (nodes, uses, _) :=
-    expandContentList doc idMap maxMarkerDepth #[] Mat.identity doc.nodes doc.uses maxMarkerNodes
-  { doc with nodes := nodes, uses := uses }
+  let (nodes, uses, ctxUses, _) :=
+    expandContentList doc idMap maxMarkerDepth #[] Mat.identity default doc.nodes doc.uses
+      doc.ctxUses maxMarkerNodes
+  { doc with nodes := nodes, uses := uses, ctxUses := ctxUses }
 
 end Marker
 end LeanSvg

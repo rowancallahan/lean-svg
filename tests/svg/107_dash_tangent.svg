@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
+  <rect width="400" height="300" fill="#fdfdfb"/>
+  <!-- T107: wide butt-capped dashes on curves; each dash end is square to the
+       curve's tangent, not to the flattened chord it falls on -->
+  <g fill="none" stroke-linecap="butt">
+    <circle cx="100" cy="100" r="70" stroke="#2a9d8f" stroke-width="22" stroke-dasharray="17 13"/>
+    <ellipse cx="290" cy="100" rx="90" ry="50" stroke="#e63946" stroke-width="16"
+             stroke-dasharray="23 9" stroke-dashoffset="-5"/>
+    <path d="M 20 280 Q 120 150 200 260 T 380 250" stroke="#1d3557" stroke-width="14"
+          stroke-dasharray="19 11 7 11"/>
+    <path d="M 220 200 C 260 130 330 290 380 180" stroke="#f4a261" stroke-width="12"
+          stroke-dasharray="15 8" stroke-linecap="square"/>
+  </g>
+</svg>

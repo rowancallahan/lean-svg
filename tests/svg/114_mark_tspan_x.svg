@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80" font-family="Noto Sans" font-size="32">
+  <!-- A combining mark that starts its own positioned tspan keeps that
+       position (matplotlib mathtext accents); one inside a list does not. -->
+  <text>
+    <tspan x="10" y="50">,</tspan>
+    <tspan x="70" y="46">&#x302;</tspan>
+    <tspan x="60" y="50">b</tspan>
+    <tspan x="120" y="50 70">a&#x301;</tspan>
+  </text>
+</svg>
