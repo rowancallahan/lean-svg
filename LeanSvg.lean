@@ -2,6 +2,7 @@ import LeanSvg.Effect
 import LeanSvg.Bytes
 import LeanSvg.Fixed
 import LeanSvg.Geom
+import LeanSvg.DashSeg
 import LeanSvg.Font
 import LeanSvg.Baseline
 import LeanSvg.Raster

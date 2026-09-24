@@ -838,6 +838,57 @@ otherwise cost a dash per fraction of a pixel; past this many the subpath is
 drawn **solid** instead.  The bound is what makes every loop below finite. -/
 def maxDashes : Nat := 100000
 
+/-- One positive-length segment `p→q` of a flattened subpath, with the curve's
+derivative at each end (`tp`, `tq`, any scale).  Both are `⟨0, 0⟩` for a straight
+segment, whose own direction is its tangent. -/
+structure DSeg where
+  p : Pt
+  q : Pt
+  tp : Pt
+  tq : Pt
+deriving Inhabited
+
+/-- The tangent `pos` along the segment of length `L`, linear between the two
+end derivatives (exact to second order for a cubic's short chord). -/
+def DSeg.tangentAt (s : DSeg) (pos L : Fx) : Pt :=
+  if (s.tp.x == 0 && s.tp.y == 0) || (s.tq.x == 0 && s.tq.y == 0) then ⟨0, 0⟩
+  else ⟨s.tp.x * (L - pos) + s.tq.x * pos, s.tp.y * (L - pos) + s.tq.y * pos⟩
+
+/-- `a` moved by `e` along `t`, or `none` when `t` is zero or does not point the
+way `a→b` does (a cusp). -/
+def stepAlong (a b t : Pt) (e : Fx) : Option Pt :=
+  let len := Fx.hypot t.x t.y
+  if len == 0 || t.x * (b.x - a.x) + t.y * (b.y - a.y) ≤ 0 then none
+  else some ⟨Fx.clamp (a.x + Int.ediv (t.x * e) len), Fx.clamp (a.y + Int.ediv (t.y * e) len)⟩
+
+/-- Square a dash's two ends to the curve rather than to the chord they cut.
+tiny-skia dashes the curve itself (`ContourMeasure::push_segment` extracts
+sub-Béziers) and caps each dash along the curve's tangent there; our dash ends
+sit on a flattened chord, which is tilted by up to half the angle a chord
+subtends — 0.5 px on the butt end of a 20 px stroke round an `r = 140` px
+circle.  An extra point a short step `e` in from each end along the tangent
+`t0`/`t1` makes the end segment, and so `strokePoly`'s cap, follow the tangent.
+`e` is at most a quarter unit and a third of the end chord, so the point stays
+between the end and its neighbour; below an eighth of a unit its direction
+would be too coarse to help, and the chord is kept. -/
+def finishDash (pts : Array Pt) (t0 t1 : Pt) : Array Pt := Id.run do
+  let n := pts.size
+  if n < 2 then return pts
+  let a := pts.getD 0 default
+  let b := pts.getD 1 default
+  let y := pts.getD (n - 2) default
+  let z := pts.getD (n - 1) default
+  let e0 := Fx.min 64 (Int.ediv (a.dist b) 3)
+  let e1 := Fx.min 64 (Int.ediv (y.dist z) 3)
+  let body := pts.extract 1 (n - 1)
+  let mut head := #[a]
+  if e0 ≥ 32 then
+    if let some u := stepAlong a b t0 e0 then head := head.push u
+  let mut tail := #[z]
+  if e1 ≥ 32 then
+    if let some v := stepAlong z y ⟨-t1.x, -t1.y⟩ e1 then tail := #[v, z]
+  return head ++ body ++ tail
+
 /-- Normalise a `stroke-dasharray` value into an even-length pattern and its
 sum, or `none` for "draw solid".
 
@@ -856,7 +907,9 @@ def dashPattern (pat : Array Fx) : Option (Array Fx × Fx) := Id.run do
 
 /-- Cut one flattened subpath into its "on" runs, appending each as an open
 `Poly` to `out`.  `pat` is the raw `stroke-dasharray` list and `off` the
-`stroke-dashoffset`.
+`stroke-dashoffset`.  `sg` is the subpath `poly` as its positive-length
+segments (the closing one included), with the curve tangents `finishDash`
+squares each dash end to; `poly` itself is what is drawn solid.
 
 The pattern starts afresh at each subpath, which is what resvg does (and what
 `painting/stroke-dasharray/multiple-subpaths.svg` checks).  `off` is reduced
@@ -884,21 +937,20 @@ renders as a dot for round and square caps and as nothing for butt caps —
 The subpath is appended unchanged (i.e. drawn solid) when the pattern says so
 and when the dash count would exceed `maxDashes`; a zero-length subpath is
 dropped instead. -/
-def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Array Poly :=
+def dashSegs (pat : Array Fx) (off : Fx) (poly : Poly) (sg : Array DSeg) (out : Array Poly) :
+    Array Poly :=
   Id.run do
     let some (pat, S) := dashPattern pat | return out.push poly
     let m := pat.size
-    let pts := dedupe poly
-    let n := pts.size
     -- a subpath of zero length has nothing to dash: tiny-skia's
     -- `ContourMeasureIter` drops it, so resvg draws no dot for it either, even
     -- with round caps.  (Undashed, `strokePoly` still draws that dot.)
-    if n < 2 then return out
-    let segs := if poly.closed then n else n - 1
+    if sg.isEmpty then return out
+    let segs := sg.size
     -- total length first: it decides whether this subpath is dashable at all
     let mut total : Nat := 0
-    for i in [0:segs] do
-      total := total + ((pts.getD i default).dist (pts.getD ((i + 1) % n) default)).toNat
+    for s in sg do
+      total := total + (s.p.dist s.q).toNat
     if total * m > maxDashes * S.toNat then return out.push poly
     -- the entry the subpath starts in, and how much of it is left
     let mut idx : Nat := 0
@@ -923,11 +975,17 @@ def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Arra
     -- a closed subpath that starts inside a dash defers that dash to the end
     let mut deferring := poly.closed && on && rem > 0
     let mut first : Array Pt := #[]
-    let mut cur : Array Pt := if on then #[pts.getD 0 default] else #[]
+    let s0 := sg.getD 0 default
+    let mut cur : Array Pt := if on then #[s0.p] else #[]
+    -- tangents at the two ends of `cur` and of `first`, for `finishDash`
+    let mut curT : Pt := s0.tp
+    let mut firstT0 : Pt := ⟨0, 0⟩
+    let mut firstT1 : Pt := ⟨0, 0⟩
     let mut out := out
     for i in [0:segs] do
-      let p := pts.getD i default
-      let q := pts.getD ((i + 1) % n) default
+      let s := sg.getD i default
+      let p := s.p
+      let q := s.q
       let dx := q.x - p.x
       let dy := q.y - p.y
       let L := Fx.hypot dx dy
@@ -946,15 +1004,19 @@ def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Arra
         pos := pos + rem
         let bp : Pt :=
           ⟨Fx.clamp (p.x + Int.ediv (dx * pos) L), Fx.clamp (p.y + Int.ediv (dy * pos) L)⟩
+        let bt := s.tangentAt pos L
         if on then
           if deferring then
             first := cur.push bp
+            firstT0 := curT
+            firstT1 := bt
             deferring := false
           else
-            out := out.push ⟨cur.push bp, false⟩
+            out := out.push ⟨finishDash (cur.push bp) curT bt, false⟩
           cur := #[]
         else
           cur := #[bp]
+          curT := bt
         on := !on
         idx := (idx + 1) % m
         rem := pat.getD idx 0
@@ -970,13 +1032,25 @@ def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Arra
     -- separate dashes otherwise.  `first` is empty unless a dash was deferred
     -- *and* completed, so an open subpath and a too-short closed one fall
     -- through to the plain case.
+    let lastT := (sg.getD (segs - 1) default).tq
     if on && cur.size ≥ 1 then
-      out := out.push ⟨if first.isEmpty then cur else cur ++ first, false⟩
+      out := out.push (if first.isEmpty then ⟨finishDash cur curT lastT, false⟩
+                       else ⟨finishDash (cur ++ first) curT firstT1, false⟩)
     else if !first.isEmpty then
-      out := out.push ⟨first, false⟩
+      out := out.push ⟨finishDash first firstT0 firstT1, false⟩
     return out
 
-/-- Dash every subpath of a flattened path.  `Render.drawShape`'s entry point. -/
+/-- `dashSegs` on a bare polyline: every segment is its own tangent. -/
+def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Array Poly :=
+  let pts := dedupe poly
+  let n := pts.size
+  let segs := if n < 2 then 0 else if poly.closed then n else n - 1
+  let sg := (Array.range segs).map fun i =>
+    ({ p := pts.getD i default, q := pts.getD ((i + 1) % n) default,
+       tp := ⟨0, 0⟩, tq := ⟨0, 0⟩ } : DSeg)
+  dashSegs pat off poly sg out
+
+/-- Dash every subpath of a flattened path. -/
 def dashPolys (pat : Array Fx) (off : Fx) (polys : Array Poly) : Array Poly :=
   polys.foldl (fun out p => dashPoly pat off p out) (Array.emptyWithCapacity polys.size)
 

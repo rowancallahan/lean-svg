@@ -13,6 +13,104 @@ our dashes differ (diff images at 400 px). Fix the shared cause. Also check
 `mpl-tests/test_axes/dash_offset.svg` and `mpl-tests/test_lines/line_collection_dashes.svg`
 against Chromium before/after.
 
+## Spec implemented
+
+- **Dash ends are square to the curve's tangent** (`LeanSvg/DashSeg.lean`,
+  `Geom.dashSegs`/`finishDash`). tiny-skia dashes the curve itself
+  (`ContourMeasure::push_segment` extracts sub-Béziers) and caps each dash
+  along the curve's tangent there. Ours cut the *flattened* polyline, so each
+  dash end was square to the chord it fell on, tilted by up to half the chord's
+  angle. On the test circles (r=70, stroke 10) that moved a butt end by
+  about 0.5 px at 400 px. `flattenSegs` flattens exactly as `flatten` does
+  (same `segCount`, same points) and also records the curve's derivative at
+  both ends of every chord. `dashSegs` (the old `dashPoly` loop, unchanged
+  except for walking `DSeg`s) interpolates that derivative at each dash boundary.
+  `finishDash` then adds one point a short step (≤ ¼ unit, ≤ ⅓ of the end
+  chord, skipped below ⅛ unit or at a cusp) in from each dash end along the
+  tangent, so `strokePoly`'s cap follows it. Straight segments carry no tangent
+  and are untouched. `dashPoly` is kept as the tangent-free wrapper.
+- Only dashed strokes take the new path: `Render.drawShape` calls
+  `dashPath … ctm s.cmds` instead of `dashPolys` on the already-flattened polys.
+
+## Skipped: the shared cause is the curve stroker, not dashing
+
+The dash phase itself was fine: our dash starts match resvg's. After the
+tangent fix, the dash ends at 400 px match resvg pixel for pixel (checked on the
+start-point dash of `ws-separator.svg`). The remaining ~1.1 % of bad pixels in
+all 11 dashed files are **along the sides of every dash**: one coverage level
+(~26/255) off along the whole curved edge. An **undashed** copy of the same
+circle (`ws-separator.svg` with the dasharray removed) scores **98.14 %** within-8 at
+200 px, worse than the dashed file's 98.8 % because it has more edge.
+`shapes/path/M-C-S.svg` and `M-S-S.svg` (undashed open curves) show the same
+whole-edge pattern. So they share this cause, and it is not a dashing cause.
+
+Cause: `strokePoly` offsets the *flattened chords* of the centre curve.
+tiny-skia's `PathStroker` offsets the *curve* (`cubic_stroke`/`quad_stroke`
+approximate each side with quads, subdivided by its tangent-ray tolerance
+tests), and the rasterizer then flattens those offset quads with its own
+`QuadraticEdge` subdivision. The outline vertices therefore sit at different
+places, about 0.1 px apart. Tuning flattening density does not fix it: doubling
+curve segments moves the undashed circle from 98.14 % to 98.40 % at 200 px but
+makes it worse at 400 px (1224 → 1503 bad px).
+
+Fix I would make: port tiny-skia's curve stroking (`stroker.rs`:
+`cubic_to`/`quad_to`, `cubic_stroke`, `quad_stroke`, `compare_quad_*`,
+`intersect_ray`, `points_within_dist`) as a new `LeanSvg/StrokeCurve.lean` that
+emits offset quads. Each quad would be flattened with `segCountQuad`/`quadAt` into
+the outline `strokePoly` builds today for its curve runs. Size: roughly
+400–600 lines of Lean plus Render wiring. It touches every stroked curve in the
+suite, so it needs a full regression pass. That is a multi-day stroker task and
+over this round's 2-hour box, so it is not started.
+
+## Report
+
+Numbers are resvg-suite within-8 (%), direct route.
+
+| file (200 px) | before | after |
+|---|---|---|
+| `stroke-dasharray/comma-ws-separator.svg` | 98.89 | 98.90 |
+| `stroke-dasharray/em-units.svg` | 98.68 | 98.69 |
+| `stroke-dasharray/mm-units.svg` | 98.15 | 98.18 |
+| `stroke-dasharray/odd-count.svg` | 98.86 | 98.86 |
+| `stroke-dasharray/ws-separator.svg` | 98.84 | 98.85 |
+| `stroke-dashoffset/default.svg` | 98.84 | 98.85 |
+| `stroke-dashoffset/em-units.svg` | 98.84 | 98.85 |
+| `stroke-dashoffset/mm-units.svg` | 98.87 | 98.91 |
+| `stroke-dashoffset/negative-value.svg` | 98.88 | 98.89 |
+| `stroke-dashoffset/percent-units.svg` | 98.93 | 98.94 |
+| `stroke-dashoffset/px-units.svg` | 98.88 | 98.89 |
+| `path/M-C-S.svg` (not dashed) | 98.99 | 98.99 |
+| `path/M-S-S.svg` (not dashed) | 98.96 | 98.96 |
+
+None of the 13 target files passes yet; the remaining gap is the stroker issue above.
+
+- **Whole suite, 200 px:** pass 1567/1679 before and after; newly passing 0,
+  newly failing 0. 13 files changed within-8, all up (the 11 above plus
+  `even-count`, `on-a-circle`, `percent-units` in stroke-dasharray).
+- **Whole suite, 100 px (`--fast`):** pass 1543/1679 before and after; 0 → fail.
+  14 files changed: 13 up and `stroke-dasharray/percent-units.svg` 98.73 → 98.72
+  (1 px).
+- **Wall time:** `run_corpora.py` fast 12.3 s → 12.4 s, 200 px 20.1 s → 19.4 s
+  (noise). Only dashed shapes flatten a second time.
+- **`tests/run_tests.py`:** 63/80 pass before and after. `23_dashes`,
+  `35_painting_tail` and `25_text` (within-8) up. `92_css_units` 88.983 → 88.982:
+  3 pixels changed on its dashed `r="1lh"` circle, which resvg does not draw at all
+  (the reference is blank there, since resvg lacks those CSS units). New
+  `tests/svg/107_dash_tangent.svg` (wide butt/square dashes on circle, ellipse,
+  quad and cubic paths) scores 97.78 → 97.92 % within-8. It stays below
+  threshold because of the stroker cause above.
+- `lake build` clean, no warnings. `check-theorems.sh`: `theorems ok`.
+  `run_adversarial.py`: 170/170 clean. `run_tiles.py`: 80/80 byte-identical.
+- **Real-world vs Chromium (200 px):** direct 260/848 pass before and after; 0
+  newly passing or failing. 10 files moved by at most 0.09 points (5 up, 5 down, largest
+  `web-tikz/cylinder-to-plane` +0.09, `tikz/graph_grid_torus` −0.03).
+  `mpl-tests/test_axes/dash_offset.svg` (90.16 %) and
+  `mpl-tests/test_lines/line_collection_dashes.svg` (75.13 %) are unchanged
+  (straight dashes, no tangent involved). Against resvg we score 99.05 % and 99.82 %
+  on them, and resvg itself scores 90.8 % vs Chromium on `dash_offset`. Their
+  Chromium gap is resvg vs Chromium stroking and antialiasing, not our dashing.
+- References: no evidence that any target file's reference is wrong.
+
 ---
 
 ## Round 7 rules (read with the common rules below)
