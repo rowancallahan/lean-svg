@@ -30,8 +30,10 @@ a document font does not map falls back to the embedded fonts
 synthesized.
 
 Bounded: at most `maxFaces` faces, each font at most 16 MB decoded
-(`Woff.maxFontBytes`) and all of them at most `maxTotalBytes`; every scan
-below runs over a range bounded by the stylesheet's size.
+(`Woff.maxFontBytes`), and at most `maxTotalBytes` of declared decoded size
+over every font tried, loaded or not (so a thousand copies of a decompression
+bomb cost what four do); every scan below runs over a range bounded by the
+stylesheet's size.
 -/
 
 namespace LeanSvg.FontFace
@@ -220,8 +222,12 @@ def weightOf (v : ByteArray) : Nat :=
       | none => 400
     | none => 400
 
-/-- The first loadable font of a `src` descriptor. -/
-def loadSrc (v : ByteArray) : Option Font := Id.run do
+/-- The first loadable font of a `src` descriptor, and the work budget left:
+each `data:` payload tried is charged its declared decoded size
+(`Woff.declaredSize`) before it is decoded, and none is tried once
+`budget` would run out. -/
+def loadSrc (v : ByteArray) (budget : Nat) : Option Font × Nat := Id.run do
+  let mut budget := budget
   for item in splitTop v 44 do
     match callArg item "format" with
     | some f =>
@@ -235,17 +241,20 @@ def loadSrc (v : ByteArray) : Option Font := Id.run do
       match dataUrl u with
       | none => continue
       | some bs =>
+        let cost := Woff.declaredSize bs
+        if cost > budget then return (none, 0)
+        budget := budget - cost
         match Woff.parseFont bs with
-        | some f => return some f
+        | some f => return (some f, budget)
         | none => continue
-  return none
+  return (none, budget)
 
 /-- The document's `@font-face` faces, in source order. -/
 def scan (css0 : ByteArray) : Array Face := Id.run do
   let css := Css.stripComments css0
   let lc := lower css
   let mut faces : Array Face := #[]
-  let mut total := 0
+  let mut budget := maxTotalBytes
   let mut i := 0
   for _ in [0:css.size] do
     let at_ := findSeq lc i "@font-face"
@@ -284,11 +293,10 @@ def scan (css0 : ByteArray) : Array Face := Id.run do
     match family, src with
     | some fam, some s =>
       if fam.size > 0 then
-        match loadSrc s with
-        | some f =>
-          total := total + f.data.size
-          if total ≤ maxTotalBytes then
-            faces := faces.push ⟨fam, weight, italic, f, coverageOf f⟩
+        let (f?, left) := loadSrc s budget
+        budget := left
+        match f? with
+        | some f => faces := faces.push ⟨fam, weight, italic, f, coverageOf f⟩
         | none => pure ()
     | _, _ => pure ()
   return faces

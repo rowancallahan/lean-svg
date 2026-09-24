@@ -18,6 +18,9 @@ import LeanSvg.ForeignObject
 import LeanSvg.Oklab
 import LeanSvg.ImageData
 import LeanSvg.Inflate
+import LeanSvg.Brotli
+import LeanSvg.Woff
+import LeanSvg.FontFace
 import LeanSvg.PngDecode
 import LeanSvg.JpegDecode
 import LeanSvg.GifDecode

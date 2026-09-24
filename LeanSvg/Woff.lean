@@ -432,6 +432,32 @@ def woff2 (bs : ByteArray) : Option ByteArray := Id.run do
   if out.size > maxFontBytes then return none
   return some out
 
+/-- An upper bound on the bytes decoding `bs` writes (for a caller's work
+budget, `FontFace.scan`): WOFF 2.0's and WOFF 1.0's declared table lengths,
+or the file's own size.  Read from the headers alone, without decoding. -/
+def declaredSize (bs : ByteArray) : Nat := Id.run do
+  let magic := u32 bs 0
+  if magic == tagOf "wOFF" then
+    let mut t := 0
+    for i in [0:u16 bs 12] do
+      t := t + u32 bs (44 + 20 * i + 12)
+    return Nat.max t bs.size
+  if magic != tagOf "wOF2" then return bs.size
+  let mut t := 0
+  let mut p := 48
+  for _ in [0:u16 bs 12] do
+    let fl := u8 bs p
+    p := p + 1 + (if fl % 64 == 63 then 4 else 0)
+    let some (o, p1) := base128 bs p | return Nat.max t bs.size
+    p := p1
+    t := t + o
+    let isGL := fl % 64 == 10 || fl % 64 == 11
+    if (isGL && fl / 64 == 0) || (!isGL && fl / 64 != 0) then
+      let some (l, p2) := base128 bs p | return Nat.max t bs.size
+      p := p2
+      t := t + l
+  return Nat.max t bs.size
+
 /-- Any supported font file as an sfnt: WOFF 2.0, WOFF 1.0, or an sfnt as
 is (`Font.parse` decides whether it can read it). -/
 def toSfnt (bs : ByteArray) : Option ByteArray :=

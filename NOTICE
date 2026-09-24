@@ -50,6 +50,16 @@ Unicode and shaping tables (T93) — generated data, not code:
     and bracket-pair tables in LeanSvg/Bidi.lean.
     LeanSvg/LICENSE-unicode-bidi.txt.
 
+Brotli static data (T105) — generated data, not code:
+  brotli 1.2.0 — https://github.com/google/brotli. MIT, Copyright (c) 2009,
+    2010, 2013-2016 by the Brotli Authors. The RFC 7932 static dictionary,
+    word transforms and context lookup table in LeanSvg/BrotliData.lean
+    (tests/gen_brotli_data.py). LeanSvg/LICENSE-brotli.txt.
+
+Font subsets in tests/svg/105_font_face.svg (T105) — WOFF 2.0/WOFF/TrueType
+  subsets of the resvg test suite's Noto Serif, Noto Sans and Noto Sans Bold,
+  SIL OFL 1.1 as above.
+
 Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
   README.md. Apache-2.0, authored for this project.
 
@@ -72,6 +82,16 @@ HarfBuzz / harfrust — https://github.com/harfbuzz/harfrust
 
 unicode-bidi — https://github.com/servo/unicode-bidi
   MIT OR Apache-2.0. LeanSvg/Bidi.lean re-implements its UAX #9 algorithm.
+
+Brotli — RFC 7932 and https://github.com/google/brotli
+  MIT. LeanSvg/Brotli.lean is a Lean decoder written from RFC 7932, checked
+  against the brotli 1.2.0 C decoder's tables. No C source is included.
+
+WOFF 2.0 — https://www.w3.org/TR/WOFF2/ and fontTools
+  (https://github.com/fonttools/fonttools, MIT). The glyf/loca and hmtx
+  reconstruction in LeanSvg/Woff.lean follows the W3C specification;
+  fontTools' woff2 module was the reference for the triplet decoding. No
+  Python source is included.
 
 BEHAVIOURAL REFERENCES
 
