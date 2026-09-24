@@ -178,6 +178,30 @@ three SVG 2 unit files were confirmed against Chromium). Follow-ups:
    byte-identical output from then on, alongside all theorems.
 4. **Optimise:** speed work under that lock; every change must keep the
    bytes identical and the theorems passing.
+5. **Speed baseline at the lock (Rowan, 2026-09-24):** when the bytes are
+   frozen, also record the three-way timing on the whole real-world corpus
+   at 1000 px: lean-svg, resvg and Chromium (scratchpad `bench.py`: CLI wall
+   time for lean-svg and resvg, warm-browser decode + raster for Chromium).
+   Commit the numbers next to the manifest; the speed phase measures against
+   them. Known at T119: `23_dashes` about 25% slower since T107's
+   tangent-aligned dash ends.
+6. **A proved-equivalent Rust renderer (Rowan, 2026-09-24; future, large):**
+   after the lock, rewrite the inner rendering function in safe Rust, extract
+   it to Lean with [Aeneas](https://github.com/AeneasVerif/aeneas), and
+   prove the extracted Rust equal to the Lean renderer. The Rust version
+   then carries the same guarantees (totality, the size and effect theorems,
+   byte-identical output), and optimisation can continue entirely in safe
+   Rust, each step re-proved equivalent.
+   - Work piecemeal by **SVG subset**: define a fragment of the language
+     (first, paths with solid fills and strokes; then transforms, gradients,
+     clipping, masks, filters, text…) as a predicate on the parsed document,
+     prove equivalence for documents in that fragment, and grow it feature
+     by feature.
+   - The hard part is the fragment definition itself: a precise,
+     checkable statement of which features a proof covers, so each proof
+     is partial but exact.
+   - The frozen byte manifest doubles as a cross-check: the Rust build must
+     pass `freeze.py check` too.
 
 ## Possible tool: FloatLib (Rowan, 2026-09-24; no changes made)
 
@@ -225,8 +249,7 @@ are never redistributed by lean-svg; the README says so.
 
 `tests/freeze.py` implements phase 3 ("Lock it") above. `record OUT.json`
 renders the resvg suite at 100 and 200 px, `tests/svg/*.svg` at native size,
-and the real-world corpus at 1000 px (600 px for `plantuml/component_arch`
-and `plantuml/state_sampler`), storing per file and width the exit code,
+and the real-world corpus at 1000 px (all files since T115), storing per file and width the exit code,
 SHA-256 of the PNG and, with `--warnings`, SHA-256 of the warnings file.
 `check OUT.json` re-renders with the manifest's settings and lists every
 difference; it exits 1 on any. Order is sorted and `--jobs` does not change
