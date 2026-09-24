@@ -128,3 +128,84 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+- **Filter work budget** (`LeanSvg/Render.lean`, non-rotated filter path).
+  Budget: `maxFilterWork = 2^25` (primitive cost × layer pixels, per filter
+  group) and `maxFilterTotal = 2^26` (summed per render); neither appears in
+  `proofs/` (only `SizeBound.lean` on output size, untouched). Cause:
+  PlantUML gives every node a drop shadow with a 300% region
+  (`x=-1 width=300%`). At 1000 px, component_arch's package polygon
+  (144×475 user units, ×5) makes a 2160×7125 px region (15.4 Mpx, under
+  `maxFilterPixels`, so the existing canvas crop did not fire) × 4
+  primitives = 61.6 M > 2^25, so the whole render failed "filter budget".
+  Fix: when `nprims × region > maxFilterWork`, the region is intersected
+  with the **whole image** (same frame as the `max_filter_bbox` limits, so
+  tiles stay byte-identical; a tile-local crop failed `run_tiles`) before
+  the budget check. The budgets themselves are unchanged, so the time
+  bound still holds. Only files that used to fail the budget are affected.
+- Test: `tests/svg/115_filter_budget_crop.svg` (800×400, 14-primitive
+  shadow with a 300% region; refused before, 99.97% vs resvg now).
+
+## Findings, not fixed (cause and proposed fix)
+
+- **Fonts named by Rowan are already right.** A Chromium probe in this
+  container: `Courier,monospace` and `Courier` → Liberation Mono (we use
+  Cousine, same metrics), `Serif`/`serif` → Liberation Serif (Tinos),
+  `sans-serif` → Liberation Sans (Arimo), mermaid's
+  `"trebuchet ms",verdana,arial,sans-serif` → Liberation Sans (Arimo, via
+  `arial`). Side-by-side crops of dot_class_hierarchy, timing_gantt,
+  area_density_stacked and pie_budget show the same faces as Chromium; T106
+  (merged after Rowan's notes) fixed these. `dot_class_hierarchy` is
+  monospace in both.
+- **The remaining "small font"/offset differences on Graphviz and PlantUML
+  come from `--width` sizing, not fonts.** `Render.canvasSetup` follows the
+  resvg CLI (T104): base size rounded to integers, then each axis scaled by
+  `new/base`. Chromium scales uniformly by `W / exact width`. Graphviz sizes
+  are in pt (`290pt` = 386.67 px → base 387), so everything is 0.09% small:
+  a line at x=341.38 in Chromium is at 341.0 in ours, and the right edge
+  loses a column. PlantUML timing_gantt (370×66 px) gets H = ⌈178.4⌉ = 179
+  and a y scale 0.35% too large, shifting text ~0.5 px down. resvg 0.48.1
+  draws exactly what we draw (checked with a probe), so the resvg suite
+  reference depends on this rule. Proposed fix (small, ~15 lines in
+  `canvasSetup`, but a policy decision for Rowan): a Chromium-fit mode (or
+  make it the default for the realworld corpus) that uses
+  `zoom = W·65536 / wFx` for both axes and `H = round(hFx·zoom)`. Not done:
+  it changes the resvg-suite comparison. A quick test via `--zoom` was
+  inconclusive because `--zoom` is quantised to 1/256.
+- Everything else I looked at in these groups is anti-aliasing: tiny-skia
+  style quarter-pixel coverage versus Skia's analytic coverage (e.g. a
+  3.448 px line: Chromium 0.345/1/1/1/0.10, ours 0.25/1/1/1/0.25).
+- `state_sampler` renders at 98.98% vs Chromium (threshold 99%); I did not
+  look into the rest.
+- The PlantUML files are slow: 9 s for state_sampler at 600 px, 11–14 s at
+  1000 px (the drop-shadow blurs over large regions). Speed-phase work.
+
+## Report
+
+Baseline `13cac51`, after `0e0fea6` (+ this report).
+
+| gate | before | after |
+|---|---|---|
+| resvg suite, 100 px (`--fast`) | 1543/1679 | 1543/1679, 0 pass→fail, 0 changed |
+| resvg suite, 200 px | 1567/1679 | 1567/1679, 0 pass→fail, 0 changed |
+| `run_tests.py` | 63/80 | 64/81 (new file passes; no other score changed) |
+| `run_adversarial.py` | – | 171/171 clean |
+| `run_tiles.py` | – | 81/81 byte-identical |
+| `check-theorems.sh` | – | theorems ok |
+| `lake build` | – | no errors, no new warnings |
+
+Real-world vs Chromium, 1000 px, direct: pass 374 → 375, unsupported 2 → 0.
+`plantuml/component_arch` unsupported → **pass 99.61%**;
+`plantuml/state_sampler` unsupported → fail 98.98%. No other file changed.
+
+Timing (A/B with both binaries, realworld direct at 1000 px, 4 jobs): wall
+58.2 s → 64.3 s (+10%). All of it comes from the two files that now render
+(11.1 s + 14.5 s CPU; they used to fail fast). Every other file: 202.7 s →
+204.4 s CPU (+0.8%, noise). Above the ~5% wall rule, but only because two
+files now render instead of failing; Rowan's call. The second A/B round
+did not finish before shutdown. Per-group scores for the other target files
+are in `/tmp/rw/realworld_direct.csv` (not committed); none changed.

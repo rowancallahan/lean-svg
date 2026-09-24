@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
+  <!-- T115: a 300% filter region whose primitives x area pass Render.maxFilterWork
+       (14 x 2340 x 1140 px) is cut to the image instead of refused. -->
+  <filter id="f" x="-1" y="-1" width="300%" height="300%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="b"/>
+    <feColorMatrix in="b" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .4 0" result="c"/>
+    <feOffset in="c" dx="4" dy="4" result="o0"/>
+    <feOffset in="o0" result="o1"/>
+    <feOffset in="o1" result="o2"/>
+    <feOffset in="o2" result="o3"/>
+    <feOffset in="o3" result="o4"/>
+    <feOffset in="o4" result="o5"/>
+    <feOffset in="o5" result="o6"/>
+    <feOffset in="o6" result="o7"/>
+    <feOffset in="o7" result="o8"/>
+    <feOffset in="o8" result="o9"/>
+    <feOffset in="o9" result="o10"/>
+    <feBlend in="SourceGraphic" in2="o10" mode="normal"/>
+  </filter>
+  <rect x="10" y="10" width="780" height="380" rx="12" fill="#FEFECE" stroke="#A80036" stroke-width="1.5" filter="url(#f)"/>
+  <rect x="60" y="60" width="120" height="40" fill="#8cf" filter="url(#f)"/>
+</svg>
