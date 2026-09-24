@@ -7,6 +7,7 @@ import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use
 import LeanSvg.ForeignObject
+import LeanSvg.Oklab
 import LeanSvg.Filter
 import LeanSvg.Image
 import LeanSvg.SvgImage
@@ -925,6 +926,7 @@ def parseSolidColor (t : ByteArray) : Option Rgba :=
   else if startsWith t 0 "rgb(" then parseRgbFunc t 4
   else if startsWith t 0 "hsla(" then parseHslFunc t 5
   else if startsWith t 0 "hsl(" then parseHslFunc t 4
+  else if startsWith t 0 "oklab(" then Oklab.parse t   -- T104 (Chromium; usvg: invalid)
   else
     let s := toStr t
     match namedColors.find? (fun (n, _) => n == s) with
