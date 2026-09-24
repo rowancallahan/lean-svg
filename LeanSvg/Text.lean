@@ -168,7 +168,11 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
           | some v => some v
           | none => if has k (cps.getD j 0) then some k else none)
         tried := tried.push k
-  return res.map (·.getD base)
+  -- T106: a character no font maps keeps the base font's `.notdef`; for a
+  -- T106 base that is Noto Sans's light box, not e.g. CMU's heavy crossed one
+  -- (dvisvgm's private-use code points, drawn by the file's own fonts, T105)
+  let tofu := if base < FamilyMatch.first then base else 0
+  return res.map (·.getD tofu)
 
 /-! ## What `Svg.lean` resolves for us -/
 
