@@ -256,3 +256,15 @@ generic-family files was an empty frame:
 
 The other score that moved: `text/font/simple-case` 95.46 → 95.25, fail →
 fail (no `font-family`, so the reference now draws Noto Serif).
+
+## Open decision for the integrator / Rowan (after the T110 merge)
+
+T118 covers Source Sans Pro, Noto Sans ExtraCondensed and `font-stretch`.
+One item from this report is still open. The 8 generic-family suite files
+(`text/font-family/{serif,sans-serif,bold-sans-serif,cursive,fantasy,monospace,fallback-1}.svg`)
+cannot pass against resvg while generic families resolve Chromium-first
+(T106, kept by T118). Choose one:
+(a) accept them as known failures, or
+(b) give them a Chromium reference in `tests/criteria.csv`. Their Chromium
+scores were 98.9–99.2% before T110 (T106 report), so some may still need a
+small fix to reach 99%.
