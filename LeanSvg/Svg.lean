@@ -3356,6 +3356,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
               ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0))
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && !st.fontAvailable then
             warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
+          if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize < 0 then
+            warns := Warn.add warns Warn.negativeFontSize
         evs := evs.push .close
         skip := skip + 1
       else skip := skip + 1
@@ -3380,6 +3382,9 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             ((rendStack.back?.getD true) && st.fontSize > 0))
         if (rendStack.back?.getD true) && st.fontSize > 0 && !st.fontAvailable && (trim bs).size > 0 then
           warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
+        -- T102: a negative `font-size` draws nothing (as usvg) and says so.
+        if (rendStack.back?.getD true) && st.fontSize < 0 && (trim bs).size > 0 then
+          warns := Warn.add warns Warn.negativeFontSize
   -- T96: under a large scale (`transform="scale(100)"` on tiny text) an
   -- outline rounded to `Fx` user units is visibly jagged, so it is laid out
   -- `outK` times larger and drawn through `ctm · scale(1 / outK)`; only for

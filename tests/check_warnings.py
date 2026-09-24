@@ -36,6 +36,10 @@ GENERIC = """<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">
   <text x="10" y="40" font-family="%s" font-size="30">Text</text>
 </svg>
 """
+NEGATIVE = """<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">
+  <text x="10" y="40" font-family="Noto Sans" font-size="-30">Text</text>
+</svg>
+"""
 MANY = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60">\n'
     + "".join(
@@ -95,6 +99,12 @@ def main() -> None:
         rc, png, warn = run(tmp, GENERIC % "serif", "serif", "--warnings")
         assert rc == 2 and warn.is_file(), rc
         print("-- no warnings (embedded family, sans-serif, system-ui): exit 0, one file")
+
+        rc, png, warn = run(tmp, NEGATIVE, "negative", "--warnings")
+        assert rc == 2, rc
+        assert ink(png) == 0, "negative font-size must draw nothing"
+        assert warn.read_text().splitlines() == ["negative font-size; text not drawn"]
+        print("-- negative font-size: nothing drawn, exit 2, one warning")
 
         rc, png, warn = run(tmp, MANY, "many", "--warnings")
         assert rc == 2, rc
