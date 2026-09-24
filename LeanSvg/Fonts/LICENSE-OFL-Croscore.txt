@@ -1,4 +1,5 @@
 Copyright 2026 The Arimo Project Authors (https://github.com/googlefonts/arimo)
+Copyright 2020 The Arimo Project Authors (https://github.com/googlefonts/arimo)
 Copyright 2026 The Tinos Project Authors (https://github.com/googlefonts/tinos)
 Copyright 2026 The Cousine Project Authors (https://github.com/googlefonts/cousine)
 

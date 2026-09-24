@@ -58,6 +58,23 @@ Modern Unicode", "Bitstream Vera" or "Vera".
   Cousine's are now added.
 - `LICENSE-OFL-Mplus1p.txt` lacked upstream's second line, "Copyright 2016
   The Rounded M+ Project Authors.". It is now added.
+- A second pass compared each embedded font's own copyright record (`name`
+  ID 0, decoded from the Lean modules) with its licence file, and found three
+  more lines missing. Each is now added:
+  - Amiri: "Portions copyright (c) 2010, Sebastian Kosch";
+  - Noto Sans Hebrew: the font says 2024, and the file had only upstream's
+    2022 line;
+  - Arimo: the font says 2020, and the file had only upstream's current
+    2026 line.
+
+### Open question: notices in a binary-only distribution
+
+The subsets keep each font's copyright record (`name` ID 0) but drop the
+licence record (ID 13). A copy of the `lean-svg` binary on its own therefore
+carries the copyright lines but not the OFL text. OFL condition 2 is met only
+when `NOTICE` and the licence files travel with the binary, which is the case
+for a copy of this repository. Anyone who ships the binary alone must ship
+those files next to it.
 
 ### Deliberately **not** embedded
 
