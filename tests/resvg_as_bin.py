@@ -23,6 +23,11 @@ width = sys.argv[sys.argv.index("--width") + 1] if "--width" in sys.argv else No
 cmd = ["resvg"]
 if FONTS_DIR.is_dir():
     cmd += ["--skip-system-fonts", "--use-fonts-dir", str(FONTS_DIR)]
+    # T110: generic families as resvg's integration tests set them
+    # (keep in step with `run_tests.RESVG_GENERIC_ARGS`)
+    cmd += ["--serif-family", "Noto Serif", "--sans-serif-family", "Noto Sans",
+            "--cursive-family", "Yellowtail", "--fantasy-family", "Sedgwick Ave Display",
+            "--monospace-family", "Noto Mono"]
 if width is not None:
     cmd += ["-w", width]
 cmd += [src, dst]
