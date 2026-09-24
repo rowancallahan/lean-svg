@@ -2796,6 +2796,7 @@ def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Na
         let m := parseTransform v
         let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then singularMat else m
         wrapTransformOrigin attrs pctRefW pctRefH m,
+    hasTransform := (attr attrs "patternTransform").isSome,
     x := coord "x", y := coord "y", width := coord "width", height := coord "height",
     viewBox := (attr attrs "viewBox").bind fun v =>
       let ns := parseNumberList16 v
@@ -3512,8 +3513,17 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           nodes := nodes ++ shs.map Node.shape
           if layered then nodes := nodes.push .groupEnd
           skip := 1
-        else if nm == "g" then
+        else if nm == "g" || nm == "use" then
+          -- T104: `Use.expand` has already copied a `use`'s target inside it,
+          -- so it is a `g` whose `x`/`y` translate after its own transform
+          -- (as in `interpret`).  A symbol's generated viewport clip is
+          -- ignored here like every content `clip-path`.
           let st := applyEff parent attrs chain
+          let st := if nm == "g" then st else
+            let len := fun (n : String) (ref : Fx) =>
+              (((attr attrs n).bind parseLengthOrPercent).map (resolvePct · ref)).getD 0
+            let tr := Mat.translate (len "x" st.pctRefW) (len "y" st.pctRefH)
+            { st with ctm := st.ctm.mul tr, ownMat := st.ownMat.mul tr }
           let (st', layered) := layerDecision st
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
