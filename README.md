@@ -36,6 +36,26 @@ PNG encoding. Reproduce with `python3 docs/readme/render.py`.
 
 All three SVGs are this project's own artwork, Apache-2.0.
 
+### Real-world charts
+
+Three charts from the real-world test corpus, rendered by lean-svg at 1000 px
+on a white background (`lean-svg in.svg out.png --width 1000 --background white`;
+the PNGs were then recompressed losslessly).
+
+**Latent Dirichlet allocation plate diagram** (TikZ with embedded Computer Modern fonts,
+`tikz-fonts/bayesnet_plate.svg`)
+
+![LDA plate diagram rendered by lean-svg](docs/readme/bayesnet_plate.png)
+
+**Burrows–Wheeler transform** (TikZ, `web-tikz/burrows-wheeler-transform.svg`,
+from [janosh/diagrams](https://github.com/janosh/diagrams), MIT)
+
+![Burrows-Wheeler transform rendered by lean-svg](docs/readme/burrows-wheeler-transform.png)
+
+**Posterior corner plot** (matplotlib with mathtext labels, `matplotlib/corner_plot.svg`)
+
+![corner plot rendered by lean-svg](docs/readme/corner_plot.png)
+
 ## Generated Readme
 
 Fidelity is checked against [resvg](https://github.com/linebender/resvg); 
