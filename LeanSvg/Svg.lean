@@ -114,6 +114,10 @@ structure Style where
   `treat_as_hairline` also refuses when `!paint.anti_alias`). Inherited;
   `auto`/`geometricPrecision` (the default) turn antialiasing back on. -/
   crisp : Bool := false
+  /-- `text-rendering: optimizeSpeed`: glyphs and decorations of a `<text>`
+  are drawn crisp (usvg's `text/flatten.rs::resolve_rendering_mode`). Read
+  from the `<text>` element's style only; inherited. -/
+  textCrisp : Bool := false
   /-- The CSS `color` property: inherited, defaults to black, and is what
   `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
   applies `color` before any other property so the resolution sees the
@@ -2291,6 +2295,12 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  | "text-rendering" =>
+    let t := trim v
+    if eqAscii t "optimizeSpeed" then { st with textCrisp := true }
+    else if eqAscii t "auto" || eqAscii t "optimizeLegibility" || eqAscii t "geometricPrecision" then
+      { st with textCrisp := false }
+    else st
   | "shape-rendering" =>
     let t := trim v
     if eqAscii t "crispEdges" || eqAscii t "optimizeSpeed" then { st with crisp := true }
@@ -3438,10 +3448,9 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      -- `text-rendering`, not `shape-rendering`, decides glyph antialiasing
-      -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
-      -- that property, so glyphs stay antialiased regardless of an ambient
-      -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
+      -- `text-rendering` of the `<text>` element, not `shape-rendering`, decides
+      -- glyph antialiasing (usvg's `text/flatten.rs::resolve_rendering_mode`;
+      -- `painting/shape-rendering/optimizeSpeed-on-text.svg`).
       let st := if outK == 1 then st else
         { st with strokeWidth := st.strokeWidth * outK, dashes := st.dashes.map (· * outK),
                   dashOffset := st.dashOffset * outK }
@@ -3451,7 +3460,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         { st with stroke := st.fill, strokeOpacity := st.fillOpacity, strokeCtx := st.fillCtx,
                   strokeWidth := Synth.boldWidth p.boldSize sc * outK, fill := .none, fillCtx := none,
                   cap := .butt, join := .miter, miterLimit := 1024, dashes := #[], dashOffset := 0 }
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := false }, false, none, none⟩
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := textStyle.textCrisp }, false, none, none⟩
       chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
