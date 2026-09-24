@@ -213,3 +213,6 @@ hours; partial but regression-free beats complete but risky.
   exact-match improved on `104_root_background` (81.5 → 99.98), `26_layers`
   (96.5 → 99.98), `34_filters`, `84_svg_image`.
 - `run_adversarial.py`: 172/172 clean. `run_tiles.py`: 82/82 byte-identical.
+- Real-world corpus vs Chromium (`--ref chrome`, 200 px), baseline binary
+  built from `13cac51`: direct 260/848 pass before and after; 0 files moved by
+  more than 0.1 points; newly passing 0, newly failing 0.
