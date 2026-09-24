@@ -18,6 +18,9 @@ queued for human review. The rules are `EXCLUDED` below:
       supported (removed in SVG 2, no browser implements them); files where
       resvg is rated correct stay scored against resvg.
     - Zero or negative document size: lean-svg refuses the file, as resvg does.
+    - Legacy/removed features Chromium also ignores (`clip` property,
+      `icc-color`, `glyph-orientation-*`, `kerning=<length>`), where resvg
+      is not the reference: they stay ignored.
     - External resources (another file, a URL, an external stylesheet), for
       files that would otherwise need a human check: nothing outside the SVG
       is loaded. Where resvg is the reference, run_corpora.py already scores
@@ -49,6 +52,9 @@ def excluded(rel, ref):
         return "DTD entities are not supported (Rowan, 2026-09-23)"
     if ref != "resvg" and re.search(r"enable-background|BackgroundImage|BackgroundAlpha", text):
         return "enable-background/BackgroundImage stay unsupported (Rowan, 2026-09-23)"
+    if ref != "resvg" and (rel.startswith(("masking/clip/", "text/glyph-orientation-", "text/kerning/"))
+                           or "icc-color" in text.lower()):
+        return "legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
     if rel in ("structure/svg/zero-size.svg", "structure/svg/negative-size.svg"):
         return "invalid document size: lean-svg refuses it, as resvg does"
     if ref == "human":

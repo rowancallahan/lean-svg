@@ -396,7 +396,7 @@ filters/flood-color/inheritance-5.svg,resvg-suite,resvg,resvg=1 (correct) in res
 filters/flood-color/simple-case.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/flood-opacity/50percent.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 filters/flood-opacity/simple-case.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-masking/clip/simple-case.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+masking/clip/simple-case.svg,resvg-suite,excluded,"legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
 masking/clip-rule/clip-rule=evenodd.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 masking/clipPath/circle-shorthand-with-stroke-box.svg,resvg-suite,chrome,"resvg=2 (not correct), chrome=1 (correct)"
 masking/clipPath/circle-shorthand-with-view-box.svg,resvg-suite,chrome,"resvg=2 (not correct), chrome=1 (correct)"
@@ -685,7 +685,7 @@ painting/fill/hsl-360-100percent-25percent.svg,resvg-suite,resvg,resvg=1 (correc
 painting/fill/hsl-999-100percent-25percent.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill/hsl-with-alpha.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill/hsla-with-percentage-s-and-l-values.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-painting/fill/icc-color.svg,resvg-suite,human,"resvg=0, chrome=0: neither is a known-correct oracle for this file"
+painting/fill/icc-color.svg,resvg-suite,excluded,"legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
 painting/fill/inherit-without-parent.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill/inherit.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill/invalid-#RRGGBB-1.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -725,7 +725,7 @@ painting/fill/rgba-0-50percent-0-0.5.svg,resvg-suite,resvg,resvg=1 (correct) in 
 painting/fill/rgba-0percent-50percent-0percent-0.5.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill/transparent.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill/uppercase-rgb-color.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-painting/fill/valid-FuncIRI-with-a-fallback-ICC-color.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+painting/fill/valid-FuncIRI-with-a-fallback-ICC-color.svg,resvg-suite,excluded,"legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
 painting/fill-opacity/50percent.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill-opacity/half-opacity.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 painting/fill-opacity/nested.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
@@ -1444,10 +1444,10 @@ text/font-weight/lighter-with-clamping.svg,resvg-suite,resvg,resvg=1 (correct) i
 text/font-weight/lighter-without-parent.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/font-weight/lighter.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/font-weight/normal.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-text/glyph-orientation-horizontal/simple-case.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
-text/glyph-orientation-vertical/simple-case.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+text/glyph-orientation-horizontal/simple-case.svg,resvg-suite,excluded,"legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
+text/glyph-orientation-vertical/simple-case.svg,resvg-suite,excluded,"legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
 text/kerning/0.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
-text/kerning/10percent.svg,resvg-suite,human,"resvg=2, chrome=2: neither is a known-correct oracle for this file"
+text/kerning/10percent.svg,resvg-suite,excluded,"legacy/removed feature Chromium also ignores; stays ignored (Rowan, 2026-09-24)"
 text/lengthAdjust/spacingAndGlyphs.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/lengthAdjust/text-on-path.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv
 text/lengthAdjust/vertical.svg,resvg-suite,resvg,resvg=1 (correct) in resvg-test-suite results.csv

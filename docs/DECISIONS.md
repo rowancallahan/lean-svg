@@ -130,3 +130,17 @@ code are the only effects. Open for Rowan to decide later:
 
 Still open from T99: spotlight cone edge, box blur vs Gaussian, legacy
 features Chromium ignores, `xml:lang` font selection.
+
+## T99 questions answered (Rowan, 2026-09-24)
+
+- **Spotlight cone edge:** follow the suite's soft fade at the
+  `limitingConeAngle` edge (Skia), not resvg's hard edge. Files resvg is rated
+  correct on that change are then judged against the suite PNG.
+- **Blur:** keep resvg's three-box-blur approximation for now.
+  **Reminder / to do:** move to a true Gaussian later (Chromium's behaviour);
+  every blur file will need re-judging when that happens.
+- **Legacy features Chromium also ignores** (`clip` property, `icc-color`,
+  `glyph-orientation-*`, `kerning=<length>`): keep ignoring; excluded in
+  `tests/criteria.csv` where resvg is not the reference.
+- **`xml:lang`:** choose the fallback font for Han characters by language tag
+  (`ja` → Mplus 1p, `ko` → Noto Sans KR, else Noto Sans SC), as Chromium does.
