@@ -262,3 +262,21 @@ pass `freeze.py check` with zero differences, alongside the theorems. A
 deliberate output change is a separate, reviewed commit that re-records the
 manifest and says which files changed and why. No manifest is committed yet:
 the bytes still change.
+
+**Locked (Rowan, 2026-09-24).** `tests/freeze.json` records 4,297 renders
+(resvg suite at 100 and 200 px, `tests/svg/*.svg`, the real-world corpus at
+1000 px) from commit 71f406d, with warnings. A second full render matched
+every entry. From now on:
+
+    python3 tests/freeze.py check tests/freeze.json --jobs 8   # ~2 min, must say "identical"
+
+Any intentional output change re-records the manifest in its own commit,
+listing the files that changed and why.
+
+**Speed baseline.** `tests/bench_baseline.csv`: per real-world file at
+1000 px, lean-svg and resvg CLI wall time and Chromium decode+raster time
+(best of 2, `tests/bench_realworld.py`, same renderer code as the lock).
+Totals: lean-svg 304 s, resvg 45 s, Chromium 10 s. Medians: 58, 18 and
+7 ms. The 34 files with embedded `<image>` take 140 s of our 304 s; process
+start-up is 16 ms (resvg 3 ms). Rowan: do not go deep on speed in Lean; the
+plan is the Rust rewrite proved equal with Aeneas (phase 6).
