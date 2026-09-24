@@ -1,41 +1,41 @@
 file,verdict,note,render_hash,at,status
-graphviz/circo_cycle.svg,fail,,5f93dbc98506de3c,2026-09-24T05:34:30.515Z,current
-graphviz/dot_bayes_net_asia.svg,fail,fonts,8a87761dc15d84f9,2026-09-24T05:07:15.343Z,current
-graphviz/dot_binary_tree.svg,fail,,f8b0e256214b5a35,2026-09-24T05:34:25.838Z,current
-graphviz/dot_class_hierarchy.svg,fail,even though i like this font better we should have the monospce one as well,105b4a71958ad58b,2026-09-24T05:10:55.759Z,current
-graphviz/dot_clusters_pipeline.svg,fail,small font issue,12fea1ff0b12e380,2026-09-24T05:33:37.073Z,current
-graphviz/dot_colors_styles.svg,fail,"small font issue other than that good, graph viz less important too but some of the math fonts would be nice",639e26e88f3d4ffa,2026-09-24T05:34:22.757Z,current
-graphviz/dot_dag_causal.svg,fail,,1132cea246890c0c,2026-09-24T05:34:46.091Z,current
-graphviz/dot_flowchart.svg,fail,just font,50c0f8da1453e8bc,2026-09-24T05:35:20.893Z,current
-graphviz/dot_gantt_like_ranks.svg,fail,font issues,4296d651a04af087,2026-09-24T05:33:26.623Z,current
-graphviz/dot_html_table.svg,fail,fonts bad again,40e3e616b17a37e5,2026-09-24T05:05:50.238Z,current
-graphviz/dot_large_dependency.svg,fail,just font,767ce9d24d1d316a,2026-09-24T05:35:25.441Z,current
-graphviz/dot_mcmc_workflow.svg,pass,,69333a86072aa6f4,2026-09-24T05:12:08.236Z,current
-graphviz/dot_neural_net.svg,pass,good except for font,24946cd4cda2dfda,2026-09-24T05:17:51.987Z,current
-graphviz/dot_ortho_splines.svg,fail,small font issue,0492108dd144ca23,2026-09-24T05:33:46.777Z,current
-graphviz/dot_plate_model.svg,fail,,29fa6799d3323df3,2026-09-24T05:34:43.677Z,current
-graphviz/dot_record_struct.svg,pass,,cee311e9cd49ab2d,2026-09-24T05:11:42.678Z,current
-graphviz/dot_state_machine.svg,fail,just font,9b69ebefe084cddf,2026-09-24T05:35:30.686Z,current
-graphviz/fdp_social.svg,pass,good except for font,b798e098483a4bb8,2026-09-24T05:17:44.999Z,current
-graphviz/neato_factor_graph.svg,fail,,038812375ec77ea5,2026-09-24T05:34:47.760Z,current
-graphviz/neato_graph_undirected.svg,fail,,099c0fd503abf7b6,2026-09-24T05:34:37.852Z,current
-graphviz/neato_markov_random_field.svg,fail,font,9afb79ce7f822df2,2026-09-24T05:14:21.927Z,current
-graphviz/neato_molecule.svg,fail,,e1c7efbcb4e5ae31,2026-09-24T05:34:31.923Z,current
+graphviz/circo_cycle.svg,pass,,1e6f3589e3d49559,2026-09-24T07:29:31.477Z,current
+graphviz/dot_bayes_net_asia.svg,pass,,6aa33f8517002ec7,2026-09-24T07:22:26.209Z,current
+graphviz/dot_binary_tree.svg,pass,,1928b5e2a5edfa6e,2026-09-24T07:24:29.125Z,current
+graphviz/dot_class_hierarchy.svg,pass,,2ba9053560825f0b,2026-09-24T07:22:00.671Z,current
+graphviz/dot_clusters_pipeline.svg,pass,,b0d9f11557260463,2026-09-24T07:25:58.438Z,current
+graphviz/dot_colors_styles.svg,pass,,c528801b467815f1,2026-09-24T07:23:14.057Z,current
+graphviz/dot_dag_causal.svg,pass,,6bfad62a69cc9856,2026-09-24T07:26:38.748Z,current
+graphviz/dot_flowchart.svg,pass,,0ae279b36f21e75c,2026-09-24T07:29:58.347Z,current
+graphviz/dot_gantt_like_ranks.svg,pass,,5d3c2fa3ef666d74,2026-09-24T07:24:19.182Z,current
+graphviz/dot_html_table.svg,pass,,0f62bdd2e3be7072,2026-09-24T07:21:20.677Z,current
+graphviz/dot_large_dependency.svg,pass,,4465cccfc6af49fd,2026-09-24T07:23:50.815Z,current
+graphviz/dot_mcmc_workflow.svg,pass,,95c59e0300da71f1,2026-09-24T07:30:59.373Z,current
+graphviz/dot_neural_net.svg,pass,,60db02be596a7682,2026-09-24T07:28:42.006Z,current
+graphviz/dot_ortho_splines.svg,pass,,cfed3e6895e2d5b5,2026-09-24T07:22:13.222Z,current
+graphviz/dot_plate_model.svg,pass,,17f5d201317cc301,2026-09-24T07:27:25.466Z,current
+graphviz/dot_record_struct.svg,pass,,d7b39e886ebb045d,2026-09-24T07:22:06.216Z,current
+graphviz/dot_state_machine.svg,pass,,b1c720a527c8af2d,2026-09-24T07:28:51.574Z,current
+graphviz/fdp_social.svg,pass,,eb5347b204a414b4,2026-09-24T07:22:08.755Z,current
+graphviz/neato_factor_graph.svg,pass,,8c49a1f2eaa94c53,2026-09-24T07:26:17.337Z,current
+graphviz/neato_graph_undirected.svg,pass,,c346f9d5dde95e59,2026-09-24T07:26:15.055Z,current
+graphviz/neato_markov_random_field.svg,pass,,692be7d486769858,2026-09-24T07:21:37.035Z,current
+graphviz/neato_molecule.svg,pass,,577376e5a0b15a17,2026-09-24T07:25:53.145Z,current
 graphviz/twopi_radial.svg,pass,,e3cf53982f37c5c3,2026-09-24T05:34:36.219Z,current
-matplotlib-text/bayes_factor_bars.svg,pass,,2ca124c3095f3206,2026-09-24T05:32:19.914Z,current
-matplotlib-text/beta_binomial_update.svg,fail,fonts. major issue with showing the prior here this must be fixed,23c5b303b97cdc2a,2026-09-24T05:06:58.645Z,current
-matplotlib-text/contourf_colorbar.svg,pass,,67017bc3fd95ab99,2026-09-24T05:19:38.404Z,current
-matplotlib-text/dendrogram_like.svg,pass,pass except for font i prefer the current font for ours if its the default though,bf0e473c72cd104e,2026-09-24T05:15:58.425Z,current
-matplotlib-text/hexbin_density.svg,pass,,a2a803f2142444b5,2026-09-24T05:14:32.856Z,current
-matplotlib-text/hierarchical_shrinkage.svg,pass,,9e213d3178edc1f0,2026-09-24T05:18:54.782Z,current
-matplotlib-text/histogram_kde.svg,pass,,b1113b3a874ec136,2026-09-24T05:10:24.933Z,current
-matplotlib-text/mathtext_showcase.svg,fail,,04fd0102426d9d26,2026-09-24T05:32:08.610Z,current
-matplotlib-text/mcmc_trace.svg,pass,somehow the beta sigma and alpha all render ok,321bc5ac6429da60,2026-09-24T05:07:53.479Z,current
-matplotlib-text/pair_scatter.svg,pass,fonts mostly ok here somehow,4a18da38b63ab8e3,2026-09-24T05:08:36.650Z,current
-matplotlib-text/poisson_pmf.svg,pass,,09a2fbba3f174947,2026-09-24T05:32:16.395Z,current
-matplotlib-text/scatter_colormap_sizes.svg,pass,,3234e683c14ac7aa,2026-09-24T05:10:12.975Z,current
-matplotlib-text/streamplot_field.svg,fail,fonts need to be fixed to fancy math,8bdeef876b3d2076,2026-09-24T05:08:58.724Z,current
-matplotlib-text/twin_axes.svg,pass,,6c11c047f9fdf572,2026-09-24T05:32:14.426Z,current
+matplotlib-text/bayes_factor_bars.svg,pass,,6e891658e17adc3a,2026-09-24T07:29:03.489Z,current
+matplotlib-text/beta_binomial_update.svg,pass,,eb116cac3a5a51da,2026-09-24T07:21:30.667Z,current
+matplotlib-text/contourf_colorbar.svg,pass,,f7a299d0038c02e8,2026-09-24T07:28:46.439Z,current
+matplotlib-text/dendrogram_like.svg,pass,,fe0156cb9d0d4f6e,2026-09-24T07:31:20.000Z,current
+matplotlib-text/hexbin_density.svg,pass,,ddf655db0d93c6c7,2026-09-24T07:20:31.071Z,current
+matplotlib-text/hierarchical_shrinkage.svg,pass,,518cb0ea283bc1cf,2026-09-24T07:31:23.368Z,current
+matplotlib-text/histogram_kde.svg,pass,,3c6c951316d2b466,2026-09-24T07:31:16.502Z,current
+matplotlib-text/mathtext_showcase.svg,fail,"tofu boxes somehow, fail",f640fea992af3c7a,2026-09-24T07:23:06.455Z,current
+matplotlib-text/mcmc_trace.svg,pass,,21ee94e8271292c7,2026-09-24T07:18:14.640Z,current
+matplotlib-text/pair_scatter.svg,pass,,fead34b8be1f57d7,2026-09-24T07:18:33.259Z,current
+matplotlib-text/poisson_pmf.svg,pass,,4280243a796de750,2026-09-24T07:31:27.908Z,current
+matplotlib-text/scatter_colormap_sizes.svg,pass,,ee81991cb9355ead,2026-09-24T07:19:52.809Z,current
+matplotlib-text/streamplot_field.svg,pass,,9577818b565a3fc9,2026-09-24T07:18:37.696Z,current
+matplotlib-text/twin_axes.svg,pass,,da881c206e9b1403,2026-09-24T07:23:28.215Z,current
 matplotlib/beta_binomial_update__ggplot.svg,pass,,b1f65f6833e98be0,2026-09-24T05:25:52.133Z,current
 matplotlib/boxplot_violin.svg,pass,,23eed5246cd4e324,2026-09-24T05:26:06.531Z,current
 matplotlib/contour_density.svg,pass,,49b0e93efc4e0061,2026-09-24T05:17:56.858Z,current
@@ -76,14 +76,14 @@ matplotlib/streamplot_field.svg,pass,font ok here somehow,ff28f7be22056d2a,2026-
 matplotlib/surface_3d.svg,pass,,7bf452a6f0bdbd5c,2026-09-24T05:17:10.299Z,current
 matplotlib/time_series_bands.svg,pass,,3886423f070b96d9,2026-09-24T05:26:32.616Z,current
 matplotlib/wireframe_3d.svg,pass,,11327eb659d26f77,2026-09-24T05:09:25.924Z,current
-mermaid/class_distributions.svg,pass,,6269f2432674e76a,2026-09-24T06:06:50.899Z,current
-mermaid/er_schema.svg,pass,,d1588c8292d99fb0,2026-09-24T05:31:03.094Z,current
-mermaid/flowchart_mcmc.svg,pass,,d3d7acf4df6215a6,2026-09-24T06:07:01.017Z,current
-mermaid/gantt_project.svg,pass,,1a8eeb0471017d07,2026-09-24T05:24:02.284Z,current
-mermaid/mindmap_bayes.svg,pass,,f430c70171f45b7c,2026-09-24T06:06:54.004Z,current
-mermaid/pie_budget.svg,fail,font,3e15ecac87783b84,2026-09-24T05:24:24.916Z,current
-mermaid/sequence_inference.svg,pass,,4474a996a9f83f7d,2026-09-24T05:23:58.497Z,current
-mermaid/state_chain.svg,pass,fixed,f9fea51f468e2fd3,2026-09-24T05:29:45.645Z,current
+mermaid/class_distributions.svg,pass,,37ffbd8b94d9539a,2026-09-24T07:24:00.397Z,current
+mermaid/er_schema.svg,pass,,742e2cf791c96c17,2026-09-24T07:19:12.517Z,current
+mermaid/flowchart_mcmc.svg,pass,,704922922eaf7b40,2026-09-24T07:30:32.024Z,current
+mermaid/gantt_project.svg,pass,,0a769fc97fefc23b,2026-09-24T07:33:23.017Z,current
+mermaid/mindmap_bayes.svg,pass,,c34a357b727166bc,2026-09-24T07:23:17.031Z,current
+mermaid/pie_budget.svg,pass,,1ed312038f6d5ee6,2026-09-24T07:26:22.330Z,current
+mermaid/sequence_inference.svg,pass,,d6423bf80d110e17,2026-09-24T07:21:42.195Z,current
+mermaid/state_chain.svg,pass,,6a6497a5be2ad1ba,2026-09-24T07:22:17.425Z,current
 mpl-tests/test_artist/clip_path_clipping.svg,pass,[judged at 300 px],3d4c9e7c3fb5cd29,2026-09-24T04:10:10.025Z,current
 mpl-tests/test_artist/hatching.svg,pass,,bdfa28d647178fe0,2026-09-24T05:10:29.076Z,current
 mpl-tests/test_axes/canonical.svg,pass,,3bc62dd60715dfbd,2026-09-24T04:27:56.426Z,current
@@ -103,9 +103,9 @@ mpl-tests/test_axes/step_linestyle.svg,pass,,67eda355d3ab3332,2026-09-24T04:31:1
 mpl-tests/test_axes/test_alpha.svg,pass,,26fbfc435ce70b09,2026-09-24T06:11:29.629Z,current
 mpl-tests/test_axes/transparent_markers.svg,pass,,991fb98d365ded02,2026-09-24T06:13:45.025Z,current
 mpl-tests/test_backend_svg/bold_font_output.svg,pass,,e7695eabf74e0300,2026-09-24T04:28:25.727Z,current
-mpl-tests/test_backend_svg/bold_font_output_with_none_fonttype.svg,pass,,71d11b66fcefd9b0,2026-09-24T06:10:11.793Z,current
+mpl-tests/test_backend_svg/bold_font_output_with_none_fonttype.svg,pass,,091c47114ae95711,2026-09-24T07:31:57.039Z,current
 mpl-tests/test_backend_svg/multi_font_aspath.svg,pass,,31781288a46a1341,2026-09-24T04:25:39.726Z,current
-mpl-tests/test_backend_svg/multi_font_astext.svg,pass,,6042f7433550348b,2026-09-24T04:24:53.022Z,current
+mpl-tests/test_backend_svg/multi_font_astext.svg,pass,maybe we add basic emojis if its not too big of a thing to add idk,a4a096a862ca2f3e,2026-09-24T07:33:01.226Z,current
 mpl-tests/test_backends_rendering/blend_groups_svg.svg,pass,,0294ba8a7006694b,2026-09-24T06:13:30.904Z,current
 mpl-tests/test_backends_rendering/blend_groups_svg_rasterized.svg,pass,,84b90dca6c82eb87,2026-09-24T06:14:29.603Z,current
 mpl-tests/test_backends_rendering/blend_modes_svg.svg,pass,,601a1a7ab1b2137a,2026-09-24T04:26:07.215Z,current
@@ -136,9 +136,9 @@ mpl-tests/test_legend/framealpha.svg,pass,,df487c1f7382de05,2026-09-24T04:31:27.
 mpl-tests/test_legend/hatching.svg,pass,,2a35aca50be16d24,2026-09-24T04:25:00.918Z,current
 mpl-tests/test_lines/line_collection_dashes.svg,pass,,3ed1486a67ede8d5,2026-09-24T04:25:30.959Z,current
 mpl-tests/test_lines/scaled_lines.svg,pass,[judged at 300 px],6a135f2ae67809a2,2026-09-24T04:09:55.814Z,current
-mpl-tests/test_mathtext/mathtext0_cm_03.svg,fail,see why we draw the extra hyphen and fix if needed,5e3e89a32ab0e58a,2026-09-24T05:04:54.781Z,current
-mpl-tests/test_mathtext/mathtext0_dejavusans_04.svg,pass,,f0b60fafb179928a,2026-09-24T04:25:20.161Z,current
-mpl-tests/test_mathtext/mathtext0_dejavusans_05.svg,fail,"we will have to add some more fonts but not too many since we want to keep size down but we def need more of the math fonts if they have permissive licenses that is. Or maybe people can load fonts in, but then we need some stuff to make sure that the fonts cant be a backdoor or something",31312613fc22d980,2026-09-24T05:13:46.951Z,current
+mpl-tests/test_mathtext/mathtext0_cm_03.svg,pass,close enough just fonts maybe but we want self contained fonts for now,00e880f344bd80cc,2026-09-24T07:32:41.472Z,current
+mpl-tests/test_mathtext/mathtext0_dejavusans_04.svg,pass,,ebdc6748981632ee,2026-09-24T07:28:14.212Z,current
+mpl-tests/test_mathtext/mathtext0_dejavusans_05.svg,pass,,ec954e68602f4c0e,2026-09-24T07:19:40.158Z,current
 mpl-tests/test_mathtext/mathtext_cm_05.svg,pass,,7522a02776c1fa72,2026-09-24T06:12:23.042Z,current
 mpl-tests/test_mathtext/mathtext_cm_18.svg,pass,,6248886f368fe179,2026-09-24T06:07:58.414Z,current
 mpl-tests/test_mathtext/mathtext_cm_20.svg,pass,,786ddfeea2fef70e,2026-09-24T06:12:33.404Z,current
@@ -206,7 +206,7 @@ mpl-tests/test_text/multiline.svg,pass,,bfaffa19f867ef90,2026-09-24T04:27:11.932
 mpl-tests/test_text/multiline2.svg,pass,[judged at 300 px],51caaec3a6712f2c,2026-09-24T04:10:39.223Z,current
 mpl-tests/test_text/text_alignment.svg,pass,,96b89e9b5e6ec32c,2026-09-24T04:26:42.967Z,current
 mpl-tests/test_text/text_as_path_opacity.svg,pass,,47f6e8bc6aeba93a,2026-09-24T06:15:23.607Z,current
-mpl-tests/test_text/text_as_text_opacity.svg,pass,,1440346acb226ae1,2026-09-24T06:12:39.517Z,current
+mpl-tests/test_text/text_as_text_opacity.svg,pass,,19f92e15be032e50,2026-09-24T07:32:44.810Z,current
 mpl-tests/test_text/text_bboxclip.svg,pass,,507645f2be852089,2026-09-24T04:31:17.159Z,current
 mpl-tests/test_text/titles.svg,pass,,71743ef038480f6c,2026-09-24T06:11:47.898Z,current
 mpl-tests/test_tightlayout/tight_layout1.svg,pass,,ef7ca8d5271e4eff,2026-09-24T06:09:38.308Z,current
@@ -217,78 +217,78 @@ mpl-tests/test_tightlayout/tight_layout6.svg,pass,,c058d3da5c59e094,2026-09-24T0
 mpl-tests/test_tightlayout/tight_layout7.svg,pass,,255a16bc0e87497d,2026-09-24T06:09:36.636Z,current
 mpl-tests/test_tightlayout/tight_layout9.svg,pass,,d15118b6c06abc49,2026-09-24T06:08:32.927Z,current
 mpl-tests/test_transforms/pre_transform_data.svg,pass,[judged at 300 px],de0b887bfd064f93,2026-09-24T04:09:53.193Z,current
-plantuml/activity_pipeline.svg,pass,,7bdd2d6b9ea251ff,2026-09-24T05:24:32.564Z,current
-plantuml/class_model.svg,pass,,2b30c709f0e49566,2026-09-24T05:25:16.183Z,current
-plantuml/component_arch.svg,pass,,9cc9f427dcb3cecd,2026-09-24T05:24:56.129Z,current
-plantuml/mindmap_topics.svg,pass,,30f57d01cdda3cd0,2026-09-24T05:10:01.731Z,current
-plantuml/sequence_auth.svg,pass,,30d419f408553aa8,2026-09-24T05:25:07.121Z,current
-plantuml/state_sampler.svg,pass,,9ae817bb96517281,2026-09-24T05:25:10.527Z,current
-plantuml/timing_gantt.svg,fail,fonts slightly off,c0dfc725ac17a3b2,2026-09-24T05:08:24.008Z,current
-plantuml/usecase_system.svg,pass,,473681b4e401f4d1,2026-09-24T05:16:43.581Z,current
-tikz-fonts/arrows_meta_showcase.svg,fail,fonts are a big issue here,3300e7c7e8172903,2026-09-24T05:07:06.827Z,current
-tikz-fonts/automaton_dfa.svg,fail,,7c4a4af00f41acd7,2026-09-24T05:22:24.973Z,current
-tikz-fonts/automaton_markov_chain.svg,fail,,822cfdf03f501e8f,2026-09-24T05:20:49.676Z,current
-tikz-fonts/automaton_pushdown.svg,fail,fonts messed up here we need these math fonts,6655205391c0b96c,2026-09-24T05:05:26.742Z,current
-tikz-fonts/bayesnet_hmm.svg,fail,,7e784d3f8e49d8f0,2026-09-24T05:20:43.281Z,current
-tikz-fonts/bayesnet_plate.svg,fail,major math font issue,682c506bb2d80cf8,2026-09-24T05:16:29.149Z,current
-tikz-fonts/bayesnet_regression_dag.svg,fail,,3ddbfc1f7be81518,2026-09-24T05:21:23.103Z,current
-tikz-fonts/bayesnet_sprinkler.svg,fail,fonts,d291ecfd1dc6c7d1,2026-09-24T05:07:11.341Z,current
-tikz-fonts/cd_adjunction.svg,fail,tofu box is very badd here,601842428a1dc938,2026-09-24T05:22:06.924Z,current
-tikz-fonts/cd_cube.svg,fail,,e2332f3bae2b030f,2026-09-24T05:23:05.070Z,current
-tikz-fonts/cd_exact_sequence.svg,fail,,7bb156a43b0e194a,2026-09-24T05:21:53.903Z,current
-tikz-fonts/cd_natural_transformation.svg,fail,,df3c90a71eb004f8,2026-09-24T05:23:47.706Z,current
-tikz-fonts/cd_pullback.svg,fail,tofu box very bad here under upper left B with axcB,9fde390dd0216a36,2026-09-24T05:22:47.353Z,current
-tikz-fonts/cd_snake_lemma.svg,fail,,a5599214145a0474,2026-09-24T05:21:24.741Z,current
-tikz-fonts/cd_square.svg,fail,,728fe5c6f9873d8a,2026-09-24T05:21:18.487Z,current
-tikz-fonts/circuit_opamp.svg,fail,,ee7d078be8368174,2026-09-24T05:21:51.365Z,current
-tikz-fonts/circuit_rlc.svg,fail,,31e82156db320bf4,2026-09-24T05:23:08.127Z,current
-tikz-fonts/complex_plane_roots.svg,fail,,b1e909dc03a27687,2026-09-24T05:21:57.984Z,current
-tikz-fonts/feynman_annihilation.svg,fail,,be9daf9066b26574,2026-09-24T05:21:20.353Z,current
-tikz-fonts/feynman_gluon_loop.svg,fail,,adc786bbb84e8cf2,2026-09-24T05:23:49.224Z,current
-tikz-fonts/feynman_higgs.svg,fail,,f26611883a5c63c4,2026-09-24T05:22:26.867Z,current
-tikz-fonts/feynman_moller.svg,fail,,c6eaa2abaf6f948e,2026-09-24T05:21:48.389Z,current
-tikz-fonts/feynman_qed_vertex.svg,fail,,2cbcb9bbb2b73ef4,2026-09-24T05:23:15.311Z,current
-tikz-fonts/flowchart_algorithm.svg,fail,very iimportant font issue and tofu box around the prime symbol that is ahead of the thetta symbol as well as the font in here this is an important one to fix,2728d7524f573883,2026-09-24T05:20:08.472Z,current
-tikz-fonts/function_graph_limits.svg,fail,,0a973d08f791af8d,2026-09-24T05:23:09.845Z,current
-tikz-fonts/geom_3d_axes.svg,fail,,f56143641a3cde29,2026-09-24T05:23:11.572Z,current
-tikz-fonts/geom_conic_sections.svg,fail,,9573cb1c4af1fc62,2026-09-24T05:22:30.667Z,current
+plantuml/activity_pipeline.svg,pass,,a6a7a03c6f4c1f49,2026-09-24T07:31:35.383Z,current
+plantuml/class_model.svg,pass,,a58bf2c4033b5cb5,2026-09-24T07:25:08.655Z,current
+plantuml/component_arch.svg,pass,,fa01c53f82f38db4,2026-09-24T07:31:42.432Z,current
+plantuml/mindmap_topics.svg,pass,,7c776db70c51a215,2026-09-24T07:28:20.655Z,current
+plantuml/sequence_auth.svg,pass,,75e96382f58fd9c6,2026-09-24T07:26:24.588Z,current
+plantuml/state_sampler.svg,pass,,9dc88e87ca59426e,2026-09-24T07:31:39.394Z,current
+plantuml/timing_gantt.svg,pass,,7eb1e8996c080843,2026-09-24T07:30:21.938Z,current
+plantuml/usecase_system.svg,pass,,918f4c574e6542f9,2026-09-24T07:23:24.225Z,current
+tikz-fonts/arrows_meta_showcase.svg,pass,,1f7a9d179354bfd4,2026-09-24T07:20:43.381Z,current
+tikz-fonts/automaton_dfa.svg,pass,,868dce46620b2970,2026-09-24T07:25:43.835Z,current
+tikz-fonts/automaton_markov_chain.svg,pass,,e99deb8e4c549ab8,2026-09-24T07:23:36.769Z,current
+tikz-fonts/automaton_pushdown.svg,pass,,928f5e0ec8c59f8e,2026-09-24T07:20:58.185Z,current
+tikz-fonts/bayesnet_hmm.svg,pass,,4f6b14a9949cdf12,2026-09-24T07:22:03.247Z,current
+tikz-fonts/bayesnet_plate.svg,pass,,b78a2b800650f614,2026-09-24T07:21:00.391Z,current
+tikz-fonts/bayesnet_regression_dag.svg,pass,,1ca7fe9288804718,2026-09-24T07:24:14.305Z,current
+tikz-fonts/bayesnet_sprinkler.svg,pass,,744c18d3caf72b2a,2026-09-24T07:21:10.714Z,current
+tikz-fonts/cd_adjunction.svg,pass,,b10e808e3d513682,2026-09-24T07:29:48.773Z,current
+tikz-fonts/cd_cube.svg,pass,,245129388107a4ca,2026-09-24T07:27:30.431Z,current
+tikz-fonts/cd_exact_sequence.svg,pass,,12f5f5edad675525,2026-09-24T07:25:24.304Z,current
+tikz-fonts/cd_natural_transformation.svg,pass,,c4697daaae0947b6,2026-09-24T07:25:27.729Z,current
+tikz-fonts/cd_pullback.svg,pass,,7edd8c95f92799e8,2026-09-24T07:27:21.471Z,current
+tikz-fonts/cd_snake_lemma.svg,pass,,fabcbf13fd9c5b3d,2026-09-24T07:24:52.051Z,current
+tikz-fonts/cd_square.svg,pass,,212af0988f53c301,2026-09-24T07:25:30.228Z,current
+tikz-fonts/circuit_opamp.svg,pass,,d080382c26a7a877,2026-09-24T07:29:10.304Z,current
+tikz-fonts/circuit_rlc.svg,pass,,9813626d9b77a171,2026-09-24T07:25:40.438Z,current
+tikz-fonts/complex_plane_roots.svg,pass,,93870f3d10085e00,2026-09-24T07:24:05.524Z,current
+tikz-fonts/feynman_annihilation.svg,pass,,6749c5b529de8ec7,2026-09-24T07:25:11.277Z,current
+tikz-fonts/feynman_gluon_loop.svg,pass,,a92713383766742e,2026-09-24T07:24:38.539Z,current
+tikz-fonts/feynman_higgs.svg,pass,,7a0d5a0ab89468f9,2026-09-24T07:25:18.243Z,current
+tikz-fonts/feynman_moller.svg,pass,,d5d11e49f6521d9a,2026-09-24T07:25:34.044Z,current
+tikz-fonts/feynman_qed_vertex.svg,pass,,ae21b9668f791e03,2026-09-24T07:29:53.613Z,current
+tikz-fonts/flowchart_algorithm.svg,pass,,c5e615d0cc9659ab,2026-09-24T07:22:46.713Z,current
+tikz-fonts/function_graph_limits.svg,pass,,7bce1ae911121d19,2026-09-24T07:26:04.865Z,current
+tikz-fonts/geom_3d_axes.svg,pass,,d0f010181d828c6e,2026-09-24T07:27:33.343Z,current
+tikz-fonts/geom_conic_sections.svg,pass,,5f63a957d4445362,2026-09-24T07:24:33.172Z,current
 tikz-fonts/geom_fractal_sierpinski.svg,pass,,dce32f820bf8b878,2026-09-24T05:22:50.547Z,current
-tikz-fonts/geom_inscribed_angle.svg,fail,,7f7d7b3e0a8078e4,2026-09-24T05:22:33.340Z,current
+tikz-fonts/geom_inscribed_angle.svg,pass,,3bedd373dbfae980,2026-09-24T07:29:39.877Z,current
 tikz-fonts/geom_polyhedron.svg,pass,,00c567a3a8f9c585,2026-09-24T05:21:13.597Z,current
 tikz-fonts/geom_pythagoras.svg,fail,,3e771414dc603c5d,2026-09-24T05:23:17.176Z,current
-tikz-fonts/geom_unit_circle.svg,fail,,d747229f50cbd2d0,2026-09-24T05:21:28.047Z,current
+tikz-fonts/geom_unit_circle.svg,pass,,6d7b2ee76f4a7fbb,2026-09-24T07:23:55.565Z,current
 tikz-fonts/graph_grid_torus.svg,pass,,6a4156b344b57e78,2026-09-24T05:20:47.334Z,current
-tikz-fonts/graph_k5_k33.svg,fail,fonts again,f2dfee8057115307,2026-09-24T05:05:42.314Z,current
+tikz-fonts/graph_k5_k33.svg,pass,,0d769f2b74a61b66,2026-09-24T07:28:06.387Z,current
 tikz-fonts/graph_petersen.svg,pass,,54b2747cb3a3af10,2026-09-24T05:21:11.773Z,current
-tikz-fonts/graph_weighted_dijkstra.svg,fail,big font issue,2fd93544e0dd3da3,2026-09-24T05:19:28.968Z,current
+tikz-fonts/graph_weighted_dijkstra.svg,pass,,6062478eeaabe560,2026-09-24T07:28:39.566Z,current
 tikz-fonts/knot_trefoil.svg,fail,this looks like neither are rendering tbh its just showing a circle and should be a trefoil i think,21f651fee1341803,2026-09-24T05:23:38.506Z,current
-tikz-fonts/lattice_subgroups.svg,fail,important and major faiilure here,916aeb9d62085189,2026-09-24T05:21:40.655Z,current
-tikz-fonts/matrix_block.svg,fail,"this is a pretty bad fail do a deep dive and fix see fi we can find the other font issues too it should be different for the a ,b,0 numbers all the fonts seem off here",bb81a38104764598,2026-09-24T05:03:42.167Z,current
-tikz-fonts/mindmap_stats.svg,pass,,03264199d7ef871e,2026-09-24T05:23:01.644Z,current
-tikz-fonts/nn_attention.svg,fail,"major font issue and huge square root regression and drawigng of that issue, take a close look at thsi one this is a big failure unfortunately",d2e883bb853bd0b8,2026-09-24T05:18:49.979Z,current
-tikz-fonts/nn_conv_blocks.svg,fail,,4bfaed5b70e274a4,2026-09-24T05:21:30.089Z,current
-tikz-fonts/nn_mlp.svg,fail,font issue,d086c3ff90ff4379,2026-09-24T05:06:41.319Z,current
-tikz-fonts/nn_rnn_unrolled.svg,fail,font,5117e531d6953d6e,2026-09-24T05:20:29.810Z,current
+tikz-fonts/lattice_subgroups.svg,pass,,093d8eaa69b7a340,2026-09-24T07:29:51.642Z,current
+tikz-fonts/matrix_block.svg,pass,,05afc9fead733111,2026-09-24T07:28:56.321Z,current
+tikz-fonts/mindmap_stats.svg,pass,,6fa5ef0b18db686b,2026-09-24T07:26:08.183Z,current
+tikz-fonts/nn_attention.svg,pass,,bc7406fb523c0d23,2026-09-24T07:22:23.658Z,current
+tikz-fonts/nn_conv_blocks.svg,pass,,267d8576538fc993,2026-09-24T07:24:16.701Z,current
+tikz-fonts/nn_mlp.svg,pass,,d1d0504f4995da8a,2026-09-24T07:20:28.631Z,current
+tikz-fonts/nn_rnn_unrolled.svg,pass,,8256b59759fdc6e3,2026-09-24T07:28:59.459Z,current
 tikz-fonts/patterns_fill.svg,pass,,6ff8cc6004a1757f,2026-09-24T05:02:26.322Z,current
-tikz-fonts/plot_pgf_3d_surface.svg,fail,font issue but otherwise it looks great! good job!,d2aafadd814a6922,2026-09-24T05:28:26.461Z,current
-tikz-fonts/plot_pgf_bar.svg,fail,fonts got worse somehow with weird kerning must fix the fonts to be fancy,b56fb6e70750a788,2026-09-24T05:06:15.775Z,current
-tikz-fonts/plot_pgf_contour_scatter.svg,fail,,33798e0c9b3583c8,2026-09-24T05:22:54.369Z,current
-tikz-fonts/plot_pgf_functions.svg,fail,,8c2d9b96575c9cc6,2026-09-24T05:20:51.968Z,current
-tikz-fonts/plot_pgf_histogram.svg,fail,font fail,42285bed593c3933,2026-09-24T05:16:59.431Z,current
-tikz-fonts/plot_pgf_loglog_errors.svg,fail,"fonts got messed up since last time pretty bad, we need the fancy math font its quite imoprtant and the kerning is messed up here this is pretty imoprtant to fix",ad5033bc21581a8a,2026-09-24T05:05:17.659Z,current
-tikz-fonts/plot_pgf_normal_shaded.svg,fail,,1e9d6a16a67e7091,2026-09-24T05:22:28.533Z,current
-tikz-fonts/plot_pgf_polar.svg,fail,fonts bad here,f805a3c2270ca9e3,2026-09-24T05:09:32.652Z,current
-tikz-fonts/plot_pgf_posterior.svg,fail,"fonts are off here by a lot, this is a pretty big issue and makes it look wrong something happened with the density font too its overlapping itself, this is e very severe one please look at it",a981db2b8f98944b,2026-09-24T05:04:16.153Z,current
-tikz-fonts/riemann_sums.svg,fail,major regression here and this one is important to get right,024990ef4cc12940,2026-09-24T05:22:17.793Z,current
+tikz-fonts/plot_pgf_3d_surface.svg,pass,,6ecb9a62efe1c180,2026-09-24T07:19:27.259Z,current
+tikz-fonts/plot_pgf_bar.svg,pass,,0f37173f9cdf122c,2026-09-24T07:19:44.055Z,current
+tikz-fonts/plot_pgf_contour_scatter.svg,pass,,da0918bd768a0126,2026-09-24T07:25:47.837Z,current
+tikz-fonts/plot_pgf_functions.svg,pass,,8ce5723a4e1884d8,2026-09-24T07:23:32.479Z,current
+tikz-fonts/plot_pgf_histogram.svg,pass,,7762c66520b8b14f,2026-09-24T07:30:49.616Z,current
+tikz-fonts/plot_pgf_loglog_errors.svg,pass,,dc12b834f6ad7f6e,2026-09-24T07:18:56.133Z,current
+tikz-fonts/plot_pgf_normal_shaded.svg,pass,,a1fbc34e27e4fe48,2026-09-24T07:25:21.417Z,current
+tikz-fonts/plot_pgf_polar.svg,pass,,218b2ac7e176fd05,2026-09-24T07:30:47.088Z,current
+tikz-fonts/plot_pgf_posterior.svg,pass,,71dcc07aaa7480d5,2026-09-24T07:21:48.533Z,current
+tikz-fonts/riemann_sums.svg,pass,,7f4170eb8afb233d,2026-09-24T07:24:48.765Z,current
 tikz-fonts/shading_gradients.svg,pass,,ba8da90206f1b2d8,2026-09-24T05:23:19.820Z,current
-tikz-fonts/timeline_calendar.svg,fail,fonts bad at a level that is not ok,9bff5e596a698a00,2026-09-24T05:05:36.300Z,current
-tikz-fonts/tree_binary_search.svg,fail,,90ac0e97373f56a9,2026-09-24T05:21:32.264Z,current
-tikz-fonts/tree_forest_parse.svg,fail,,231a7cba3f52a77b,2026-09-24T05:21:15.523Z,current
-tikz-fonts/tree_probability.svg,fail,,85528f3c173668a0,2026-09-24T05:21:46.283Z,current
-tikz-fonts/tree_qtree_decision.svg,fail,,c46f720b6e9dbb73,2026-09-24T05:23:45.689Z,current
+tikz-fonts/timeline_calendar.svg,pass,,73d77df438f35df2,2026-09-24T07:28:04.479Z,current
+tikz-fonts/tree_binary_search.svg,pass,,009f198a1d6a508e,2026-09-24T07:24:24.457Z,current
+tikz-fonts/tree_forest_parse.svg,pass,,3a59a1ca47bdf6eb,2026-09-24T07:25:15.263Z,current
+tikz-fonts/tree_probability.svg,pass,,a3b5e61a05437ebf,2026-09-24T07:26:33.942Z,current
+tikz-fonts/tree_qtree_decision.svg,pass,,5c15ca2aa1a3ef04,2026-09-24T07:30:01.541Z,current
 tikz-fonts/vector_field_tikz.svg,pass,,25319079b8edcc5b,2026-09-24T05:22:22.967Z,current
-tikz-fonts/venn_even_odd.svg,fail,tofu box issue instead of delta big issue here and omega font is offf,76d9e81997655a61,2026-09-24T05:20:24.193Z,current
-tikz-fonts/venn_three.svg,fail,,d35c475b443ecda2,2026-09-24T05:23:13.472Z,current
+tikz-fonts/venn_even_odd.svg,pass,,2da14dc63a16b2d6,2026-09-24T07:21:50.429Z,current
+tikz-fonts/venn_three.svg,pass,,13eaf4370fa138b5,2026-09-24T07:27:27.879Z,current
 tikz/arrows_meta_showcase.svg,pass,[judged at 300 px],85b6e37dc786a8ab,2026-09-24T04:05:02.726Z,current
 tikz/automaton_markov_chain.svg,pass,,b3430460563b86d7,2026-09-24T05:36:16.592Z,current
 tikz/automaton_pushdown.svg,pass,,7e74874c29da98e2,2026-09-24T05:35:40.632Z,current
@@ -366,16 +366,16 @@ web-tikz/multilayer-perceptron.svg,pass,,052238bd01aeeae9,2026-09-24T05:11:52.49
 web-tikz/operator-orderings.svg,pass,,557beded1679831e,2026-09-24T05:19:02.566Z,current
 web-tikz/risk-opportunity-matrix.svg,pass,,bcdef9b4ed4e6441,2026-09-24T04:32:51.699Z,current
 web-tikz/torus-fundamental-domain.svg,pass,,6994d90c3a479afb,2026-09-24T05:15:01.412Z,current
-web-vega/area_density.svg,pass,,e11be783ecb186ce,2026-09-24T05:32:30.654Z,current
-web-vega/area_density_stacked.svg,fail,we should have this font too,c006000c2ca28968,2026-09-24T05:11:05.260Z,current
-web-vega/boxplot_2D_vertical.svg,pass,,bab9704a479a9673,2026-09-24T05:32:49.718Z,current
-web-vega/boxplot_minmax_2D_horizontal.svg,pass,,38da9358192587c1,2026-09-24T05:11:10.806Z,current
-web-vega/circle_bubble_health_income.svg,pass,,e7b000530a7f764d,2026-09-24T05:15:15.538Z,current
-web-vega/connected_scatterplot.svg,pass,,ac5cd196d8736039,2026-09-24T05:32:36.105Z,current
-web-vega/errorband_2d_vertical_borders.svg,pass,,4db6894be57b6e74,2026-09-24T05:19:06.266Z,current
-web-vega/histogram_nonlinear.svg,pass,,c44d5e24402614f0,2026-09-24T05:32:33.585Z,current
-web-vega/layer_candlestick.svg,pass,,1052b7144fef641d,2026-09-24T05:14:15.278Z,current
-web-vega/layer_dual_axis.svg,pass,slight font but everything else good,4165dd265757ab14,2026-09-24T05:17:27.575Z,current
-web-vega/layer_likert.svg,pass,,5cb61a4cbdd5918a,2026-09-24T05:09:48.842Z,current
-web-vega/rect_heatmap.svg,pass,,5108ab4d78b7dabe,2026-09-24T05:11:34.852Z,current
-web-vega/trellis_area.svg,pass,,529898cca5f3e968,2026-09-24T05:17:32.554Z,current
+web-vega/area_density.svg,pass,,812c880e08a20b20,2026-09-24T07:28:27.717Z,current
+web-vega/area_density_stacked.svg,pass,,b106e47da394d4d9,2026-09-24T07:28:36.107Z,current
+web-vega/boxplot_2D_vertical.svg,pass,,dacbfa08f968f506,2026-09-24T07:26:28.622Z,current
+web-vega/boxplot_minmax_2D_horizontal.svg,pass,,ebc00411715745cd,2026-09-24T07:30:38.717Z,current
+web-vega/circle_bubble_health_income.svg,pass,,306d424fd7825158,2026-09-24T07:33:27.690Z,current
+web-vega/connected_scatterplot.svg,pass,,b7225d7447d37585,2026-09-24T07:21:53.388Z,current
+web-vega/errorband_2d_vertical_borders.svg,pass,,5a75afaf144f881b,2026-09-24T07:33:40.259Z,current
+web-vega/histogram_nonlinear.svg,pass,,8aa5f045299e1900,2026-09-24T07:33:52.664Z,current
+web-vega/layer_candlestick.svg,pass,,38c84d205a7c092c,2026-09-24T07:20:34.478Z,current
+web-vega/layer_dual_axis.svg,pass,,9785d1757e32dabe,2026-09-24T07:33:35.206Z,current
+web-vega/layer_likert.svg,pass,,86d39eb1c1dc04ad,2026-09-24T07:19:33.290Z,current
+web-vega/rect_heatmap.svg,pass,,c0c41e62f1ff0ca3,2026-09-24T07:33:48.920Z,current
+web-vega/trellis_area.svg,pass,,8a5007eb49180cfd,2026-09-24T07:33:31.982Z,current
