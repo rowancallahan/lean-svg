@@ -419,6 +419,18 @@ def mapPt (ts : Mat) (ox oy : Int) (x y : F32) : F32 × F32 :=
   let py := F32.add (F32.add (F32.mul x ky) (F32.mul y sy)) (fFix ts.f 256)
   (F32.sub px (fInt ox), F32.sub py (fInt oy))
 
+/-- Skia's `kAntiAliasThreshold` (0.016) and its inverse `fConeScale`. -/
+def coneAA : F32 := F32.ofRat 16 1000
+def coneScale : F32 := F32.div F32.one coneAA
+
+/-- T101: the soft `limitingConeAngle` edge of Skia's `SkSpotLight::lightColor`
+(Chromium, the suite's reference PNGs), in place of resvg's hard cut.  `c` is
+the cone's cosine, `m = -L·S ≥ c` and `f = m^specularExponent`; within
+`coneAA` of the edge `f` ramps linearly to zero:
+`f · ((m - c) · coneScale)`. -/
+def coneFade (c m f : F32) : F32 :=
+  if F32.lt m (F32.add c coneAA) then F32.mul f (F32.mul (F32.sub m c) coneScale) else f
+
 /-- Run one lighting primitive on `src` (only its alpha is read).  The result
 is `rw × rh`, anchored at the layer origin like every filter image; `(ox, oy)`
 is the filter region's origin in layer pixels and `ts` the user-to-layer
@@ -517,8 +529,11 @@ def apply (p : Params) (sinCos : F32 → F32 × F32) (ts : Mat) (ox oy : Int) (r
         else if (match coneCos with | some c => F32.lt m c | none => false) then
           (cr, cg, cb) := (0, 0, 0)
         else
-          let (f, b) := powF m spotSe budget
+          let (f0, b) := powF m spotSe budget
           budget := b
+          let f := match coneCos with
+            | some c => coneFade c m f0
+            | none => f0
           (cr, cg, cb) := (compute p.r (some f), compute p.g (some f), compute p.b (some f))
       let r := compute cr kf
       let g := compute cg kf

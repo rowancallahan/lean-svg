@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <!-- T101: feSpotLight fades over the last 0.016 of cos(limitingConeAngle) (Skia), not a hard edge -->
+  <filter id="f" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+    <feDiffuseLighting lighting-color="#fd8">
+      <feSpotLight x="100" y="100" z="60" pointsAtX="100" pointsAtY="100" limitingConeAngle="40"/>
+    </feDiffuseLighting>
+  </filter>
+  <filter id="g" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+    <feSpecularLighting lighting-color="#8cf" specularExponent="2">
+      <feSpotLight x="100" y="-20" z="120" pointsAtX="100" pointsAtY="200" limitingConeAngle="-20"/>
+    </feSpecularLighting>
+  </filter>
+  <rect width="200" height="200" filter="url(#f)"/>
+  <rect x="20" y="130" width="160" height="60" filter="url(#g)"/>
+</svg>
