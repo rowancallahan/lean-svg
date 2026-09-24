@@ -3316,13 +3316,14 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           layStack := layStack.push (lc.push owners.size)
           owners := owners.push st
         else layStack := layStack.push lc
-        -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
-        -- while its characters keep their slots in the position lists.
+        -- usvg's `is_visible_element`: `display:none` or failed conditional
+        -- processing (`systemLanguage`, ...) drops a span's glyphs while its
+        -- characters keep their slots in the position lists.
         let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
         let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         bsStack := bsStack.push
           (bpx + dpx, bsub + (if dsub then 1 else 0), bsup + (if dsup then 1 else 0))
-        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs
+        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs && passesConditions attrs
         if nm == "textPath" then
           -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
           let ep := elemPosOf st attrs
@@ -3376,7 +3377,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             (Text.Ev.text targetText st.spacePreserve selfIdx
               (decorSizes styles
                 { sp with underlineIdx, overlineIdx, throughIdx })
-              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0))
+              ((rendStack.back?.getD true) && !isDisplayNone attrs && passesConditions attrs && st.fontSize > 0))
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && !st.fontAvailable then
             warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize < 0 then
