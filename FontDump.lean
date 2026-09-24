@@ -1,5 +1,6 @@
 import LeanSvg.Font
 import LeanSvg.FontSet
+import LeanSvg.Woff
 
 /-!
 # `fontdump`: a debug/oracle tool over `LeanSvg.Font`
@@ -31,7 +32,9 @@ def usage : String :=
   "usage: fontdump <font.ttf> <text>\n" ++
   "       fontdump --embedded <module in LeanSvg/Fonts> <text>\n" ++
   "       fontdump --metrics <font.ttf>\n" ++
-  "       fontdump --metrics --embedded <module in LeanSvg/Fonts>\n"
+  "       fontdump --metrics --embedded <module in LeanSvg/Fonts>\n" ++
+  "       fontdump --sfnt <font.ttf|.woff|.woff2>   (the sfnt it decodes to, on stdout)\n" ++
+  "       fontdump --brotli <file> <size>           (the decompressed bytes, on stdout)\n"
 
 /-- The embedded font as the renderer loads it (`Font.parseEmbedded`, T94), so
 `tests/check_font.py --via-embedded` checks that path. -/
@@ -144,7 +147,17 @@ def main (args : List String) : IO UInt32 := do
       return 2
   | ["--metrics", path] =>
     let bytes ← IO.FS.readBinFile path
-    runMetricsOn (LeanSvg.Font.parse bytes)
+    runMetricsOn (LeanSvg.Woff.parseFont bytes)
+  | ["--sfnt", path] =>
+    let bytes ← IO.FS.readBinFile path
+    match LeanSvg.Woff.toSfnt bytes with
+    | some out => (← IO.getStdout).write out; return 0
+    | none => IO.eprintln "fontdump: cannot decode"; return 1
+  | ["--brotli", path, size] =>
+    let bytes ← IO.FS.readBinFile path
+    match LeanSvg.Brotli.decompress bytes (size.toNat?.getD 0) with
+    | some out => (← IO.getStdout).write out; return 0
+    | none => IO.eprintln "fontdump: cannot decompress"; return 1
   | ["--embedded", name, text] =>
     match embeddedFont name with
     | some f => runOn (some f) text
@@ -153,7 +166,7 @@ def main (args : List String) : IO UInt32 := do
       return 2
   | [path, text] =>
     let bytes ← IO.FS.readBinFile path
-    runOn (LeanSvg.Font.parse bytes) text
+    runOn (LeanSvg.Woff.parseFont bytes) text
   | _ =>
     IO.eprintln usage
     return 2

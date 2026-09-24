@@ -572,6 +572,73 @@ def generate_cases():
         + '\n<rect x="10" y="10" width="20" height="20"/>\n</svg>\n',
     )
 
+
+    # ---- T105: fonts embedded with @font-face ---------------------------
+    # (Brotli streams are written by hand, `brotli_stored`/`brotli_zeros`, so
+    # this needs no Brotli library.)
+    ok_woff2 = base64.b64decode(re.search(
+        r"data:font/woff2;base64,([A-Za-z0-9+/=]+)",
+        (SVG_DIR / "105_font_face.svg").read_text()).group(1))
+
+    def font_face_svg(name, fonts, family_count=1, texts=1):
+        rules = "".join(
+            "@font-face{font-family:F%d;src:url(data:font/woff2;base64,%s) format('woff2');}\n"
+            % (i % family_count, base64.b64encode(f).decode()) for i, f in enumerate(fonts))
+        body = "".join(
+            '<text x="5" y="%d" font-size="10" font-family="F%d, sans-serif">Quartz 123</text>\n'
+            % (12 + 12 * (i % 15), i % family_count) for i in range(texts))
+        write_text(name,
+                   '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n'
+                   "<style>" + rules + "</style>\n" + body + "</svg>\n")
+
+    # A Brotli bomb: 45 bytes that inflate to 256 MiB of zeros, declared as a
+    # 16 MiB `name` table (the per-font cap) and repeated in 1000 rules: each
+    # decode stops at 16 MiB, and the 64 MiB work budget stops trying after
+    # four.
+    bomb = brotli_zeros(16)
+    font_face_svg("font_face_brotli_bomb.svg",
+                  [woff2_file([(5, (16 << 20) - 64, None)], bomb)] * 1000, texts=20)
+    # A stream that really is the declared 16 MiB (the slowest a face can
+    # be), 1000 times: the work budget decodes four.
+    font_face_svg("font_face_brotli_full.svg",
+                  [woff2_file([(5, (16 << 20) - 64, None)], brotli_zeros(1, (16 << 20) - 80))] * 1000,
+                  texts=20)
+    # The same stream declared small: decoding stops at the declared size.
+    font_face_svg("font_face_brotli_bomb_small.svg",
+                  [woff2_file([(5, 1000, None)], bomb)] * 200, texts=5)
+    # Declared sizes past every cap: a 2^32 - 1 table and sfnt size.
+    font_face_svg("font_face_woff2_huge_sizes.svg",
+                  [woff2_file([(5, 0xFFFFFFFF, None)], bomb, total_sfnt=0xFFFFFFFF),
+                   woff2_file([(10, 0xFFFFFFFF, 0xFFFFFFFF), (11, 0xFFFFFFFF, 0)], bomb)], texts=5)
+    # Garbage: random bytes behind a WOFF 2.0 signature, and truncations of
+    # a valid font.
+    rng = random.Random(105)
+    garbage = [b"wOF2" + bytes(rng.randrange(256) for _ in range(rng.randrange(1, 400)))
+               for _ in range(50)]
+    garbage += [ok_woff2[:rng.randrange(len(ok_woff2))] for _ in range(50)]
+    font_face_svg("font_face_woff2_garbage.svg", garbage, family_count=10, texts=30)
+    # WOFF 1.0 zlib bomb: one table declared 16 MiB, inflating to 256 MiB.
+    zb = zlib.compress(bytes(256 << 20), 9)
+    woff1 = (struct.pack(">4sIIHHIHHIIIII", b"wOFF", 0x00010000, 44 + 20 + len(zb), 1, 0,
+                         (16 << 20) + 28, 1, 0, 0, 0, 0, 0, 0)
+             + struct.pack(">4sIIII", b"name", 64, len(zb), (16 << 20) - 64, 0) + zb)
+    write_text("font_face_woff1_zlib_bomb.svg",
+               '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">\n<style>'
+               + ("@font-face{font-family:Z;src:url(data:font/woff;base64,%s);}\n"
+                  % base64.b64encode(woff1).decode()) * 50
+               + '</style>\n<text x="5" y="20" font-family="Z" font-size="12">zlib</text>\n</svg>\n')
+    # Many faces of one valid font: the 256-face cap, and every text element
+    # resolving its family.
+    font_face_svg("font_face_many.svg", [ok_woff2] * 2000, family_count=500, texts=2000)
+    # Hostile transformed `glyf` tables (with a `loca` and a `maxp`), stored
+    # uncompressed in the Brotli stream so every claim reaches
+    # `Woff.reconstructGlyf`.
+    evil = [woff2_glyf(g) for g in evil_glyf_tables()]
+    font_face_svg("font_face_woff2_glyf_evil.svg", evil, family_count=len(evil), texts=len(evil))
+
+    # Non-`data:` sources only (checked for being inert by
+    # `check_font_face_refs_inert` too).
+    write_text("font_face_refs.svg", FONT_FACE_REFS_SVG)
     return sorted(GEN_DIR.iterdir())
 
 
@@ -765,6 +832,185 @@ def check_image_refs_inert(binary):
     return result
 
 
+class BitWriter:
+    """Bits LSB first, as Brotli packs them."""
+
+    def __init__(self):
+        self.bits = []
+
+    def w(self, v, n):
+        self.bits.extend((v >> k) & 1 for k in range(n))
+
+    def raw(self, bs):
+        self.bits.extend([0] * (-len(self.bits) % 8))
+        for b in bs:
+            self.w(b, 8)
+
+    def get(self):
+        self.bits.extend([0] * (-len(self.bits) % 8))
+        return bytes(sum(self.bits[i + k] << k for k in range(8)) for i in range(0, len(self.bits), 8))
+
+
+def brotli_mlen(bw, n):
+    nib = 4 if n <= 1 << 16 else 5 if n <= 1 << 20 else 6
+    bw.w(nib - 4, 2)
+    bw.w(n - 1, 4 * nib)
+
+
+def brotli_stored(data):
+    """A valid Brotli stream of uncompressed meta-blocks holding `data`."""
+    bw = BitWriter()
+    bw.w(0, 1)                                   # WBITS 16
+    for i in range(0, len(data), 1 << 16):
+        chunk = data[i:i + (1 << 16)]
+        bw.w(0, 1)
+        brotli_mlen(bw, len(chunk))
+        bw.w(1, 1)                               # ISUNCOMPRESSED
+        bw.raw(chunk)
+    bw.w(1, 1)
+    bw.w(1, 1)                                   # ISLAST, ISLASTEMPTY
+    return bw.get()
+
+
+def brotli_zeros(blocks, block_len=1 << 24):
+    """16 stored zero bytes, then `blocks` meta-blocks of `block_len` (at
+    least 2118, at most 2^24) zeros, each one command of zero-bit prefix codes
+    copying from distance 4 (45 bytes for 256 MiB)."""
+    bw = BitWriter()
+    bw.w(0, 1)
+    bw.w(0, 1)
+    brotli_mlen(bw, 16)
+    bw.w(1, 1)
+    bw.raw(bytes(16))
+    for _ in range(blocks):
+        bw.w(0, 1)
+        brotli_mlen(bw, block_len)
+        bw.w(0, 1)                               # compressed
+        bw.w(0, 3)                               # one block type each for L, I, D
+        bw.w(0, 6)                               # NPOSTFIX, NDIRECT
+        bw.w(0, 2)                               # context mode
+        bw.w(0, 2)                               # one literal tree, one distance tree
+        bw.w(1, 2); bw.w(0, 2); bw.w(0, 8)       # literals: the one symbol 0
+        bw.w(1, 2); bw.w(0, 2); bw.w(391, 10)    # commands: insert 0, copy code 23
+        bw.w(1, 2); bw.w(0, 2); bw.w(0, 6)       # distances: code 0 (the last, 4)
+        bw.w(block_len - 2118, 24)               # the copy length
+    bw.w(1, 1)
+    bw.w(1, 1)
+    return bw.get()
+
+
+def woff2_b128(v):
+    out = [v & 0x7F]
+    v >>= 7
+    while v:
+        out.append(0x80 | (v & 0x7F))
+        v >>= 7
+    return bytes(reversed(out))
+
+
+def woff2_file(entries, stream, total_sfnt=None):
+    """A WOFF 2.0 file: directory `(flags, origLength, transformLength or
+    None)` and the Brotli `stream`."""
+    d = b"".join(bytes([f]) + woff2_b128(o) + (woff2_b128(t) if t is not None else b"")
+                 for f, o, t in entries)
+    total = 48 + len(d) + len(stream)
+    sfnt = total_sfnt if total_sfnt is not None else min(0xFFFFFFFF, 12 + 16 * len(entries)
+                                                        + sum(o for _, o, _ in entries))
+    return struct.pack(">4sIIHHIIHHIIIII", b"wOF2", 0x00010000, total, len(entries), 0, sfnt,
+                       len(stream), 1, 0, 0, 0, 0, 0, 0) + d + stream
+
+
+def woff2_glyf(glyf):
+    """`glyf` (transformed) + `loca` (transformed, empty) + a `maxp`."""
+    maxp = struct.pack(">IH", 0x00005000, struct.unpack_from(">H", glyf, 4)[0])
+    return woff2_file([(10, 4 * 65536, len(glyf)), (11, 4 * 65536, 0), (4, len(maxp), None)],
+                      brotli_stored(glyf + maxp))
+
+
+def glyf_header(num_glyphs, streams, option_flags=0):
+    return (struct.pack(">HHHH", 0, option_flags, num_glyphs, 1)
+            + b"".join(struct.pack(">I", len(x)) for x in streams) + b"".join(streams))
+
+
+def evil_glyf_tables():
+    out = []
+    # every glyph claims 32767 contours; the point streams are nearly empty
+    n = 1000
+    out.append(glyf_header(n, [struct.pack(">h", 32767) * n, b"\xfd\xff\xff" * 10, b"\0" * 10,
+                               b"\0" * 10, b"", bytes(4 * ((n + 31) // 32)), b""]))
+    # every stream claims 4 GiB
+    g = bytearray(glyf_header(10, [b""] * 7))
+    for k in range(7):
+        struct.pack_into(">I", g, 8 + 4 * k, 0xFFFFFFFF)
+    out.append(bytes(g))
+    # composites whose flags always say "more components", bbox bitmap all set
+    n = 64
+    out.append(glyf_header(n, [struct.pack(">h", -1) * n, b"", b"", b"",
+                               b"\xff\xff" * 5000, b"\xff" * (4 * ((n + 31) // 32)) + b"\0" * 64, b""]))
+    # 65535 glyphs, the most a font has, of one point each
+    n = 65535
+    out.append(glyf_header(n, [struct.pack(">h", 1) * n, b"\x01" * n, b"\x7d" * n,
+                               b"\x7f\xff\x7f\xff\x00" * n, b"", bytes(4 * ((n + 31) // 32)), b""]))
+    # 55 glyphs of 65535 one-byte points zigzagging by 1: 7 MiB in, and the
+    # rebuilt `glyf` (5 bytes a point) passes the 16 MiB cap
+    n = 55
+    out.append(glyf_header(n, [struct.pack(">h", 1) * n, b"\xfd\xff\xff" * n,
+                               (b"\x17\x14" * 32768)[:65535] * n,
+                               (b"\x00" * 65535 + b"\x00") * n, b"",
+                               bytes(4 * ((n + 31) // 32)), b""]))
+    return out
+
+
+# T105: every kind of non-`data:` font source.  None may be loaded, so the
+# file must render exactly as it does without its <style>.
+FONT_FACE_REFS_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120">\n<style>\n'
+    "@font-face{font-family:R1;src:url(font.woff2) format('woff2');}\n"
+    "@font-face{font-family:R2;src:url('file:///etc/passwd');}\n"
+    '@font-face{font-family:R3;src:url("https://example.com/f.woff");}\n'
+    "@font-face{font-family:R4;src:local('Noto Serif'), local(Arial);}\n"
+    "@font-face{font-family:R5;src:url(//example.com/f.ttf) format('truetype');}\n"
+    "@font-face{font-family:R6;src:url(data:font/woff2;base64,) format('woff2');}\n"
+    "</style>\n"
+    + "".join('<text x="5" y="%d" font-size="14" font-family="R%d, sans-serif">R%d text</text>\n'
+              % (18 * k, k, k) for k in range(1, 7))
+    + "</svg>\n")
+
+
+def check_font_face_refs_inert(binary):
+    """T105: a `@font-face` whose sources are not `data:` URLs loads nothing:
+    the file renders byte-identically without its `<style>`."""
+    result = {"name": "font_face_refs_inert", "rc": None, "ms": None, "output": False,
+              "stderr": "", "violations": []}
+    tmpdir = Path(tempfile.mkdtemp(prefix="lean-svg_adv_"))
+    try:
+        a = tmpdir / "a.svg"
+        b = tmpdir / "b.svg"
+        a.write_text(FONT_FACE_REFS_SVG)
+        b.write_text(re.sub(r"<style>.*</style>", "", FONT_FACE_REFS_SVG, flags=re.S))
+        outs = []
+        start = time.perf_counter()
+        for svg, name in ((a, "a.png"), (b, "b.png")):
+            proc = subprocess.run([str(binary), str(svg), str(tmpdir / name)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=RENDER_TIMEOUT)
+            result["rc"] = proc.returncode
+            result["stderr"] = proc.stderr.decode("utf-8", "replace").strip()
+            if proc.returncode not in (0, 2):
+                result["violations"].append("render of %s failed" % svg.name)
+                return result
+            outs.append((tmpdir / name).read_bytes())
+        result["ms"] = (time.perf_counter() - start) * 1000.0
+        result["output"] = True
+        if outs[0] != outs[1]:
+            result["violations"].append("non-data: font sources changed the output")
+    except subprocess.TimeoutExpired:
+        result["violations"].append("timed out after %ds" % RENDER_TIMEOUT)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return result
+
+
 def check_foreignobject_refs_inert(binary):
     """Rowan: HTML inside `<foreignObject>` (T104) must never load anything.
     Every resource-bearing element and CSS `url()`/`@import` in
@@ -927,7 +1173,8 @@ def main():
 
     extra_checks = {"no_clobber": check_no_clobber, "oversized_input": check_max_input_size,
                     "image_refs_inert": check_image_refs_inert,
-                    "foreignobject_refs_inert": check_foreignobject_refs_inert}
+                    "foreignobject_refs_inert": check_foreignobject_refs_inert,
+                    "font_face_refs_inert": check_font_face_refs_inert}
     extra_names = [n for n in extra_checks if not args.filter or args.filter in n]
     if not cases and not extra_names:
         print("no adversarial cases to run", file=sys.stderr)

@@ -152,7 +152,8 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
     | none => break
     | some i =>
       let cp := cps.getD i 0
-      let dflt := FamilyMatch.fallbackOrder base covs.size
+      -- T105: only the embedded fonts are fallbacks, never a document font
+      let dflt := FamilyMatch.fallbackOrder base (Nat.min covs.size FontSet.count)
       let order := match pref with
         | some p => if isHan cp then p :: dflt else dflt
         | none => dflt
@@ -752,7 +753,7 @@ caller draws them through `ctm · scale(1 / outK)`), so text under a large
 `transform` keeps sub-`Fx` precision in its outlines
 (`textPath/dy-with-tiny-coordinates.svg`).  The returned boxes stay unscaled. -/
 def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Bool)
-    (outK : Int := 1) :
+    (outK : Int := 1) (doc : Array (Option Font × Array (Nat × Nat)) := #[]) :
     Array Placed × Nat × Option Box × Array (Option Box) :=
   Id.run do
   -- ---- 1. character-data nodes, in document order, with their nesting depth
@@ -889,9 +890,11 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       pos := pos.setIfInBounds i { pos.getD i {} with x := none, y := none, dx := 0, dy := 0 }
   -- ---- 6. fonts (T91): every font's coverage, for fallback; each font
   -- itself is decoded and parsed the first time a character needs it
-  let covs : Array (Array (Nat × Nat)) := FontSet.entries.map (fun e => Font.decodeRanges e.coverage)
-  let mut fonts : Array (Option Font) := Array.replicate FontSet.count none
-  let mut loaded : Array Bool := Array.replicate FontSet.count false
+  -- (T105: the document's own fonts, `doc`, follow at `FontSet.count + k`)
+  let covs : Array (Array (Nat × Nat)) :=
+    FontSet.entries.map (fun e => Font.decodeRanges e.coverage) ++ doc.map (·.2)
+  let mut fonts : Array (Option Font) := Array.replicate FontSet.count none ++ doc.map (·.1)
+  let mut loaded : Array Bool := Array.replicate FontSet.count false ++ doc.map (fun _ => true)
   -- ---- 7. the renderable characters, in order
   let mut rend : Array Nat := Array.emptyWithCapacity total
   for i in [0:total] do
@@ -991,7 +994,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             spans := spans.setIfInBounds (spans.size - 1) (s0, q + 1, bf, kern, sc)
           else spans := spans.push (q, q + 1, bf, kern, sc)
         | none => spans := spans.push (q, q + 1, bf, kern, sc)
-      let (groups, cache) := ShapeText.processChunk ⟨fonts, loaded⟩ covs cps spans
+      let (groups, cache) := ShapeText.processChunk ⟨fonts, loaded⟩ (covs.extract 0 FontSet.count) cps spans
         (if rtlPara then 1 else 0) override
       fonts := cache.fonts
       loaded := cache.loaded

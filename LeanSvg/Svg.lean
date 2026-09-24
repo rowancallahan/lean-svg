@@ -14,6 +14,7 @@ import LeanSvg.SvgImage
 import LeanSvg.Units
 import LeanSvg.BasicShape
 import LeanSvg.Warn
+import LeanSvg.FontFace
 import Std.Data.HashMap
 
 /-!
@@ -208,6 +209,10 @@ structure Style where
   none is set), for the warning a run reports when it is not `fontAvailable`
   and falls through to Noto Sans. -/
   fontFamilyRaw : ByteArray := "Times New Roman".toUTF8
+  /-- T105: the document's own `@font-face` faces (`FontFace.scan`), set on
+  the root and inherited unchanged.  A `fontFamily` of `FontSet.count + k`
+  names the family of face `k`. -/
+  docFaces : Array FontFace.Face := #[]
   /-- `text-decoration`, *not* inherited: `applyEffective` resets all three to
   `false` for every element, and only that element's own raw attribute value
   (from any cascade layer) can set them back.  usvg's decoration search
@@ -1855,13 +1860,20 @@ unrecognised name is skipped, as `fontdb::Database::query` does.  An unquoted
 name must be a sequence of CSS identifiers: svgtypes rejects the whole value
 when a word starts with a digit (`Mplus 1p`), and usvg then uses its default
 family, so that is `none` too. -/
-def resolveFontFamily (bs : ByteArray) : Option Nat := Id.run do
+def resolveFontFamily (bs : ByteArray) (doc : Array FontFace.Face := #[]) : Option Nat := Id.run do
   for tok in Bytes.splitTrim bs 44 do
     let name := stripQuotes tok
     if name.size == tok.size then
       for w in Bytes.splitTrim name 32 do
         let c := Bytes.at' w 0
         if 48 ≤ c && c ≤ 57 then return none
+    -- T105: the document's `@font-face` families come first (Chromium's
+    -- order: a family list is matched name by name, each against the
+    -- document's faces before the installed fonts)
+    let lname := Bytes.lower name
+    match (List.range doc.size).find? (fun k => doc[k]?.map (·.family) == some lname) with
+    | some k => return some (FontSet.count + k)
+    | none => pure ()
     -- T106: exact family, alias, then generic (`FamilyMatch.lookup`)
     match FamilyMatch.lookup name (name.size != tok.size) with
     | some k => return some k
@@ -2289,7 +2301,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   | "font-size" => { st with fontSize := parseFontSize st.fontSize v st.rootFontSize }
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
   | "font-family" =>
-    match resolveFontFamily v with
+    match resolveFontFamily v st.docFaces with
     | some k => { st with fontAvailable := true, fontFamily := k, fontFamilyRaw := trim v }
     | none => { st with fontAvailable := false, fontFamily := 0, fontFamilyRaw := trim v }
   -- `find_decoration`: space-separated tokens of this element's own raw
@@ -2331,7 +2343,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
         | some w => { st with fontWeight := parseFontWeight st.fontWeight w }
         | none => st
       let st := { st with fontSize := parseFontSize st.fontSize size st.rootFontSize }
-      match resolveFontFamily family with
+      match resolveFontFamily family st.docFaces with
       | some k => { st with fontAvailable := true, fontFamily := k, fontFamilyRaw := trim family }
       | none => { st with fontAvailable := false, fontFamily := 0, fontFamilyRaw := trim family }
   | "font-size-adjust" =>
@@ -2961,7 +2973,9 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     smallCaps := st.fontSmallCaps,
-    family := st.fontFamily,
+    -- T105: a document family picks its face by weight and style
+    family := if st.fontFamily < FontSet.count then st.fontFamily
+      else FontSet.count + FontFace.select st.docFaces (st.fontFamily - FontSet.count) st.fontWeight st.fontItalic,
     size := st.fontSize,
     sizeAdjust := st.fontSizeAdjust,
     letterSpacing := st.letterSpacing,
@@ -3409,6 +3423,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     return if k < 16 || !(styles.all fun s => plain s.fill && plain s.stroke) then 1 else k
   let (placed, used, mbox, sbox) :=
     Text.layout evs textStyle.spacePreserve budget textStyle.writingMode outK
+      (textStyle.docFaces.map fun f => (some f.font, f.coverage))
   let outCtm := if outK == 1 then textStyle.ctm
     else textStyle.ctm.mul (Mat.scale16 (65536 / outK) (65536 / outK))
   let mut out : Array Shape := #[]
@@ -3855,6 +3870,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         if styleDepth.isSome && styleOk then out := (out ++ bytes).push 32
     return out
   let rules := Css.parseStylesheet combinedCss
+  -- T105: fonts embedded in the document (`@font-face` with `data:` URLs)
+  let docFaces := FontFace.scan combinedCss
   -- T104: XHTML labels in `foreignObject` become SVG text (after `use`
   -- expansion, so copies are rewritten too; needs the stylesheet).
   let events ← ForeignObject.rewrite rules events
@@ -3901,7 +3918,8 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           | some (w, h) => (Fx.ofNat w, Fx.ofNat h)
           | none => (resolveRootSize r).getD (Fx.ofNat 100, Fx.ofNat 100)
         { parent with pctRefSet := true, pctRefW := rw, pctRefH := rh,
-                      rootFontSize := { parent.rootFontSize with vpW := vw, vpH := vh } }
+                      rootFontSize := { parent.rootFontSize with vpW := vw, vpH := vh },
+                      docFaces }
     let styleDecls := match attr attrs "style" with
       | some v => parseStyleDecls v
       | none => #[]
