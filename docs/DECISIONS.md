@@ -207,3 +207,6 @@ also refuses: "nodes limit reached"). Decision: allow nesting up to ~2,000–2,5
 levels if it stays fast and costs nothing when unused; deep processing must
 not recurse on the native stack (iterative or fuel-bounded), and the size and
 time theorems must keep holding.
+- Also to revisit: the filter work budget refuses PlantUML's drop shadow
+  (300% filter region) on tall diagrams rendered at 1000 px wide
+  (1000 × 5,500 px); they render at 600 px. Chromium has no such cap.
