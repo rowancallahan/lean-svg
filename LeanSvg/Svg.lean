@@ -3318,13 +3318,14 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           layStack := layStack.push (lc.push owners.size)
           owners := owners.push st
         else layStack := layStack.push lc
-        -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
-        -- while its characters keep their slots in the position lists.
+        -- usvg's `is_visible_element`: `display:none` or failed conditional
+        -- processing (`systemLanguage`, ...) drops a span's glyphs while its
+        -- characters keep their slots in the position lists.
         let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
         let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         bsStack := bsStack.push
           (bpx + dpx, bsub + (if dsub then 1 else 0), bsup + (if dsup then 1 else 0))
-        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs
+        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs && passesConditions attrs
         if nm == "textPath" then
           -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
           let ep := elemPosOf st attrs
@@ -3378,7 +3379,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             (Text.Ev.text targetText st.spacePreserve selfIdx
               (decorSizes styles
                 { sp with underlineIdx, overlineIdx, throughIdx })
-              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0))
+              ((rendStack.back?.getD true) && !isDisplayNone attrs && passesConditions attrs && st.fontSize > 0))
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && !st.fontAvailable then
             warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize < 0 then
@@ -4506,6 +4507,23 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               | none => pure ()
               match pf.mode with
               | .render =>
+                -- T109: usvg resolves a text run's paint server against the
+                -- whole `<text>`'s font-metric box (`text_bbox` in
+                -- `paint_server.rs`), not the run's own glyph outlines; a
+                -- `ctxUses` slot carries that box and the text's `ctm` to
+                -- `Render`, as `Marker.expand` does for a shape's own box.
+                -- A paint already tied to a `use` (`context-*`) keeps its slot.
+                let server := fun (p : Paint) (ctx : Option Nat) => ctx.isNone && match p with
+                  | .gradient .. | .pattern _ => true
+                  | _ => false
+                let tslot := ctxUses.size
+                let needT := shs.any fun s =>
+                  server s.style.fill s.style.fillCtx || server s.style.stroke s.style.strokeCtx
+                if needT then ctxUses := ctxUses.push ⟨st.ctm, mbox⟩
+                let shs := if !needT then shs else shs.map fun s =>
+                  { s with style := { s.style with
+                      fillCtx := if server s.style.fill s.style.fillCtx then some tslot else s.style.fillCtx,
+                      strokeCtx := if server s.style.stroke s.style.strokeCtx then some tslot else s.style.strokeCtx } }
                 -- T90: each run inside its spans' layers (`SpanLayers`).
                 let mut opened : Array (Nat × Bool) := #[]
                 let base := layerDepth + (if layered then 1 else 0)

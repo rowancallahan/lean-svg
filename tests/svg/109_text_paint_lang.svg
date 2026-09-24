@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" font-family="Noto Sans">
+  <!-- T109: a gradient/pattern on text sizes against the text's font-metric box;
+       systemLanguage on a tspan hides its glyphs (usvg default language "en") -->
+  <radialGradient id="rg">
+    <stop offset="0" stop-color="#fe8"/>
+    <stop offset="1" stop-color="#236"/>
+  </radialGradient>
+  <linearGradient id="lg" x2="0" y2="1">
+    <stop offset="0" stop-color="#c22"/>
+    <stop offset="1" stop-color="#22c"/>
+  </linearGradient>
+  <text x="100" y="60" text-anchor="middle" font-size="56" fill="url(#rg)">Tamp</text>
+  <text x="100" y="120" text-anchor="middle" font-size="48" fill="none" stroke="url(#lg)" stroke-width="2">ace<tspan fill="url(#lg)" stroke="none">gy</tspan></text>
+  <text x="20" y="180" font-size="32" fill="green">en<tspan systemLanguage="ru-RU" fill="red">ru</tspan><tspan systemLanguage="fr, en-GB">EN</tspan></text>
+</svg>
