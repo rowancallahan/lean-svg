@@ -761,6 +761,51 @@ def check_image_refs_inert(binary):
     return result
 
 
+def check_foreignobject_refs_inert(binary):
+    """Rowan: HTML inside `<foreignObject>` (T104) must never load anything.
+    Every resource-bearing element and CSS `url()`/`@import` in
+    `foreignobject_refs.svg` is stripped from a copy; both files must render
+    byte-identically, so nothing external is read or drawn (the text stays)."""
+    result = {"name": "foreignobject_refs_inert", "rc": None, "ms": None,
+              "output": False, "stderr": "", "violations": []}
+    tmpdir = Path(tempfile.mkdtemp(prefix="lean-svg_adv_"))
+    src = ADV_DIR / "foreignobject_refs.svg"
+    try:
+        text = src.read_text()
+        text = re.sub(r"<(img|link|embed)\b[^>]*/>", "", text)
+        text = re.sub(r"<(iframe|object|video|script)\b.*?</\1>", "", text, flags=re.S)
+        text = re.sub(r"@import[^;]*;", "", text)
+        text = re.sub(r"background(-image)?:\s*url\([^)]*\);?", "", text)
+        stripped = tmpdir / "stripped.svg"
+        stripped.write_text(text)
+        outs = []
+        start = time.perf_counter()
+        for svg, name in ((src, "a.png"), (stripped, "b.png")):
+            proc = subprocess.run([str(binary), str(svg), str(tmpdir / name)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=RENDER_TIMEOUT)
+            result["rc"] = proc.returncode
+            if proc.stdout or proc.stderr:
+                result["violations"].append("wrote to stdout/stderr")
+            if proc.returncode not in (0, 2):
+                result["violations"].append("render of %s failed" % svg.name)
+                return result
+            outs.append((tmpdir / name).read_bytes())
+            leftovers = sorted(p.name for p in tmpdir.iterdir()
+                               if p.name not in ("a.png", "b.png", "stripped.svg"))
+            if leftovers:
+                result["violations"].append("unexpected files written: %s" % leftovers)
+        result["ms"] = (time.perf_counter() - start) * 1000.0
+        result["output"] = True
+        if outs[0] != outs[1]:
+            result["violations"].append("foreignObject resources changed the output")
+    except subprocess.TimeoutExpired:
+        result["violations"].append("timed out after %ds" % RENDER_TIMEOUT)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return result
+
+
 def check_max_input_size(binary):
     """A file over the input size limit (64 MiB) must be rejected cleanly,
     like every other hostile input: rc 1, no output, no hang."""
@@ -877,7 +922,8 @@ def main():
         cases = [c for c in cases if args.filter in c[1]]
 
     extra_checks = {"no_clobber": check_no_clobber, "oversized_input": check_max_input_size,
-                    "image_refs_inert": check_image_refs_inert}
+                    "image_refs_inert": check_image_refs_inert,
+                    "foreignobject_refs_inert": check_foreignobject_refs_inert}
     extra_names = [n for n in extra_checks if not args.filter or args.filter in n]
     if not cases and not extra_names:
         print("no adversarial cases to run", file=sys.stderr)

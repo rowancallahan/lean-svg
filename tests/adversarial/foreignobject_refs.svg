@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <style>@import url("http://evil.example/a.css"); div { background: url(file:///etc/passwd); }</style>
+  <foreignObject x="10" y="10" width="180" height="180">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="color: black; font-size: 16px">
+      Label text
+      <img src="file:///etc/passwd" width="50" height="50"/>
+      <img src="http://evil.example/x.png" width="50" height="50"/>
+      <link rel="stylesheet" href="http://evil.example/b.css"/>
+      <iframe src="file:///etc/hostname" width="50" height="50"></iframe>
+      <object data="/etc/passwd" width="50" height="50"></object>
+      <embed src="/etc/passwd" width="50" height="50"/>
+      <video src="/dev/zero" width="50" height="50"></video>
+      <span style="background-image: url(/etc/passwd)">more text</span>
+      <script>fetch("http://evil.example/")</script>
+    </div>
+  </foreignObject>
+</svg>
