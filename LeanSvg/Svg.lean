@@ -3193,14 +3193,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     | .open_ _ a => a
     | _ => #[]
   let mut styles : Array Style := #[]
-  -- Vertical text on a path is not implemented: under a vertical
-  -- `writing-mode` on the `<text>` element itself a `textPath` is still
-  -- dropped whole, as before T50.
-  let vertical := match attrOrStyle textAttrs "writing-mode" with
-    | some v =>
-      let t := trim v
-      eqAscii t "tb" || eqAscii t "tb-rl" || eqAscii t "vertical-rl" || eqAscii t "vertical-lr"
-    | none => false
+  -- T102: a `textPath` under a vertical `writing-mode` is laid out too
+  -- (`Text.layout`'s path branch); before, it was dropped whole.
   let mut evs : Array Text.Ev := #[Text.Ev.open_ (elemPosOf textStyle textAttrs)]
   let mut warns : Array String := #[]
   -- `ancestors` is the outer walk's own style stack at the point `<text>` was
@@ -3277,7 +3271,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
     | .open_ nm attrs =>
       depth := depth + 1
       if skip > 0 then skip := skip + 1
-      else if nm == "tspan" || nm == "a" || (nm == "textPath" && depth == 2 && !vertical) then
+      else if nm == "tspan" || nm == "a" || (nm == "textPath" && depth == 2) then
         let isFirst := ccStack.back?.getD 0 == 0
         ccStack := match ccStack.back? with
           | some c => ccStack.pop.push (c + 1)
