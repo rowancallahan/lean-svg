@@ -200,7 +200,7 @@ listed below with their causes.
   differs from Chromium in some shapes. This is pattern tiling, T108's area,
   so I did not touch it.
 - **Image size / 1 px offset**: 11 files are `size_mismatch` (for example
-  `confusion_matrix` 960 vs 962 rows) and 84 more have heights that differ
+  `confusion_matrix` 960 vs 962 rows) and 95 more have heights that differ
   by 1 row (compared on the overlap). Cause: Chromium rounds the root's
   `pt` size to whole CSS pixels before scaling (234.85 pt × 225.44 pt →
   313 × 301 px → 962 rows at 1000 wide). We and resvg keep the exact ratio
