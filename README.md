@@ -116,11 +116,25 @@ only to render that one file. They are never stored, cached, written out or
 used for any other file, and lean-svg does not redistribute them; their
 licences are the concern of whoever made the SVG.
 
+### Real-world test corpus (committed, test data only)
+
+`tests/corpora/realworld/` holds 848 chart SVGs used only as test inputs; none
+is compiled into the binary. `SOURCES.csv` records the source, author and
+licence of every downloaded file; the licence texts are in
+`tests/corpora/realworld/LICENSES/`.
+
+| component | licence |
+|---|---|
+| **matplotlib test-suite baseline SVGs** (`mpl-tests/`, 515 files) | Matplotlib License (PSF-based, BSD-compatible). Copyright (c) 2012- Matplotlib Development Team; 2002-2011 John D. Hunter. `LICENSE-matplotlib.txt`. |
+| **janosh/diagrams** (`web-tikz/`, 50 files) | MIT. Copyright (c) 2021 Janosh Riebesell. `LICENSE-janosh-diagrams-MIT.txt`. |
+| **Vega-Lite examples** (`web-vega/`, 31 files) | BSD-3-Clause. Copyright (c) 2015, University of Washington Interactive Data Lab. `LICENSE-vega-lite-BSD-3-Clause.txt`. |
+| **Generated charts** (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib/`, `matplotlib-text/`) and their sources in `src/` | Apache-2.0, authored for this project. The TikZ SVGs contain glyphs of the AMS Type 1 Computer Modern and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm), embedded by dvisvgm as the SIL Open Font License 1.1 permits for fonts embedded in documents. |
+
 ### Not redistributed
 
-The test corpora are cloned locally by the test harnesses, are excluded by
-`.gitignore`, and are neither committed to this repository nor included in any
-release artifact.
+The other test corpora are cloned locally by the test harnesses, are excluded
+by `.gitignore`, and are neither committed to this repository nor included in
+any release artifact.
 
 | component | licence |
 |---|---|
