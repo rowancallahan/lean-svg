@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" font-family="Noto Sans" font-size="28">
+  <!-- T118: font-stretch selects Noto Sans ExtraCondensed (fontdb matches stretch before style and weight) -->
+  <text x="20" y="40" font-stretch="extra-condensed">Extra condensed Жж</text>
+  <text x="20" y="80" font-stretch="ultra-condensed">Ultra → nearest wider</text>
+  <g font-stretch="semi-condensed"><text x="20" y="120" font-stretch="inherit">Inherited semi</text></g>
+  <text x="20" y="160" font-stretch="narrower" font-weight="bold" font-style="italic">Stretch beats bold italic</text>
+  <text x="20" y="200" font-stretch="expanded">Expanded → normal</text>
+  <text x="20" y="240" style="font: condensed 28px Noto Sans">Shorthand<tspan font-stretch="62.5%"> 62.5%</tspan></text>
+</svg>

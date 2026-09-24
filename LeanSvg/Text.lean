@@ -98,13 +98,14 @@ def pickFace (weight : Nat) (italic : Bool) : Face :=
 
 /-- The `FontSet` index of a span's base font: `family` is a `FontSet` index
 (0 = "Noto Sans"); only Noto Sans has more than one face. -/
-def baseFont (family : Nat) (face : Face) : Nat :=
+def baseFont (family : Nat) (face : Face) (stretch : Nat := 5) : Nat :=
   -- T106: the other multi-face families pick by the face's weight and slant
-  if family != 0 then
+  -- (T118: and a non-normal stretch, Noto Sans included)
+  if family != 0 || stretch != 5 then
     let (w, it) := match face with
       | .regular => (400, false) | .bold => (700, false) | .italic => (400, true)
       | .thin => (100, false) | .light => (300, false) | .black => (900, false)
-    FamilyMatch.pick family w it matchWeight
+    FamilyMatch.pick family w it matchWeight stretch
   else match face with
     | .regular => 0
     | .bold => 1
@@ -188,6 +189,8 @@ cascade by `Svg.lean`.  `size`, `letterSpacing` and `wordSpacing` are `Fx`
 (1/256 px) user-space lengths. -/
 structure SpanProps where
   face : Face := .regular
+  /-- T118: `font-stretch`, an OS/2 width class (5 = normal). -/
+  stretch : Nat := 5
   /-- T97: `font-variant: small-caps`, shaped with the font's `smcp`. -/
   smallCaps : Bool := false
   /-- The base font's family, as a `FontSet` index (T91). -/
@@ -941,7 +944,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     let cps : Array Nat := (List.range (b - a)).toArray.map (fun q => chars.getD (rend.getD (a + q) 0) 0)
     let bases : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       let pr := cProps.getD (rend.getD (a + q) 0) default
-      baseFont pr.family pr.face)
+      baseFont pr.family pr.face pr.stretch)
     -- (T101: and each language tag, keyed `base · 4 + lang`)
     let langs : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       (cProps.getD (rend.getD (a + q) 0) default).lang)
