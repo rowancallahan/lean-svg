@@ -48,6 +48,12 @@ def cmuSans : Nat := 32
 def cmuTypewriter : Nat := 33
 /-- The first T106 font: every font before it is the resvg suite's set. -/
 def first : Nat := 16
+/-- T118: Noto Sans ExtraCondensed, appended after the T106 fonts. -/
+def notoSansExtraCondensed : Nat := 34
+
+/-- A resvg-suite font (usvg's fallback rules), as opposed to a T106 family
+or a document font: the fonts before `first`, and Noto Sans ExtraCondensed. -/
+def isSuite (k : Nat) : Bool := k < first || k == notoSansExtraCondensed
 
 /-- Lowercase alias → `FontSet` index.  An index that is not the first face
 of its family (`cmuSerifItalic`) locks that face: `pick` keeps it. -/
@@ -148,7 +154,7 @@ suite's fonts keep `FontSet` order (usvg's); a T106 base tries DejaVu Sans
 then STIX Two Math first (fontconfig's usual first fallbacks on Linux, and
 the widest symbol coverage embedded). -/
 def fallbackOrder (base count : Nat) : List Nat :=
-  if base < first then List.range count
+  if isSuite base then List.range count
   else dejaVuSans :: stixTwoMath :: List.range count
 
 end FamilyMatch
@@ -165,6 +171,7 @@ example : [dejaVuSans, dejaVuSansMono, dejaVuSerif, arimo, tinos, cousine, stixT
     ["DejaVu Sans", "DejaVu Sans Mono", "DejaVu Serif", "Arimo", "Tinos", "Cousine",
      "STIX Two Math", "STIX Two Text", "CMU Serif", "CMU Serif", "CMU Sans Serif",
      "CMU Typewriter Text"].map some := by rfl
+example : FontSet.styles[notoSansExtraCondensed]? = some (400, false, 2) := by rfl
 
 end FamilyMatch
 end LeanSvg

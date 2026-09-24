@@ -51,7 +51,7 @@ SC"/"Noto Sans KR" and do not use "Source".
 | CMUSansSerif | CMU Sans Serif Medium | 0.7.0 | Latin, Greek, Cyrillic | 889 | 80,664 | 109,603 | LICENSE-OFL-CMU.txt |
 | CMUTypewriter | CMU Typewriter Text Regular | 0.7.0 | Latin, Greek, Cyrillic | 877 | 106,030 | 143,461 | LICENSE-OFL-CMU.txt |
 | NotoSansExtraCondensed | Noto Sans ExtraCondensed | 2.000 | Latin, Greek, Cyrillic | 2793 | 266,481 | 356,958 | LICENSE-OFL.txt |
-| **Total** | | | | | **23,737,689** | **31,790,891** | |
+| **Total** | | | | | **24,004,170** | **32,147,849** | |
 
 Sources (all `glyf` TrueType outlines):
 

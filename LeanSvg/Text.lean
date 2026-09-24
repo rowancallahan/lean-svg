@@ -134,7 +134,7 @@ of the span's language tag `lang` (`SpanProps.lang`) is tried first:
 a tag, and for other characters, the order is `FontSet`'s, as usvg's (which
 ignores the tag).
 
-T106: a base font from `FamilyMatch` (index ≥ `FamilyMatch.first`) tries
+T106: a base font from `FamilyMatch` (not `FamilyMatch.isSuite`) tries
 DejaVu Sans and STIX Two Math first (`FamilyMatch.fallbackOrder`) and falls
 back per character, as Chromium does: a fallback font covering the whole
 chunk does not replace the base font's own glyphs. -/
@@ -162,7 +162,7 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
       | none => break
       | some k =>
         -- T106: a T106 base falls back per character, as Chromium does
-        if base < FamilyMatch.first && cps.all (has k) then
+        if FamilyMatch.isSuite base && cps.all (has k) then
           res := cps.map (fun _ => some k)
           break
         res := (List.range cps.size).toArray.map (fun j =>
@@ -173,7 +173,7 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
   -- T106: a character no font maps keeps the base font's `.notdef`; for a
   -- T106 base that is Noto Sans's light box, not e.g. CMU's heavy crossed one
   -- (dvisvgm's private-use code points, drawn by the file's own fonts, T105)
-  let tofu := if base < FamilyMatch.first then base else 0
+  let tofu := if FamilyMatch.isSuite base then base else 0
   return res.map (·.getD tofu)
 
 /-! ## What `Svg.lean` resolves for us -/
