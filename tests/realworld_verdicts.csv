@@ -331,7 +331,7 @@ tikz/nn_conv_blocks.svg,pass,,dbc50106b1cab408,2026-09-24T05:36:41.442Z,current
 tikz/nn_mlp.svg,pass,[judged at 300 px],805e24dfedd4d54f,2026-09-24T04:04:45.996Z,current
 tikz/nn_rnn_unrolled.svg,pass,,1b6014fec09a289d,2026-09-24T04:24:32.524Z,current
 tikz/patterns_fill.svg,pass,,6ff8cc6004a1757f,2026-09-24T05:02:23.010Z,current
-tikz/plot_pgf_3d_surface.svg,fail,except for font good,acb4d4bce3bd8f92,2026-09-24T05:29:16.530Z,current
+tikz/plot_pgf_3d_surface.svg,pass,good now,acb4d4bce3bd8f92,2026-09-24T07:43:37.791Z,current
 tikz/plot_pgf_bar.svg,pass,somehow this font is fixed now looks good,4ac1a830ee88c4f9,2026-09-24T05:11:27.030Z,current
 tikz/plot_pgf_contour_scatter.svg,pass,[judged at 300 px],99fbb34fc4352f55,2026-09-24T04:08:29.092Z,current
 tikz/plot_pgf_functions.svg,pass,,926fcd78c615cd79,2026-09-24T05:36:24.582Z,current
