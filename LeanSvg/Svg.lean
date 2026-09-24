@@ -15,6 +15,7 @@ import LeanSvg.Units
 import LeanSvg.BasicShape
 import LeanSvg.Warn
 import LeanSvg.FontFace
+import LeanSvg.StixNonUnicode
 import Std.Data.HashMap
 
 /-!
@@ -3407,6 +3408,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           let selfIdx := styles.size - 1
           let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
           let sp := spanPropsOf st bpx bsub bsup
+          -- T119: matplotlib's STIXNonUnicode letters → Unicode (`StixNonUnicode`)
+          let targetText := if StixNonUnicode.isFamily st.fontFamilyRaw then StixNonUnicode.remap targetText else targetText
           evs := evs.push
             (Text.Ev.text targetText st.spacePreserve selfIdx
               (decorSizes styles
@@ -3428,6 +3431,8 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
         let selfIdx := styles.size - 1
         let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         let sp := spanPropsOf st bpx bsub bsup
+        -- T119: matplotlib's STIXNonUnicode letters → Unicode (`StixNonUnicode`)
+        let bs := if StixNonUnicode.isFamily st.fontFamilyRaw then StixNonUnicode.remap bs else bs
         evs := evs.push
           (Text.Ev.text bs st.spacePreserve selfIdx
             (decorSizes styles

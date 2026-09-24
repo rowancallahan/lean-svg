@@ -26,10 +26,13 @@ matplotlib-text/bayes_factor_bars.svg,pass,,6e891658e17adc3a,2026-09-24T07:29:03
 matplotlib-text/beta_binomial_update.svg,pass,,eb116cac3a5a51da,2026-09-24T07:21:30.667Z,current
 matplotlib-text/contourf_colorbar.svg,pass,,f7a299d0038c02e8,2026-09-24T07:28:46.439Z,current
 matplotlib-text/dendrogram_like.svg,pass,,fe0156cb9d0d4f6e,2026-09-24T07:31:20.000Z,current
+matplotlib-text/ecdf.svg,pass,,b723c7577eb7c505,2026-09-24T23:22:18.171Z,current
+matplotlib-text/errorbars.svg,pass,,676e0d8dcf76a602,2026-09-24T23:22:13.097Z,current
+matplotlib-text/fill_between_regions.svg,pass,,0b541135882f3ebf,2026-09-24T23:22:15.993Z,current
 matplotlib-text/hexbin_density.svg,pass,,ddf655db0d93c6c7,2026-09-24T07:20:31.071Z,current
 matplotlib-text/hierarchical_shrinkage.svg,pass,,518cb0ea283bc1cf,2026-09-24T07:31:23.368Z,current
 matplotlib-text/histogram_kde.svg,pass,,3c6c951316d2b466,2026-09-24T07:31:16.502Z,current
-matplotlib-text/mathtext_showcase.svg,fail,"tofu boxes somehow, fail",f640fea992af3c7a,2026-09-24T07:23:06.455Z,current
+matplotlib-text/mathtext_showcase.svg,pass,ours looks better now,8e5f3771833fd75a,2026-09-24T23:20:35.481Z,current
 matplotlib-text/mcmc_trace.svg,pass,,21ee94e8271292c7,2026-09-24T07:18:14.640Z,current
 matplotlib-text/pair_scatter.svg,pass,,fead34b8be1f57d7,2026-09-24T07:18:33.259Z,current
 matplotlib-text/poisson_pmf.svg,pass,,4280243a796de750,2026-09-24T07:31:27.908Z,current
@@ -50,7 +53,7 @@ matplotlib/hatch_bars.svg,pass,,1662a450b5eb5f2d,2026-09-24T05:09:18.318Z,curren
 matplotlib/heatmap_annot.svg,pass,,f380b9eaf1e070d8,2026-09-24T05:15:25.725Z,current
 matplotlib/heatmap_annot__fivethirtyeight.svg,pass,,74061d146bdc253e,2026-09-24T05:15:31.345Z,current
 matplotlib/hexbin_density.svg,pass,,16238668d83a0978,2026-09-24T05:14:43.634Z,current
-matplotlib/histogram_kde__classic.svg,pass,,0d68cff806593ca7,2026-09-24T05:10:07.055Z,current
+matplotlib/histogram_kde__classic.svg,pass,,caa5cbd486e1172e,2026-09-24T21:12:22.437Z,current
 matplotlib/horizontal_bar.svg,pass,,5df56c81104e44ee,2026-09-24T05:17:02.415Z,current
 matplotlib/image_colormap.svg,pass,,131a1a7bcb1dc0a4,2026-09-24T05:25:34.063Z,current
 matplotlib/log_axes.svg,pass,,7c9b03856f17f347,2026-09-24T05:02:33.175Z,current
@@ -105,7 +108,7 @@ mpl-tests/test_axes/transparent_markers.svg,pass,,991fb98d365ded02,2026-09-24T06
 mpl-tests/test_backend_svg/bold_font_output.svg,pass,,e7695eabf74e0300,2026-09-24T04:28:25.727Z,current
 mpl-tests/test_backend_svg/bold_font_output_with_none_fonttype.svg,pass,,091c47114ae95711,2026-09-24T07:31:57.039Z,current
 mpl-tests/test_backend_svg/multi_font_aspath.svg,pass,,31781288a46a1341,2026-09-24T04:25:39.726Z,current
-mpl-tests/test_backend_svg/multi_font_astext.svg,pass,maybe we add basic emojis if its not too big of a thing to add idk,a4a096a862ca2f3e,2026-09-24T07:33:01.226Z,current
+mpl-tests/test_backend_svg/multi_font_astext.svg,pass,,267ae0173b8f9060,2026-09-24T21:12:14.380Z,current
 mpl-tests/test_backends_rendering/blend_groups_svg.svg,pass,,0294ba8a7006694b,2026-09-24T06:13:30.904Z,current
 mpl-tests/test_backends_rendering/blend_groups_svg_rasterized.svg,pass,,84b90dca6c82eb87,2026-09-24T06:14:29.603Z,current
 mpl-tests/test_backends_rendering/blend_modes_svg.svg,pass,,601a1a7ab1b2137a,2026-09-24T04:26:07.215Z,current
@@ -218,7 +221,7 @@ mpl-tests/test_tightlayout/tight_layout7.svg,pass,,255a16bc0e87497d,2026-09-24T0
 mpl-tests/test_tightlayout/tight_layout9.svg,pass,,d15118b6c06abc49,2026-09-24T06:08:32.927Z,current
 mpl-tests/test_transforms/pre_transform_data.svg,pass,[judged at 300 px],de0b887bfd064f93,2026-09-24T04:09:53.193Z,current
 plantuml/activity_pipeline.svg,pass,,a6a7a03c6f4c1f49,2026-09-24T07:31:35.383Z,current
-plantuml/class_model.svg,pass,,a58bf2c4033b5cb5,2026-09-24T07:25:08.655Z,current
+plantuml/class_model.svg,pass,,fce49b8d067ea013,2026-09-24T21:12:33.207Z,current
 plantuml/component_arch.svg,pass,,fa01c53f82f38db4,2026-09-24T07:31:42.432Z,current
 plantuml/mindmap_topics.svg,pass,,7c776db70c51a215,2026-09-24T07:28:20.655Z,current
 plantuml/sequence_auth.svg,pass,,75e96382f58fd9c6,2026-09-24T07:26:24.588Z,current
@@ -351,12 +354,17 @@ tikz/vector_field_tikz.svg,pass,[judged at 300 px],25319079b8edcc5b,2026-09-24T0
 tikz/venn_even_odd.svg,pass,[judged at 300 px],852b0018c2f85210,2026-09-24T04:07:12.924Z,current
 tikz/venn_three.svg,pass,,1818e74250c915ee,2026-09-24T05:38:24.854Z,current
 web-tikz/2d-convolution.svg,pass,good,2a720d78d8212b7f,2026-09-24T05:09:42.873Z,current
+web-tikz/burrows-wheeler-transform.svg,pass,,28dc727b01b98948,2026-09-24T23:20:57.809Z,current
 web-tikz/chain-homology.svg,pass,,78041b9e47346a0d,2026-09-24T05:14:52.620Z,current
 web-tikz/complex-sign-function.svg,pass,,3fcea28d234ebe18,2026-09-24T05:16:14.388Z,current
+web-tikz/critical-temperature.svg,pass,,7afe36919f89f387,2026-09-24T23:21:50.077Z,current
 web-tikz/dft-jacobs-ladder.svg,pass,,eff56e17e3c8ce2f,2026-09-24T04:33:53.988Z,current
 web-tikz/dna-double-helix.svg,pass,,ebd772bcc5f17b51,2026-09-24T05:12:13.577Z,current
 web-tikz/euler-angles.svg,pass,,cc601cdaca94c539,2026-09-24T04:34:03.175Z,current
 web-tikz/ferroelectric-response.svg,pass,,3f0bf78a1074bd58,2026-09-24T04:34:14.989Z,current
+web-tikz/feynman-diagram-one-point.svg,pass,,12b0574f8c4ef499,2026-09-24T23:21:01.385Z,current
+web-tikz/generative-adversarial-network.svg,pass,,ed9ddc62e6efcb9e,2026-09-24T23:21:17.043Z,current
+web-tikz/hamiltonian-graph.svg,pass,,dd9fab09bef08509,2026-09-24T23:21:12.487Z,current
 web-tikz/k-nearest-neighbors.svg,pass,,c488a2b2a15ab131,2026-09-24T04:33:47.134Z,current
 web-tikz/kohn-sham-cycle.svg,pass,fonts look good here,c8f25e260f02add8,2026-09-24T05:18:22.756Z,current
 web-tikz/long-short-term-memory.svg,pass,,25482d57b1382cf8,2026-09-24T05:16:05.348Z,current
@@ -364,7 +372,14 @@ web-tikz/materials-informatics.svg,pass,fixed,1220a092693810f2,2026-09-24T05:29:
 web-tikz/maximum-flow-problem.svg,pass,,39c693e50648fbf1,2026-09-24T05:31:24.356Z,current
 web-tikz/multilayer-perceptron.svg,pass,,052238bd01aeeae9,2026-09-24T05:11:52.494Z,current
 web-tikz/operator-orderings.svg,pass,,557beded1679831e,2026-09-24T05:19:02.566Z,current
+web-tikz/propagator-fluctuations.svg,pass,,dfa68e1071f7c8d7,2026-09-24T21:12:04.899Z,current
+web-tikz/random-forest.svg,pass,,fa24fb2b3b95732b,2026-09-24T23:20:52.795Z,current
+web-tikz/reinforcement-learning-greedy-policy.svg,pass,,25d018a48263504c,2026-09-24T23:21:38.951Z,current
 web-tikz/risk-opportunity-matrix.svg,pass,,bcdef9b4ed4e6441,2026-09-24T04:32:51.699Z,current
+web-tikz/roost-update.svg,pass,,c04430c09d922d79,2026-09-24T23:21:29.343Z,current
+web-tikz/self-attention.svg,pass,,31fe30088ee09a53,2026-09-24T23:21:24.242Z,current
+web-tikz/single-head-attention.svg,pass,,e67ea9f4dd09ae27,2026-09-24T23:21:08.716Z,current
+web-tikz/thermodynamic-potentials-venn-diagram.svg,pass,,7d715e5bc13090b7,2026-09-24T23:21:46.562Z,current
 web-tikz/torus-fundamental-domain.svg,pass,,6994d90c3a479afb,2026-09-24T05:15:01.412Z,current
 web-vega/area_density.svg,pass,,812c880e08a20b20,2026-09-24T07:28:27.717Z,current
 web-vega/area_density_stacked.svg,pass,,b106e47da394d4d9,2026-09-24T07:28:36.107Z,current

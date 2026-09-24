@@ -15,8 +15,8 @@ File set (same widths as the chart review):
   resvg      tests/corpora/resvg-test-suite/tests/**/*.svg  at 100 and 200 px
   local      tests/svg/*.svg                                 at native size
              (no --width, as tests/run_tests.py renders them)
-  realworld  tests/corpora/realworld/**/*.svg                at 1000 px, except
-             the two tall PlantUML files at 600 px (DECISIONS.md, filter budget)
+  realworld  tests/corpora/realworld/**/*.svg                at 1000 px (all of
+             them since T115 crops an over-budget filter region to the image)
 
 The binary must print nothing: any stdout/stderr output aborts the run.
 """
@@ -34,7 +34,6 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 CORPORA = REPO / "tests" / "corpora"
 TIMEOUT = 300  # seconds per render; a timeout aborts the run
-REALWORLD_600 = {"plantuml/component_arch.svg", "plantuml/state_sampler.svg"}
 FORMAT = 1
 
 
@@ -56,10 +55,8 @@ def file_set():
             elif name == "local":
                 widths = [None]
             else:
-                widths = [600 if rel in REALWORLD_600 else 1000]
+                widths = [1000]
             out += [("%s/%s@%s" % (name, rel, w or "native"), p, w) for w in widths]
-    missing = REALWORLD_600 - {k.split("/", 1)[1].rsplit("@", 1)[0] for k, _, _ in out if k.startswith("realworld/")}
-    assert not missing, "600 px realworld files not found: %s" % sorted(missing)
     keys = [k for k, _, _ in out]
     assert len(keys) == len(set(keys))
     return sorted(out, key=lambda t: t[0])
