@@ -220,3 +220,22 @@ licence text is in `LeanSvg/Fonts/`, `NOTICE` credits it, and the README
 "Licensing and credits" table lists it with version, copyright and licence.
 Fonts embedded in an input SVG (T105) are used only to render that file and
 are never redistributed by lean-svg; the README says so.
+
+## Byte freeze (T117, 2026-09-24; tooling only, nothing frozen yet)
+
+`tests/freeze.py` implements phase 3 ("Lock it") above. `record OUT.json`
+renders the resvg suite at 100 and 200 px, `tests/svg/*.svg` at native size,
+and the real-world corpus at 1000 px (600 px for `plantuml/component_arch`
+and `plantuml/state_sampler`), storing per file and width the exit code,
+SHA-256 of the PNG and, with `--warnings`, SHA-256 of the warnings file.
+`check OUT.json` re-renders with the manifest's settings and lists every
+difference; it exits 1 on any. Order is sorted and `--jobs` does not change
+the result.
+
+How it will be used: when Rowan declares correctness done, record one
+manifest with `--warnings` from that commit and commit it (e.g.
+`tests/freeze.json`). From then on every change (speed work above all) must
+pass `freeze.py check` with zero differences, alongside the theorems. A
+deliberate output change is a separate, reviewed commit that re-records the
+manifest and says which files changed and why. No manifest is committed yet:
+the bytes still change.
