@@ -129,7 +129,73 @@ python3 tests/run_tests.py
    if it fits the local corpus style 
 
 **Deliverable:** write `tasks/<ID>-<slug>.md` (the ID given below) with the
-spec you implemented, what you skipped and why, and a `## Report
+spec you implemented, what you skipped and why, and a `## Report` with the
+before/after numbers for your target directories and the whole suite.
+Commit (author `Rowan Callahan <rowan.l.callahan@gmail.com>`) in logical
+commits and push to your assigned branch. **Do not open a pull request, do not
+merge, do not push to any other branch.** If you run out of time, push what
+is verified-clean and document what remains. Aim to finish within a few
+hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+- **`font-stretch`** (`Svg.parseFontStretch`, `Style.fontStretch`, width
+  class 1–9): exactly usvg 0.48.1's `conv_font_stretch` — the nine keywords;
+  `narrower` = `condensed` and `wider` = `expanded` (absolute, as usvg does,
+  not relative to the parent); `inherit` keeps the parent's value (usvg's
+  svgtree `resolve_inherit`); anything else, **percentages included**, is
+  `normal` (usvg's `_ => Normal`; Chromium would map `62.5%` to
+  extra-condensed, usvg does not). The CSS `font` shorthand resets stretch to
+  normal and then takes a stretch keyword it names.
+- **Matching**: `FontSet.styles` is now `(weight, italic, stretch)`;
+  `FamilyMatch.matchStretch` is fontdb's `find_best_match` step 4a (exact,
+  else for ≤ normal nearest narrower then nearest wider, above normal the
+  reverse); `FamilyMatch.pick` filters by stretch before style and weight.
+  `Text.baseFont` takes the span's stretch (`SpanProps.stretch`) and routes
+  Noto Sans through `pick` only when stretch ≠ normal, so every normal-stretch
+  path is unchanged. Generic families untouched.
+- **Font**: Noto Sans ExtraCondensed 2.000 (the suite's
+  `NotoSans-ExtraCondensed.ttf`; typographic family "Noto Sans", width class
+  2, OFL 1.1, same Google copyright as the other Noto Sans faces, licence
+  `LeanSvg/Fonts/LICENSE-OFL.txt`), appended last to `FontSet` (index 34) so
+  every existing fallback order is unchanged. Module 356,958 bytes of Lean
+  source, 266,481 bytes of font. Binary 47.2 MB (< 75 MB).
+- `tests/svg/118_font_stretch.svg`: keywords, nearest-stretch, inherit,
+  stretch over bold italic, expanded → normal, shorthand, percentage.
+
+- **Fallback** (follow-up commit): Noto Sans ExtraCondensed is a resvg-suite
+  font, so a chunk it cannot fully draw follows usvg's rules (FontSet order,
+  a fallback covering the whole chunk replaces every glyph), not T106's
+  per-character Chromium chain. `FamilyMatch.isSuite` (indices < 16, and
+  34) replaces the three `base < FamilyMatch.first` tests in
+  `FamilyMatch.fallbackOrder` and `Text.assignFonts`; document fonts
+  (≥ `FontSet.count`) are unaffected. Found by `118_font_stretch.svg`'s
+  `ultra-condensed` line with a `→`, which resvg draws wholly in Mplus 1p.
+
+## Skipped, and why
+
+- **Source Sans Pro not embedded; `suiteOnlyFamilies` unchanged (items 1a
+  and 3). Decision: it stays out (licence).** Its licence
+  (`fonts/SourceSansPro-LICENSE-OFL.md`): "Copyright 2010-2018 Adobe … with
+  Reserved Font Name 'Source'". OFL 1.1 defines a Modified Version as "any
+  derivative made by adding to, deleting, or substituting … any of the
+  components of the Original Version, by changing formats or by porting".
+  Any embedding here is a Modified Version: subsetting deletes glyphs and
+  hinting, and even the whole font, unsubsetted, is changed in format (base64
+  Lean module, tables reordered, T94). §3: no Modified Version "may use the
+  Reserved Font Name(s) unless explicit written permission is granted by the
+  corresponding Copyright Holder". "Source Sans Pro" contains the RFN, so it
+  cannot be embedded under that name without Adobe's written permission, and
+  renaming it while still resolving `font-family="Source Sans Pro"` to it
+  would present the modified font under the reserved name. Source Sans 3
+  carries the same RFN. `source-sans-pro.svg` and `font-list.svg` keep
+  failing (Noto Sans + warning, as before).
+- `tests/check_shape.py`'s `NOTO_SANS` list not extended to the new face
+  (it compares shaping against HarfBuzz; not needed for this change).
+
+## Report
 
 Measured after merging the integration branch
 (`claude/beautiful-brown-nd2o1h` at `55d30b8`, which includes T116's
