@@ -222,7 +222,7 @@ input file.
 | resvg suite `--fast` (100 px) | 1543 pass | 1543 pass; 0 files moved > 0.1 pt; 0 pass→fail |
 | resvg suite 200 px | 1567 pass | 1567 pass; 0 files moved > 0.1 pt; 0 pass→fail |
 | `run_tests.py` | 62/77 | 63/78 (new 105 passes; every other row identical) |
-| `run_adversarial.py` | 147 + checks | all clean, incl. 10 new generated cases + `font_face_refs_inert` |
+| `run_adversarial.py` | 158/158 clean (first run with T105 code, before the new cases) | 168/168 clean (10 new generated cases + `font_face_refs_inert`) |
 | `run_tiles.py` | — | 78/78 byte-identical |
 | `check-theorems.sh` / `check_invariants.py` | ok | ok / ok |
 | `lake build` | — | no errors, no new warnings |
