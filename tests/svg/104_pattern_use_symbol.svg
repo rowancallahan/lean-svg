@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="200" viewBox="0 0 300 200">
+  <!-- T104: pgf-style patterns: an empty template pattern, content from a <use> of a <symbol> -->
+  <defs>
+    <pattern id="tpl" width="12" height="12" patternUnits="userSpaceOnUse"/>
+    <symbol id="hatch"><path d="M0 0L12.4 12.4" stroke-width="2" fill="none"/></symbol>
+    <path id="dot" d="M9 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0z"/>
+  </defs>
+  <pattern id="p1" xlink:href="#tpl"><g stroke="#66f"><use xlink:href="#hatch"/></g></pattern>
+  <pattern id="p2" xlink:href="#tpl"><use xlink:href="#dot" x="1" y="1" fill="seagreen"/></pattern>
+  <rect x="20" y="30" width="120" height="140" fill="url(#p1)" stroke="black"/>
+  <rect x="160" y="30" width="120" height="140" fill="url(#p2)" stroke="black"/>
+</svg>

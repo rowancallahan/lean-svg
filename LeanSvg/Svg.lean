@@ -2796,6 +2796,7 @@ def parsePatternDef (attrs : Array Xml.Attr) (hadChildren : Bool) (eventIdx : Na
         let m := parseTransform v
         let m := if m.a * m.a + m.b * m.b == 0 || m.c * m.c + m.d * m.d == 0 then singularMat else m
         wrapTransformOrigin attrs pctRefW pctRefH m,
+    hasTransform := (attr attrs "patternTransform").isSome,
     x := coord "x", y := coord "y", width := coord "width", height := coord "height",
     viewBox := (attr attrs "viewBox").bind fun v =>
       let ns := parseNumberList16 v
@@ -3512,8 +3513,17 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           nodes := nodes ++ shs.map Node.shape
           if layered then nodes := nodes.push .groupEnd
           skip := 1
-        else if nm == "g" then
+        else if nm == "g" || nm == "use" then
+          -- T104: `Use.expand` has already copied a `use`'s target inside it,
+          -- so it is a `g` whose `x`/`y` translate after its own transform
+          -- (as in `interpret`).  A symbol's generated viewport clip is
+          -- ignored here like every content `clip-path`.
           let st := applyEff parent attrs chain
+          let st := if nm == "g" then st else
+            let len := fun (n : String) (ref : Fx) =>
+              (((attr attrs n).bind parseLengthOrPercent).map (resolvePct · ref)).getD 0
+            let tr := Mat.translate (len "x" st.pctRefW) (len "y" st.pctRefH)
+            { st with ctm := st.ctm.mul tr, ownMat := st.ownMat.mul tr }
           let (st', layered) := layerDecision st
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
@@ -3767,6 +3777,30 @@ structure SubCfg where
   viewport units resolve against (Chromium's `<img>` viewport); `none` means
   the root's natural size. -/
   outSize : Option (Nat × Nat) := none
+
+/-- T104: the root `<svg>`'s non-standard `background-color` (usvg
+`convert_doc`): the winning value across `!important` CSS, `style=""`, normal
+CSS and the attribute, if it is a plain colour, as a shape filling `area` (the
+`viewBox`, or the root size without one) in the root's user space.  usvg makes
+it a sibling *before* the root group, so the root's own opacity, clip, mask
+and filter do not apply to it. -/
+def rootBackground (rules : Array Css.Rule) (attrs : Array Xml.Attr) (chain : Array Css.ElemInfo)
+    (area : Fx × Fx × Fx × Fx) : Option Shape :=
+  let n := "background-color"
+  let (normalCss, importantCss) := Css.matchingDeclsSplit rules chain
+  let lastNamed := fun (decls : Array (String × ByteArray)) =>
+    (decls.filter (fun d => d.1 == n)).back?.map (·.2)
+  let styleDecls := match attr attrs "style" with
+    | some v => parseStyleDecls v
+    | none => #[]
+  let v := (lastNamed importantCss).orElse fun _ =>
+    (lastNamed styleDecls).orElse fun _ => (lastNamed normalCss).orElse fun _ => attr attrs n
+  v.bind fun v => (parseSolidColor (lower (trim v))).bind fun c =>
+    let (x, y, w, h) := area
+    if w ≤ 0 || h ≤ 0 then none else
+    some { cmds := #[.moveTo ⟨x, y⟩, .lineTo ⟨x + w, y⟩, .lineTo ⟨x + w, y + h⟩,
+                     .lineTo ⟨x, y + h⟩, .close],
+           style := { (default : Style) with fill := .solid c } }
 
 /-- Walk the event stream with a style stack.
 
@@ -4112,6 +4146,13 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
           if isDisplayNone attrs || !passesConditions attrs then
             skip := 1
           else
+            let r := parseRoot attrs
+            let area := match r.viewBox with
+              | some vb => some vb
+              | none => (resolveRootSize r).map fun (w, h) => (0, 0, w, h)
+            match area.bind (rootBackground rules attrs chain) with
+            | some bg => nodes := nodes.push (.shape bg)
+            | none => pure ()
             -- usvg converts the root `svg` as a group, so its own `clip-path`
             -- applies (`masking/clipPath/on-the-root-svg-with-size`).  T18's
             -- gradient table reaches every element from here, by inheritance.

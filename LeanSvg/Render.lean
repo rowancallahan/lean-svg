@@ -121,17 +121,22 @@ def canvasSetup (root : RootInfo) (opts : Options) :
     | none => Mat.identity
   let baseW := Nat.max 1 (Fx.round wFx).toNat
   let baseH := Nat.max 1 (Fx.round hFx).toNat
-  let (W, H, zoom16) : Nat × Nat × Int :=
+  -- T104: `--width` sizes as resvg's CLI does (`IntSize::scale_to_width` on
+  -- the rounded size: `H = ⌈w·baseH/baseW⌉`) and scales each axis by its own
+  -- `new/base` ratio (`fit_to_transform`).  Rounding `hFx·z` instead came out
+  -- one row short for most fractional sizes.
+  let (W, H, zoom16, zoomY) : Nat × Nat × Int × Int :=
     match opts.width, opts.zoom with
     | some w, _ =>
       let z : Int := Int.ediv ((w : Int) * 65536) baseW
-      (w, Nat.max 1 (Int.ediv (hFx * z + 32768 * 256) (65536 * 256)).toNat, z)
+      let h := Nat.max 1 ((w * baseH + baseW - 1) / baseW)
+      (w, h, z, Int.ediv ((h : Int) * 65536) baseH)
     | none, some z =>
       let z16 := z * 256
       (Nat.max 1 (Int.ediv (wFx * z16 + 32768 * 256) (65536 * 256)).toNat,
-       Nat.max 1 (Int.ediv (hFx * z16 + 32768 * 256) (65536 * 256)).toNat, z16)
-    | none, none => (baseW, baseH, 65536)
-  let mat := (Mat.scale16 zoom16 zoom16).mul vbMat
+       Nat.max 1 (Int.ediv (hFx * z16 + 32768 * 256) (65536 * 256)).toNat, z16, z16)
+    | none, none => (baseW, baseH, 65536, 65536)
+  let mat := (Mat.scale16 zoom16 zoomY).mul vbMat
   match opts.viewport with
   | none => return (W, H, mat, ⟨0, 0, W, H, 0, 0⟩)
   | some (vx, vy, vw, vh) =>

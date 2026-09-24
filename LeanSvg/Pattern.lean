@@ -21,9 +21,9 @@ usvg (`crates/usvg/src/parser/paint_server.rs`, `convert_pattern` /
 `to_user_coordinates`) decides the semantics: `patternUnits` (default
 `objectBoundingBox`), `patternContentUnits` (default `userSpaceOnUse`),
 `viewBox` + `preserveAspectRatio`, `x/y/width/height`, `href` inheritance
-(every attribute here, but *not* `patternTransform`, which usvg reads as the
-element's own attribute only — `SvgNode::resolve_transform` never walks the
-`href` chain), a bounded href chain with cycles rejected as usvg's `HrefIter`
+(every attribute here; usvg does *not* inherit `patternTransform` —
+`SvgNode::resolve_transform` never walks the `href` chain — but SVG and
+Chromium do, and so do we since T104), a bounded href chain with cycles rejected as usvg's `HrefIter`
 does (self- or origin-reference stops it), and zero-size → invalid.  The
 *content* an element paints with is the first link in the chain (self first)
 that has any own children (`find_pattern_with_children`); a chain that finds
@@ -68,8 +68,11 @@ structure RawDef where
   oBB : Option Bool := none
   /-- `patternContentUnits`, default `userSpaceOnUse`. -/
   contentOBB : Option Bool := none
-  /-- `patternTransform`: the element's own attribute only, never inherited. -/
+  /-- `patternTransform` as written (identity when absent). -/
   transform : Mat := Mat.identity
+  /-- T104: whether `patternTransform` was present, so `resolve` can inherit
+  it along the `href` chain. -/
+  hasTransform : Bool := false
   x : Option Grad.LenPct := none
   y : Option Grad.LenPct := none
   width : Option Grad.LenPct := none
@@ -156,8 +159,8 @@ def chainOf (raws : Array RawDef) (find : String → Option Nat) (i : Nat) : Arr
         cur := j
     return out
 
-/-- The first non-`none` value along the chain: every pattern attribute but
-`patternTransform` may come from any link (`resolve_pattern_attr` only checks
+/-- The first non-`none` value along the chain: every pattern attribute may
+come from any link (`resolve_pattern_attr` only checks
 that the link's tag is `pattern`, which every entry in `raws` already is). -/
 def pickCommon (raws : Array RawDef) (ch : Array Nat) (get : RawDef → Option α) :
     Option α := Id.run do
@@ -218,12 +221,13 @@ def conv (oBB : Bool) (l : Grad.LenPct) (ref : Int) : Int :=
   else if oBB then roundDiv l.1 100
   else roundDiv (l.1 * ref) (coordScale * 100)
 
-/-- Resolve one definition: `href` inheritance for every attribute but
-`patternTransform`, defaults, and the positive-size check.  `find` maps an id
+/-- Resolve one definition: `href` inheritance for every attribute, defaults,
+and the positive-size check.  T104: `patternTransform` is inherited too, as
+SVG specifies and Chromium does; usvg reads it from the element itself only
+(no resvg suite test depends on the difference).  `find` maps an id
 to an index in `raws`. -/
 def resolve (raws : Array RawDef) (find : String → Option Nat) (pr : Grad.PctRef) (i : Nat) :
     Resolved :=
-  let me := raws.getD i default
   let ch := chainOf raws find i
   let oBB := (pickCommon raws ch (·.oBB)).getD true
   let contentOBB := (pickCommon raws ch (·.contentOBB)).getD false
@@ -239,7 +243,9 @@ def resolve (raws : Array RawDef) (find : String → Option Nat) (pr : Grad.PctR
   let h := getCoord (·.height) pr.h
   let contentSlot := firstWithChildren raws ch
   { valid := contentSlot.isSome && w > 0 && h > 0,
-    oBB := oBB, contentOBB := contentOBB, transform := me.transform,
+    oBB := oBB, contentOBB := contentOBB,
+    transform := (pickCommon raws ch fun r => if r.hasTransform then some r.transform else none).getD
+      Mat.identity,
     x := x, y := y, w := w, h := h, viewBox := viewBox,
     alignX := alignX, alignY := alignY, slice := slice, alignNone := alignNone,
     contentSlot := contentSlot.getD 0 }
