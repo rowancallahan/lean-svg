@@ -1,4 +1,4 @@
-"""Usage: OUT=dir N=2 python3 tests/bench_realworld.py   (DECISIONS.md, phase 5)
+"""Usage: OUT=dir N=2 [CHROMIUM=/path/to/chromium] python3 tests/bench_realworld.py   (DECISIONS.md, phase 5)
 
 Time lean-svg, resvg and Chromium on the real-world corpus at 1000 px.
 lean-svg / resvg: wall time of one CLI run each (process start, parse, render,
@@ -52,7 +52,7 @@ JS = """async ([url, n]) => {
   return best;
 }"""
 with sync_playwright() as p:
-    b = p.chromium.launch(args=["--allow-file-access-from-files"])
+    b = p.chromium.launch(executable_path=os.environ.get("CHROMIUM") or None, args=["--allow-file-access-from-files"])
     pg = b.new_page(); pg.goto("file://" + str(ROOT))
     for r in rows:
         try: r["ms_chrome"] = round(pg.evaluate(JS, ["file://" + str(ROOT / r["file"]), N]), 1)
