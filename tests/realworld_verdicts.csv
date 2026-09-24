@@ -90,28 +90,48 @@ mpl-tests/test_axes/canonical.svg,pass,,3bc62dd60715dfbd,2026-09-24T04:27:56.426
 mpl-tests/test_axes/contour_colorbar.svg,pass,,b533374332730397,2026-09-24T04:25:23.138Z,current
 mpl-tests/test_axes/contour_hatching.svg,pass,[judged at 300 px],f0b5450412f83456,2026-09-24T04:10:15.833Z,current
 mpl-tests/test_axes/dash_offset.svg,pass,[judged at 300 px],1d069f6e5e042ff8,2026-09-24T04:10:29.716Z,current
+mpl-tests/test_axes/imshow.svg,pass,,2b36be9cca987cf9,2026-09-24T06:13:08.456Z,current
+mpl-tests/test_axes/imshow_clip.svg,pass,,f07ac1421f5c010f,2026-09-24T06:11:23.256Z,current
+mpl-tests/test_axes/mixed_collection.svg,pass,,b91659efb0ad511f,2026-09-24T06:12:51.387Z,current
 mpl-tests/test_axes/nonfinite_limits.svg,pass,,4f35fe2e38451417,2026-09-24T04:31:03.178Z,current
 mpl-tests/test_axes/offset_points.svg,pass,,22630ebeb8383e84,2026-09-24T04:28:50.181Z,current
 mpl-tests/test_axes/pcolormesh.svg,pass,,c6f279ffc84fa619,2026-09-24T04:26:46.477Z,current
+mpl-tests/test_axes/rgba_markers.svg,pass,,485e53a3a62dbb79,2026-09-24T06:11:21.120Z,current
+mpl-tests/test_axes/scatter.svg,pass,,afa2f1111bbb085a,2026-09-24T06:12:26.120Z,current
 mpl-tests/test_axes/single_point.svg,pass,,f309922cebfd0ed5,2026-09-24T04:25:52.894Z,current
 mpl-tests/test_axes/step_linestyle.svg,pass,,67eda355d3ab3332,2026-09-24T04:31:13.848Z,current
+mpl-tests/test_axes/test_alpha.svg,pass,,26fbfc435ce70b09,2026-09-24T06:11:29.629Z,current
+mpl-tests/test_axes/transparent_markers.svg,pass,,991fb98d365ded02,2026-09-24T06:13:45.025Z,current
 mpl-tests/test_backend_svg/bold_font_output.svg,pass,,e7695eabf74e0300,2026-09-24T04:28:25.727Z,current
+mpl-tests/test_backend_svg/bold_font_output_with_none_fonttype.svg,pass,,71d11b66fcefd9b0,2026-09-24T06:10:11.793Z,current
 mpl-tests/test_backend_svg/multi_font_aspath.svg,pass,,31781288a46a1341,2026-09-24T04:25:39.726Z,current
 mpl-tests/test_backend_svg/multi_font_astext.svg,pass,,6042f7433550348b,2026-09-24T04:24:53.022Z,current
+mpl-tests/test_backends_rendering/blend_groups_svg.svg,pass,,0294ba8a7006694b,2026-09-24T06:13:30.904Z,current
+mpl-tests/test_backends_rendering/blend_groups_svg_rasterized.svg,pass,,84b90dca6c82eb87,2026-09-24T06:14:29.603Z,current
 mpl-tests/test_backends_rendering/blend_modes_svg.svg,pass,,601a1a7ab1b2137a,2026-09-24T04:26:07.215Z,current
+mpl-tests/test_backends_rendering/fill_rules.svg,pass,,303eedea60cf6b75,2026-09-24T06:11:16.608Z,current
 mpl-tests/test_bbox_tight/bbox_inches_tight.svg,pass,,562816f2655ca102,2026-09-24T05:14:02.972Z,current
+mpl-tests/test_bbox_tight/bbox_inches_tight_clipping.svg,pass,,08e04ffef3b73053,2026-09-24T06:13:11.839Z,current
 mpl-tests/test_bbox_tight/bbox_inches_tight_raster.svg,pass,,73f6bca0fb89e279,2026-09-24T04:31:08.388Z,current
+mpl-tests/test_bbox_tight/bbox_inches_tight_suptile_legend.svg,pass,,011c773eaddc078f,2026-09-24T06:11:12.041Z,current
+mpl-tests/test_compare_images/simple.svg,pass,,350daa23e8bbe838,2026-09-24T06:10:06.892Z,current
 mpl-tests/test_constrainedlayout/constrained_layout4.svg,pass,,5cf26ffcd675c156,2026-09-24T04:27:48.854Z,current
 mpl-tests/test_contour/contour_log_locator.svg,pass,,0f75b690c429927c,2026-09-24T04:26:50.978Z,current
 mpl-tests/test_contour/contour_manual_labels.svg,pass,,7393d2a397d3f8cb,2026-09-24T06:07:15.136Z,current
+mpl-tests/test_figure/alpha_background.svg,pass,,b2fbed489b3a48fb,2026-09-24T06:15:18.807Z,current
 mpl-tests/test_figure/figure_align_labels.svg,pass,,29f648f254d733ac,2026-09-24T04:26:01.765Z,current
 mpl-tests/test_figure/tightbbox_box_aspect.svg,pass,,c6026a5b5ae43b3b,2026-09-24T04:27:06.152Z,current
 mpl-tests/test_ft2font/last_resort.svg,pass,[judged at 300 px],56814eed42457e75,2026-09-24T04:10:26.369Z,current
+mpl-tests/test_image/bbox_image_inverted.svg,pass,,fb83bb12a6a6bc89,2026-09-24T06:10:18.414Z,current
 mpl-tests/test_image/image_clip.svg,pass,,5f5c55094c023a0a,2026-09-24T04:28:08.920Z,current
+mpl-tests/test_image/image_cliprect.svg,pass,,29068532bdaa1217,2026-09-24T06:11:37.508Z,current
+mpl-tests/test_image/image_composite_background.svg,pass,,7add48039cf37097,2026-09-24T06:11:24.682Z,current
 mpl-tests/test_image/image_placement.svg,pass,,ad0a911dcc227988,2026-09-24T06:07:08.459Z,current
+mpl-tests/test_image/image_shift.svg,pass,,7415c803c0121013,2026-09-24T06:13:55.947Z,current
 mpl-tests/test_image/imshow_masked_interpolation.svg,pass,,90c5a78db09d33d2,2026-09-24T04:26:12.905Z,current
 mpl-tests/test_image/interp_nearest_vs_none.svg,pass,,5a1eb89cd16e2832,2026-09-24T04:27:01.690Z,current
 mpl-tests/test_image/rasterize_10dpi.svg,pass,,552f37eba39b3d80,2026-09-24T05:19:15.863Z,current
+mpl-tests/test_image/rotate_image.svg,pass,,b64066c91468f4f4,2026-09-24T06:13:47.920Z,current
 mpl-tests/test_legend/framealpha.svg,pass,,df487c1f7382de05,2026-09-24T04:31:27.908Z,current
 mpl-tests/test_legend/hatching.svg,pass,,2a35aca50be16d24,2026-09-24T04:25:00.918Z,current
 mpl-tests/test_lines/line_collection_dashes.svg,pass,,3ed1486a67ede8d5,2026-09-24T04:25:30.959Z,current
@@ -119,37 +139,83 @@ mpl-tests/test_lines/scaled_lines.svg,pass,[judged at 300 px],6a135f2ae67809a2,2
 mpl-tests/test_mathtext/mathtext0_cm_03.svg,fail,see why we draw the extra hyphen and fix if needed,5e3e89a32ab0e58a,2026-09-24T05:04:54.781Z,current
 mpl-tests/test_mathtext/mathtext0_dejavusans_04.svg,pass,,f0b60fafb179928a,2026-09-24T04:25:20.161Z,current
 mpl-tests/test_mathtext/mathtext0_dejavusans_05.svg,fail,"we will have to add some more fonts but not too many since we want to keep size down but we def need more of the math fonts if they have permissive licenses that is. Or maybe people can load fonts in, but then we need some stuff to make sure that the fonts cant be a backdoor or something",31312613fc22d980,2026-09-24T05:13:46.951Z,current
+mpl-tests/test_mathtext/mathtext_cm_05.svg,pass,,7522a02776c1fa72,2026-09-24T06:12:23.042Z,current
+mpl-tests/test_mathtext/mathtext_cm_18.svg,pass,,6248886f368fe179,2026-09-24T06:07:58.414Z,current
+mpl-tests/test_mathtext/mathtext_cm_20.svg,pass,,786ddfeea2fef70e,2026-09-24T06:12:33.404Z,current
+mpl-tests/test_mathtext/mathtext_cm_27.svg,pass,,016b946691270d12,2026-09-24T06:13:39.549Z,current
+mpl-tests/test_mathtext/mathtext_cm_37.svg,pass,,2015c0e9bba0c31f,2026-09-24T06:08:14.430Z,current
 mpl-tests/test_mathtext/mathtext_cm_41.svg,pass,,167e278d23d0b618,2026-09-24T04:29:13.181Z,current
 mpl-tests/test_mathtext/mathtext_cm_52.svg,pass,,ea64db197b28582d,2026-09-24T04:31:20.688Z,current
+mpl-tests/test_mathtext/mathtext_cm_53.svg,pass,,33ecb994e15c0c2c,2026-09-24T06:09:52.740Z,current
+mpl-tests/test_mathtext/mathtext_cm_54.svg,pass,,33b0531e8124f37c,2026-09-24T06:12:06.824Z,current
+mpl-tests/test_mathtext/mathtext_cm_68.svg,pass,,866e3ea06e1ef3a7,2026-09-24T06:10:36.112Z,current
+mpl-tests/test_mathtext/mathtext_cm_70.svg,pass,,7744f2b718fb7330,2026-09-24T06:09:46.005Z,current
+mpl-tests/test_mathtext/mathtext_cm_74.svg,pass,,311508606a5b4e75,2026-09-24T06:11:04.670Z,current
+mpl-tests/test_mathtext/mathtext_cm_80.svg,pass,,4299aedab8ecf6f9,2026-09-24T06:10:39.902Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_18.svg,pass,,20d46fee293647e5,2026-09-24T06:08:20.779Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_23.svg,pass,,ceff593cc32e96a3,2026-09-24T06:12:59.445Z,current
 mpl-tests/test_mathtext/mathtext_dejavusans_37.svg,pass,,728c1e3c0af9cf11,2026-09-24T04:26:31.932Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_41.svg,pass,,54f4304bf86fc45c,2026-09-24T06:10:27.211Z,current
 mpl-tests/test_mathtext/mathtext_dejavusans_53.svg,pass,[judged at 300 px],08975db132a529f9,2026-09-24T04:10:06.211Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_68.svg,pass,,4bb712c352f1e694,2026-09-24T06:09:42.289Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_70.svg,pass,,1774493ccb111dc5,2026-09-24T06:10:32.039Z,current
+mpl-tests/test_mathtext/mathtext_dejavusans_75.svg,pass,,f7079287dfde2faa,2026-09-24T06:09:57.991Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_18.svg,pass,,0d27794149a563c2,2026-09-24T06:08:03.280Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_20.svg,pass,,94dce389c7c8ac2a,2026-09-24T06:12:19.305Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_23.svg,pass,,249e84a61a2a7332,2026-09-24T06:13:00.630Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_26.svg,pass,,bf93b06064058549,2026-09-24T06:13:37.644Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_39.svg,pass,,ebd592b3ddba43fa,2026-09-24T06:13:34.060Z,current
 mpl-tests/test_mathtext/mathtext_dejavuserif_52.svg,pass,,70128dc30891aa81,2026-09-24T04:30:56.572Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_53.svg,pass,,f37584ea2f1443ab,2026-09-24T06:08:53.371Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_54.svg,pass,,60ffe1f729fb3fc7,2026-09-24T06:11:54.340Z,current
 mpl-tests/test_mathtext/mathtext_dejavuserif_68.svg,pass,,a3212edbc773212a,2026-09-24T04:27:52.620Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_70.svg,pass,,6c6b54bacbd4fc07,2026-09-24T06:10:04.564Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_80.svg,pass,,8588336bba393dc3,2026-09-24T06:10:02.477Z,current
+mpl-tests/test_mathtext/mathtext_dejavuserif_82.svg,pass,,9eb8a58f5d719ac0,2026-09-24T06:13:27.059Z,current
+mpl-tests/test_mathtext/mathtext_stix_40.svg,pass,,7700ab3f09ec94e0,2026-09-24T06:13:04.591Z,current
 mpl-tests/test_mathtext/mathtext_stix_53.svg,pass,[judged at 300 px],9612a6589a5314c6,2026-09-24T04:10:32.058Z,current
+mpl-tests/test_mathtext/mathtext_stix_54.svg,pass,,571860e0b5dcb4ff,2026-09-24T06:12:12.654Z,current
+mpl-tests/test_mathtext/mathtext_stix_68.svg,pass,,d686eacaf2daf77a,2026-09-24T06:10:51.117Z,current
 mpl-tests/test_mathtext/mathtext_stix_74.svg,pass,,b407f5aa6e1adad2,2026-09-24T04:29:31.036Z,current
+mpl-tests/test_mathtext/mathtext_stix_75.svg,pass,,c692baa97dba6a3f,2026-09-24T06:10:48.424Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_18.svg,pass,,9d2af1ef0172c0f0,2026-09-24T06:09:32.854Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_37.svg,pass,,6fd038565ec0b18f,2026-09-24T06:08:50.141Z,current
 mpl-tests/test_mathtext/mathtext_stixsans_41.svg,pass,,0d82c7d7697d409b,2026-09-24T04:29:18.239Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_47.svg,pass,,3e286bf204514923,2026-09-24T06:14:15.395Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_53.svg,pass,,bf0fe2e2483e9229,2026-09-24T06:09:50.958Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_70.svg,pass,,b770a8ae3a458659,2026-09-24T06:10:28.559Z,current
+mpl-tests/test_mathtext/mathtext_stixsans_75.svg,pass,,ebcc0511561ab61b,2026-09-24T06:10:56.000Z,current
 mpl-tests/test_patches/all_quadrants_arcs.svg,pass,,40719ac6db7ca925,2026-09-24T04:28:14.336Z,current
 mpl-tests/test_patches/autoscale_arc.svg,pass,,c5e55c78afc08737,2026-09-24T04:27:15.437Z,current
 mpl-tests/test_patches/multi_color_hatch.svg,pass,[judged at 300 px],4e84c8b225a388e9,2026-09-24T04:09:31.771Z,current
 mpl-tests/test_patches/patch_alpha_coloring.svg,pass,,63ab62751c7153f9,2026-09-24T04:29:04.519Z,current
 mpl-tests/test_patches/patch_custom_linestyle.svg,pass,,15174b1616a1be2d,2026-09-24T04:28:44.268Z,current
+mpl-tests/test_patches/wedge_range.svg,pass,,2b6a1c18f74cfc14,2026-09-24T06:11:41.346Z,current
 mpl-tests/test_path/path_clipping.svg,pass,,4eb5d9514447e27a,2026-09-24T04:28:05.191Z,current
 mpl-tests/test_patheffects/collection.svg,pass,,b6744c5a69e07ad9,2026-09-24T04:25:04.765Z,current
 mpl-tests/test_patheffects/patheffect1.svg,pass,,4db147cea140ab1e,2026-09-24T04:25:44.389Z,current
 mpl-tests/test_patheffects/patheffect2.svg,pass,,423477c55b3c3f89,2026-09-24T04:26:10.060Z,current
 mpl-tests/test_patheffects/patheffect3.svg,pass,,d9bfdfaef3a2195f,2026-09-24T04:28:02.429Z,current
+mpl-tests/test_simplification/clipping.svg,pass,,268a6f42b2e3ac47,2026-09-24T06:12:29.442Z,current
 mpl-tests/test_simplification/clipping_with_nans.svg,pass,,11999484b02ac9b4,2026-09-24T04:30:51.046Z,current
 mpl-tests/test_simplification/hatch_simplify.svg,pass,,5cf80ff8dbd4d741,2026-09-24T04:25:54.764Z,current
 mpl-tests/test_text/features.svg,pass,[judged at 300 px],34b3d3df99db2aee,2026-09-24T04:10:00.611Z,current
+mpl-tests/test_text/font_styles.svg,pass,,80f7ade0db8009c9,2026-09-24T06:10:43.399Z,current
 mpl-tests/test_text/language.svg,pass,,5298bc01d0de7ab3,2026-09-24T04:28:56.574Z,current
 mpl-tests/test_text/multiline.svg,pass,,bfaffa19f867ef90,2026-09-24T04:27:11.932Z,current
 mpl-tests/test_text/multiline2.svg,pass,[judged at 300 px],51caaec3a6712f2c,2026-09-24T04:10:39.223Z,current
 mpl-tests/test_text/text_alignment.svg,pass,,96b89e9b5e6ec32c,2026-09-24T04:26:42.967Z,current
+mpl-tests/test_text/text_as_path_opacity.svg,pass,,47f6e8bc6aeba93a,2026-09-24T06:15:23.607Z,current
+mpl-tests/test_text/text_as_text_opacity.svg,pass,,1440346acb226ae1,2026-09-24T06:12:39.517Z,current
 mpl-tests/test_text/text_bboxclip.svg,pass,,507645f2be852089,2026-09-24T04:31:17.159Z,current
+mpl-tests/test_text/titles.svg,pass,,71743ef038480f6c,2026-09-24T06:11:47.898Z,current
+mpl-tests/test_tightlayout/tight_layout1.svg,pass,,ef7ca8d5271e4eff,2026-09-24T06:09:38.308Z,current
 mpl-tests/test_tightlayout/tight_layout2.svg,pass,,ec22d4075fd584dd,2026-09-24T04:26:36.505Z,current
 mpl-tests/test_tightlayout/tight_layout3.svg,pass,,4497e7d3f4134408,2026-09-24T04:26:57.984Z,current
 mpl-tests/test_tightlayout/tight_layout4.svg,pass,,9b230630afea89e5,2026-09-24T04:26:17.442Z,current
 mpl-tests/test_tightlayout/tight_layout6.svg,pass,,c058d3da5c59e094,2026-09-24T04:26:03.080Z,current
+mpl-tests/test_tightlayout/tight_layout7.svg,pass,,255a16bc0e87497d,2026-09-24T06:09:36.636Z,current
+mpl-tests/test_tightlayout/tight_layout9.svg,pass,,d15118b6c06abc49,2026-09-24T06:08:32.927Z,current
 mpl-tests/test_transforms/pre_transform_data.svg,pass,[judged at 300 px],de0b887bfd064f93,2026-09-24T04:09:53.193Z,current
 plantuml/activity_pipeline.svg,pass,,7bdd2d6b9ea251ff,2026-09-24T05:24:32.564Z,current
 plantuml/class_model.svg,pass,,2b30c709f0e49566,2026-09-24T05:25:16.183Z,current
