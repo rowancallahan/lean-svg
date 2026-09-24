@@ -129,82 +129,20 @@ python3 tests/run_tests.py
    if it fits the local corpus style 
 
 **Deliverable:** write `tasks/<ID>-<slug>.md` (the ID given below) with the
-spec you implemented, what you skipped and why, and a `## Report` with the
-before/after numbers for your target directories and the whole suite.
-Commit (author `Rowan Callahan <rowan.l.callahan@gmail.com>`) in logical
-commits and push to your assigned branch. **Do not open a pull request, do not
-merge, do not push to any other branch.** If you run out of time, push what
-is verified-clean and document what remains. Aim to finish within a few
-hours; partial but regression-free beats complete but risky.
+spec you implemented, what you skipped and why, and a `## Report
 
----
-
-## Spec implemented
-
-- **`font-stretch`** (`Svg.parseFontStretch`, `Style.fontStretch`, width
-  class 1–9): exactly usvg 0.48.1's `conv_font_stretch` — the nine keywords;
-  `narrower` = `condensed` and `wider` = `expanded` (absolute, as usvg does,
-  not relative to the parent); `inherit` keeps the parent's value (usvg's
-  svgtree `resolve_inherit`); anything else, **percentages included**, is
-  `normal` (usvg's `_ => Normal`; Chromium would map `62.5%` to
-  extra-condensed, usvg does not). The CSS `font` shorthand resets stretch to
-  normal and then takes a stretch keyword it names.
-- **Matching**: `FontSet.styles` is now `(weight, italic, stretch)`;
-  `FamilyMatch.matchStretch` is fontdb's `find_best_match` step 4a (exact,
-  else for ≤ normal nearest narrower then nearest wider, above normal the
-  reverse); `FamilyMatch.pick` filters by stretch before style and weight.
-  `Text.baseFont` takes the span's stretch (`SpanProps.stretch`) and routes
-  Noto Sans through `pick` only when stretch ≠ normal, so every normal-stretch
-  path is unchanged. Generic families untouched.
-- **Font**: Noto Sans ExtraCondensed 2.000 (the suite's
-  `NotoSans-ExtraCondensed.ttf`; typographic family "Noto Sans", width class
-  2, OFL 1.1, same Google copyright as the other Noto Sans faces, licence
-  `LeanSvg/Fonts/LICENSE-OFL.txt`), appended last to `FontSet` (index 34) so
-  every existing fallback order is unchanged. Module 356,958 bytes of Lean
-  source, 266,481 bytes of font. Binary 47.1 MB (< 75 MB).
-- `tests/svg/118_font_stretch.svg`: keywords, nearest-stretch, inherit,
-  stretch over bold italic, expanded → normal, shorthand, percentage.
-
-- **Fallback** (follow-up commit): Noto Sans ExtraCondensed is a resvg-suite
-  font, so a chunk it cannot fully draw follows usvg's rules (FontSet order,
-  a fallback covering the whole chunk replaces every glyph), not T106's
-  per-character Chromium chain. `FamilyMatch.isSuite` (indices < 16, and
-  34) replaces the three `base < FamilyMatch.first` tests in
-  `FamilyMatch.fallbackOrder` and `Text.assignFonts`; document fonts
-  (≥ `FontSet.count`) are unaffected. Found by `118_font_stretch.svg`'s
-  `ultra-condensed` line with a `→`, which resvg draws wholly in Mplus 1p.
-
-## Skipped, and why
-
-- **Source Sans Pro not embedded; `suiteOnlyFamilies` unchanged (items 1a
-  and 3). Decision: it stays out (licence).** Its licence
-  (`fonts/SourceSansPro-LICENSE-OFL.md`): "Copyright 2010-2018 Adobe … with
-  Reserved Font Name 'Source'". OFL 1.1 defines a Modified Version as "any
-  derivative made by adding to, deleting, or substituting … any of the
-  components of the Original Version, by changing formats or by porting".
-  Any embedding here is a Modified Version: subsetting deletes glyphs and
-  hinting, and even the whole font, unsubsetted, is changed in format (base64
-  Lean module, tables reordered, T94). §3: no Modified Version "may use the
-  Reserved Font Name(s) unless explicit written permission is granted by the
-  corresponding Copyright Holder". "Source Sans Pro" contains the RFN, so it
-  cannot be embedded under that name without Adobe's written permission, and
-  renaming it while still resolving `font-family="Source Sans Pro"` to it
-  would present the modified font under the reserved name. Source Sans 3
-  carries the same RFN. `source-sans-pro.svg` and `font-list.svg` keep
-  failing (Noto Sans + warning, as before).
-- `tests/check_shape.py`'s `NOTO_SANS` list not extended to the new face
-  (it compares shaping against HarfBuzz; not needed for this change).
-
-## Report
-
-Baseline `b570a42` (branch start, = `main` + this task file).
+Measured after merging the integration branch
+(`claude/beautiful-brown-nd2o1h` at `55d30b8`, which includes T116's
+synthetic styles) into this branch. Baseline = that integration head's
+binary; after = the merged branch. Every run was done alone, one after
+another.
 
 - `lake build`: clean, no new warnings. `check-theorems.sh`: `invariants ok`,
-  `theorems ok`. `run_adversarial.py`: 171/171 clean. `run_tiles.py`: 81/81
+  `theorems ok`. `run_adversarial.py`: 179/179 clean. `run_tiles.py`: 89/89
   byte-identical.
-- resvg suite, fast (100 px): pass 1548 → **1551**; 3 fail → pass, **0 pass →
+- resvg suite, fast (100 px): pass 1568 → **1571**; 3 fail → pass, **0 pass →
   fail**, no other file moved > 0.1 points.
-- resvg suite, 200 px: pass 1572 → **1575**; 3 fail → pass, **0 pass → fail**,
+- resvg suite, 200 px: pass 1587 → **1590**; 3 fail → pass, **0 pass → fail**,
   no other file moved > 0.1 points.
 
 | target | 200 px within-8 before | after |
@@ -215,10 +153,15 @@ Baseline `b570a42` (branch start, = `main` + this task file).
 | text/font-family/source-sans-pro | fail | unchanged (licence, see above) |
 | text/font-family/font-list | fail | unchanged (licence, see above) |
 
-- `run_tests.py`: every existing file's score identical to baseline; 63/80 →
-  64/81 pass (the new `118_font_stretch.svg` passes, 99.787% within-8; each
-  of its six lines alone ≥ 99.949%).
-- Timing (each run alone): fast 11.4 s → 11.8 s, 200 px 18.4 s → 18.9 s
-  (+3.5% / +2.7%, within the 5% budget; one extra `Nat` compare per span).
-- Binary 47.1 MB (< 75 MB). Font data 23,737,689 → 24,004,170 bytes.
-- Real-world corpus vs Chromium: RWRESULT
+- Real-world corpus vs Chromium (848 files, direct and usvg routes): 261 / 262
+  pass before and after; **0 files moved** by more than 0.1 points (no
+  real-world file uses `font-stretch`).
+- `run_tests.py`: 70/89 → 71/89. Only `118_font_stretch.svg` changed
+  (89.84% → 99.79%, fail → pass); every other file's score is identical.
+- Timing (wall): fast 11.7 s → 11.8 s, 200 px 19.4 s → 19.0 s, real-world
+  307 s → 302 s. The difference is within noise, well inside the 5% budget.
+- Binary 47.1 MB → 47.4 MB (< 75 MB).
+- Merge notes: `SpanProps` gets T116's `weight`/`italic` and T118's
+  `stretch`; T116's real-world italic pick also passes the stretch;
+  `Synth.realWorld` now excludes Noto Sans ExtraCondensed, because usvg never
+  synthesises bold or oblique for a suite font.

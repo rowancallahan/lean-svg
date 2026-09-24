@@ -179,8 +179,9 @@ python3 tests/gen_font_module.py NotoSans-ExtraCondensed.ttf NotoSansExtraConden
   Font Name "Source"; the OFL counts deleting components or changing formats
   as a Modified Version (subsetting and the Lean module encoding are both),
   and §3 forbids a Modified Version from using the RFN without Adobe's written
-  permission. Awaiting Rowan's decision (see `tasks/T118-font-stretch.md`).
-
+  permission. It is not embedded, and must not be without that permission,
+  under its own name or another name that `font-family="Source Sans Pro"`
+  resolves to (see `tasks/T118-font-stretch.md`).
 - **Emoji**: not now (Rowan's decision); colour emoji are bitmap/COLR, not `glyf`.
 - T106, skipped: Liberation fonts themselves (download refused, see above;
   Arimo/Tinos/Cousine used instead); matplotlib's BaKoMa `cmr10.ttf` etc.
