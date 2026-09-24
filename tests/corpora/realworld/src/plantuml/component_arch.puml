@@ -1,0 +1,12 @@
+@startuml
+package "lean-svg" {
+  [Parser] --> [Style]
+  [Style] --> [Render]
+  [Render] --> [Raster]
+  [Raster] --> [PNG encoder]
+}
+node "Harness" {
+  [run_corpora.py]
+}
+[run_corpora.py] ..> [Parser] : subprocess
+@enduml

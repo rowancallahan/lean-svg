@@ -1,0 +1,13 @@
+@startmindmap
+* Statistics
+** Bayesian
+*** Priors
+*** MCMC
+** Frequentist
+*** MLE
+*** Bootstrap
+left side
+** Visualisation
+*** Trace plots
+*** Forest plots
+@endmindmap

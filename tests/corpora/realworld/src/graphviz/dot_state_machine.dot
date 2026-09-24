@@ -1,0 +1,7 @@
+digraph fsm {
+  rankdir=LR; node [shape=doublecircle]; S4; node [shape=circle];
+  S0 -> S1 [label="a"]; S0 -> S2 [label="b"]; S1 -> S1 [label="a"]; S1 -> S3 [label="b"];
+  S2 -> S1 [label="a"]; S2 -> S2 [label="b"]; S3 -> S1 [label="a"]; S3 -> S4 [label="b"];
+  S4 -> S1 [label="a"]; S4 -> S2 [label="b"];
+  init [shape=point]; init -> S0;
+}

@@ -1,0 +1,7 @@
+digraph styles {
+  rankdir=LR;
+  a [style=filled, fillcolor="red:blue", gradientangle=90]; b [style="filled,dashed", fillcolor="#88cc88"]; c [shape=hexagon, style=bold, color=purple];
+  d [shape=star, style=filled, fillcolor=gold]; e [shape=cylinder, style=filled, fillcolor=lightblue]; f [shape=note]; g [shape=tab]; h [shape=folder];
+  a -> b [color="red;0.5:blue", penwidth=3]; b -> c [style=dotted, arrowhead=diamond]; c -> d [arrowhead=odot, dir=both, arrowtail=inv];
+  d -> e [style=dashed, color=green]; e -> f [arrowhead=veevee]; f -> g [arrowhead=crow]; g -> h [arrowhead=tee];
+}

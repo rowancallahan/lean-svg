@@ -1,0 +1,4 @@
+graph G {
+  layout=neato; overlap=false; node [shape=circle, style=filled, fillcolor="#ddddee"];
+  a -- b -- c -- d -- a; a -- c; b -- e -- f -- g -- e; d -- h -- i -- j -- h; c -- k; k -- l; l -- m; m -- k; f -- m;
+}

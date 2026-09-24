@@ -92,12 +92,21 @@ CORPORA = {
     "resvg": ("resvg-test-suite/tests", "**/*.svg", 200, None),
     "simple-icons": ("simple-icons/icons", "*.svg", 96, None),
     "feather": ("feather/icons", "*.svg", 96, None),
+    # T103: generated + openly licensed real-world SVGs (TikZ, matplotlib,
+    # Graphviz, ...), committed in the repo; see its SOURCES.csv and src/.
+    "realworld": ("realworld", "**/*.svg", 200, None),
 }
+# `--corpus all` keeps meaning the three external corpora; realworld is only
+# run when named.
+ALL_CORPORA = ("resvg", "simple-icons", "feather")
+# Reference used when --ref is not given. realworld has no resvg-oracle
+# claim: Chromium is what these files are meant to look like.
+DEFAULT_REF = {"realworld": "chrome"}
 ROUTES = ("direct", "usvg")
 
 # `--fast`: smaller renders for the iterate-on-failures loop. Small enough to
 # be quick, large enough that the metric still sees antialiasing detail.
-FAST_WIDTHS = {"resvg": 100, "simple-icons": 64, "feather": 64}
+FAST_WIDTHS = {"resvg": 100, "simple-icons": 64, "feather": 64, "realworld": 100}
 
 # Effective render width per corpus; main() fills this in (defaults, or
 # FAST_WIDTHS under --fast). Everything that renders goes through width_for.
@@ -407,6 +416,17 @@ def render_one(svg, corpus, route, width, binary, tmpdir, slot, tol, threshold, 
 
     ref_size = (ref.shape[1], ref.shape[0])
     ours_size = (ours.shape[1], ours.shape[0])
+    # Chromium lays the <img> out at a fractional height and its screenshot
+    # rounds that differently from our (resvg's) integer height; a 1-row
+    # difference is that rounding, not a sizing bug: compare the common rows.
+    if (ref_mode == "chrome" and ref_size[0] == ours_size[0]
+            and abs(ref_size[1] - ours_size[1]) == 1):
+        h = min(ref_size[1], ours_size[1])
+        ref, ours = ref[:h], ours[:h]
+        row["note"] = (row["note"] + "; " if row["note"] else "") + (
+            "chromium height %d vs ours %d (rounding); compared on %d rows"
+            % (ref_size[1], ours_size[1], h))
+        ref_size = ours_size = (ref_size[0], h)
     if ref_size != ours_size:
         row["status"] = "size_mismatch"
         row["size"] = "%dx%d vs %dx%d" % (ref_size + ours_size)
@@ -1008,7 +1028,7 @@ def main():
     )
     parser.add_argument(
         "--corpus", default=None,
-        choices=["resvg", "simple-icons", "feather", "all"],
+        choices=list(CORPORA) + ["all"],
         help="which corpus to measure (default all, or the corpora named by "
              "--failing-from's CSVs)",
     )
@@ -1085,10 +1105,11 @@ def main():
              "set (falls back to whatever fonts resvg finds on the system)",
     )
     parser.add_argument(
-        "--ref", default="resvg", choices=list(REF_MODES),
+        "--ref", default=None, choices=list(REF_MODES),
         help="what to score `ours` against: live resvg (default, unchanged "
              "behaviour), headless Chromium (chrome), or the resvg-test-suite's "
-             "own bundled PNG (suite, resvg corpus only)",
+             "own bundled PNG (suite, resvg corpus only). Default: resvg, "
+             "except chrome for the realworld corpus",
     )
     parser.add_argument(
         "--keep-renders", metavar="DIR", default=None,
@@ -1129,7 +1150,7 @@ def main():
     corpus_explicit = args.corpus is not None
     route_explicit = args.route is not None
     routes = list(ROUTES) if (args.route or "both") == "both" else [args.route]
-    corpora = list(CORPORA) if (args.corpus or "all") == "all" else [args.corpus]
+    corpora = list(ALL_CORPORA) if (args.corpus or "all") == "all" else [args.corpus]
 
     # ---- --failing-from: which files did not pass last time
     fail_sets = None
@@ -1238,14 +1259,17 @@ def main():
     resvg_args = resvg_font_args(args.no_font_pin)
     all_runs = []
     grand_start = time.perf_counter()
+    refs_used = []
     for (corpus, route), files in selected.items():
+        ref = args.ref or DEFAULT_REF.get(corpus, "resvg")
+        refs_used.append(ref)
         print(
             "== %s / %s: %d files at width %d, %d jobs, --ref %s"
-            % (corpus, route, len(files), width_for(corpus), args.jobs, args.ref),
+            % (corpus, route, len(files), width_for(corpus), args.jobs, ref),
             flush=True,
         )
         chrome_ref, chrome_tmpdir = None, None
-        if args.ref == "chrome":
+        if ref == "chrome":
             t0 = time.perf_counter()
             chrome_ref, chrome_tmpdir = prerender_chrome_refs(
                 corpus, files, width_for(corpus), args.jobs
@@ -1260,7 +1284,7 @@ def main():
             rows, elapsed, csv_path = run_corpus_route(
                 corpus, route, files, binary, args.tol, args.threshold, args.jobs,
                 keep_renders_dir, resvg_args=resvg_args,
-                ref_mode=args.ref, chrome_ref=chrome_ref,
+                ref_mode=ref, chrome_ref=chrome_ref,
             )
             s = stats_for(rows)
             print(
@@ -1276,7 +1300,7 @@ def main():
             if not args.no_worst:
                 write_worst_composites(
                     corpus, route, rows, binary, args.tol, args.threshold, args.jobs,
-                    resvg_args=resvg_args, ref_mode=args.ref, chrome_ref=chrome_ref,
+                    resvg_args=resvg_args, ref_mode=ref, chrome_ref=chrome_ref,
                 )
         finally:
             if chrome_tmpdir is not None:
@@ -1297,7 +1321,7 @@ def main():
         "tol": args.tol,
         "threshold": args.threshold,
         "jobs": args.jobs,
-        "ref": args.ref,
+        "ref": ", ".join(dict.fromkeys(refs_used)),
         "sampling_notes": sampling_notes,
         "fast": args.fast,
         "widths_for": sorted({c for c, _ in selected}, key=list(CORPORA).index),

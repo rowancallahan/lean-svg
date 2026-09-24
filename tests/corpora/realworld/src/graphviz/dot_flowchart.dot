@@ -1,0 +1,10 @@
+digraph G {
+  node [shape=box, style="rounded,filled", fillcolor="#e8f0fe", fontname="Helvetica"];
+  start [shape=ellipse, fillcolor="#c8e6c9", label="Start"];
+  read [label="Read data"]; clean [label="Clean / impute"];
+  ok [shape=diamond, fillcolor="#fff3cd", label="Valid?"];
+  fit [label="Fit model"]; report [label="Write report"];
+  stop [shape=ellipse, fillcolor="#ffcdd2", label="Stop"];
+  start -> read -> clean -> ok; ok -> fit [label="yes"]; ok -> clean [label="no", style=dashed];
+  fit -> report -> stop;
+}

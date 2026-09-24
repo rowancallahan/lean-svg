@@ -1,0 +1,13 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzcd}[row sep=scriptsize, column sep=scriptsize]
+& f^* E_V \arrow[dl] \arrow[rr] \arrow[dd] & & E_V \arrow[dl] \arrow[dd] \\
+f^* E \arrow[rr, crossing over] \arrow[dd] & & E \\
+& U \arrow[dl] \arrow[rr] & & V \arrow[dl] \\
+M \arrow[rr] & & N \arrow[from=uu, crossing over]
+\end{tikzcd}
+\end{document}

@@ -1,0 +1,7 @@
+stateDiagram-v2
+    [*] --> Warmup
+    Warmup --> Sampling : adapted
+    Sampling --> Sampling : draw
+    Sampling --> Divergent : energy error
+    Divergent --> Sampling
+    Sampling --> [*] : N draws

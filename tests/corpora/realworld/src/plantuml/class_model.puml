@@ -1,0 +1,15 @@
+@startuml
+abstract class Model {
+  +logp(theta) : float
+}
+class Hierarchical {
+  -groups : int
+}
+interface Sampler {
+  +step()
+}
+Model <|-- Hierarchical
+Sampler ..> Model : uses
+class NUTS implements Sampler
+class HMC implements Sampler
+@enduml

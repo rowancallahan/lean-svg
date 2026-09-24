@@ -1,0 +1,11 @@
+@startuml
+left to right direction
+actor Analyst
+actor Reviewer
+rectangle Renderer {
+  Analyst -- (Render SVG)
+  Analyst -- (Compare to reference)
+  Reviewer -- (Judge side by side)
+  (Compare to reference) .> (Render SVG) : include
+}
+@enduml

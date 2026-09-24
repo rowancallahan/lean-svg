@@ -1,0 +1,6 @@
+digraph wf {
+  rankdir=LR; node [shape=box, style="rounded,filled", fillcolor="#f5f5f5", fontname="Helvetica"];
+  prior [label="Prior predictive\ncheck"]; fit [label="Fit\n(NUTS)"]; diag [label="Diagnostics\nR̂, ESS, divergences"];
+  ppc [label="Posterior predictive\ncheck"]; comp [label="Model comparison\n(LOO)"];
+  prior -> fit -> diag -> ppc -> comp; diag -> fit [label="reparam.", style=dashed, constraint=false]; ppc -> prior [label="revise", style=dashed, constraint=false];
+}

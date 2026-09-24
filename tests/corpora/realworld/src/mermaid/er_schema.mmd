@@ -1,0 +1,6 @@
+erDiagram
+    STUDY ||--o{ SUBJECT : enrolls
+    SUBJECT ||--|{ MEASUREMENT : has
+    STUDY { string id  date start }
+    SUBJECT { int id  string arm }
+    MEASUREMENT { float value  date taken }

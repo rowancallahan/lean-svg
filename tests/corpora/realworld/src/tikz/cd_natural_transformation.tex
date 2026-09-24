@@ -1,0 +1,11 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzcd}[column sep=huge]
+\mathcal{C} \arrow[r, bend left=50, "F"{name=F}] \arrow[r, bend right=50, "G"'{name=G}] & \mathcal{D}
+\arrow[Rightarrow, from=F, to=G, shorten=3pt, "\eta"]
+\end{tikzcd}
+\end{document}

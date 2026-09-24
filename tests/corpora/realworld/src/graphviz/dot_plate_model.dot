@@ -1,0 +1,8 @@
+digraph lda {
+  rankdir=LR; node [shape=circle, fixedsize=true, width=0.6];
+  alpha [label="α"]; eta [label="η"];
+  subgraph cluster_D { label="D"; theta [label="θ"];
+    subgraph cluster_N { label="N"; z [label="z"]; w [label="w", style=filled, fillcolor=gray80]; } }
+  subgraph cluster_K { label="K"; beta [label="β"]; }
+  alpha -> theta -> z -> w; eta -> beta -> w;
+}

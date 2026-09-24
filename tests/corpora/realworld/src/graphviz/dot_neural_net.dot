@@ -1,0 +1,7 @@
+digraph nn {
+  rankdir=LR; splines=line; nodesep=0.3; node [shape=circle, label="", width=0.3, style=filled];
+  subgraph cluster_i { color=white; node [fillcolor="#8bc34a"]; i1; i2; i3; label="input"; }
+  subgraph cluster_h { color=white; node [fillcolor="#03a9f4"]; h1; h2; h3; h4; label="hidden"; }
+  subgraph cluster_o { color=white; node [fillcolor="#ff5722"]; o1; o2; label="output"; }
+  {i1 i2 i3} -> {h1 h2 h3 h4}; {h1 h2 h3 h4} -> {o1 o2};
+}

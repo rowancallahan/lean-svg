@@ -1,0 +1,11 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzcd}[column sep=large]
+\mathcal{C} \arrow[r, bend left=35, "F", ""{name=U, below}] & \mathcal{D} \arrow[l, bend left=35, "G", ""{name=D, above}]
+\arrow[from=U, to=D, phantom, "\dashv" rotate=-90]
+\end{tikzcd}
+\end{document}
