@@ -133,3 +133,97 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+**Outcome: no renderer bug of ours found in the three tikz groups; no code
+changed.** Every remaining difference against Chromium traces to Chromium's
+own layout of the `pt`-sized image (integer layout sizes → a slightly
+different scale and a 0.3–1 px offset of the whole drawing), which the
+harness cannot remove. Our output matches resvg on these files.
+
+### Method
+
+- `run_corpora.py --corpus realworld --ref chrome --width 1000 --keep-renders`,
+  all 178 files of `tikz`, `tikz-fonts`, `web-tikz`, white-composited.
+- Side-by-side ref | ours | diff for every file below 99.5 % within-32
+  (after the best vertical shift of −3..3 px).
+- To separate real differences from drift: resize ours to Chromium's size,
+  Gaussian-blur both (σ 4 px at 1000 px), flag pixels differing > 40.
+  Top 30 flagged files inspected by eye (shading_gradients, venn_even_odd,
+  patterns_fill, bayesnet_regression_dag, sierpinski, posterior, bar,
+  cd_adjunction, feynman_*, petersen, torus-fundamental-domain, …). Every
+  flag sits on an edge that moved by a pixel or on the last row (height
+  rounding); no missing, extra or wrongly coloured element anywhere.
+
+### Leads
+
+- **`tikz-fonts/plot_pgf_posterior`, red MAP stem**: does not reproduce.
+  Chromium draws the stem red too (1000 px render), and the source says
+  `\addplot[red, ycomb, mark=*]`, so red is correct. The SVG has
+  `<g fill='#f00' stroke='#f00'><path d='M113.10583 0V52.39197' fill='none'/>`.
+  The lead is stale (probably from before T105/T106).
+- **`plot_pgf_bar` (86.6 %) and `timeline_calendar` (82.7 %)**: Chromium's
+  layout offset, not ours. The 200 px renders look the same by eye; the
+  diff is every horizontal edge. Measured on `timeline_calendar` at 200 px:
+  the axis line's ink is at row 33 in ours **and in resvg** (alpha
+  `110, 10` vs `110, 9`), but at row 32 in Chromium (ink centroid 0.87 px
+  higher). Chromium sizes the `<img>` from the `pt` intrinsic size
+  (454.6 × 96.4 px) with layout-unit rounding, so its viewBox scale and
+  vertical placement differ slightly from the exact `viewBox` mapping. On a
+  43-px-tall picture made of hairlines and small text, a sub-pixel shift
+  moves most ink pixels past tolerance. Against resvg the same files score
+  **98.4 %** (`tikz/timeline_calendar`) and **99.5 %** (`tikz/plot_pgf_bar`)
+  at 200 px. The canvas sizes match resvg exactly (e.g. bar 1000×744,
+  timeline 1000×211, pushdown 1000×210); Chromium gives 742 / 213 / 212.
+  These are the same "sub-pixel height offset" class the task says to
+  ignore, but visible as a *scale* drift too (≈ 1 px at x ≈ 690 on the
+  1000 px bar chart).
+  - Rowan's `fail` verdicts on the `tikz-fonts` versions complain about
+    fonts. At 1000 px the embedded CM fonts now render like Chromium
+    (glyphs, positions and kerning match up to the drift above). If those
+    verdicts were given before T105 merged, they may be worth re-judging.
+    I did not change `realworld_verdicts.csv`.
+  - **Reference note**: for these tikz files resvg is a better reference
+    than Chromium (resvg is correct here and the Chromium comparison is
+    dominated by its layout rounding). For `tikz-fonts`, resvg skips
+    `@font-face`, so it cannot be the reference for text; Chromium plus
+    Rowan's eye is the only option there.
+- **`knot_trefoil`**: no TeX toolchain in this container (`pdflatex`,
+  `lualatex`, `dvisvgm`, `kpsewhich` all missing) and installing one is
+  outside this task's network scope, so the SVGs and `.tex` are left
+  unchanged (changing only the `.tex` would make source and SVG disagree).
+  Corrected source (the knots-manual trefoil: three outer points, three
+  inner points, Hobby curves), to replace the `\strand` line in
+  `tests/corpora/realworld/src/tikz/knot_trefoil.tex`:
+  ```tex
+  \strand[very thick, blue] ([closed]90:2)
+    foreach \k in {1,2,3} { .. (-30+\k*240:.5) .. (90+\k*240:2) } ;
+  ```
+  with `\begin{knot}[consider self intersections=true, flip crossing=2,
+  clip width=4]` unchanged. Regenerate both SVGs with
+  `tests/corpora/realworld/src/gen_tikz.sh` as T103 did.
+
+### Other observations (not bugs, no fix)
+
+- `patterns_fill` (88 % within-32 at 1000 px): pattern tiles are placed
+  identically; the diff is the same scale drift, which accumulates over
+  many thin periodic lines.
+- `tikz/knot_trefoil` takes ~880 ms at 1000 px (slowest tikz file). Noted
+  for the speed phase; not touched (round 7: no speed work).
+
+### Numbers (baseline; unchanged since no code changed)
+
+| run | result |
+|---|---|
+| resvg suite, fast 100 px | pass 1543 / 1679 (91.9 %), 11.9 s |
+| resvg suite, 200 px | pass 1567 / 1679 (93.3 %), 24.3 s |
+| `run_tests.py` | 63 / 80 |
+| realworld vs Chromium, 200 px, `tikz` | 64 files, mean within-8 92.74 % |
+| `tikz-fonts` | 64 files, mean within-8 92.58 % |
+| `web-tikz` | 50 files, mean within-8 90.13 % |
+
+No test SVG added: no feature was implemented. Build, theorems, adversarial
+and tiles are untouched by this branch (only this file changed).
