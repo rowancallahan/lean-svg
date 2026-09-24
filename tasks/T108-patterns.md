@@ -230,3 +230,14 @@ clean. `run_tiles.py` is 81/81 byte-identical.
   That touches `Svg.Shape` (shared), about 40 lines.
 
 No reference in `criteria.csv` looks wrong for these files.
+
+### Real-world corpus vs Chromium
+
+This compares the pre-change binary (13cac51) with this branch on the
+real-world corpus, using Chromium references. Passes went from 261 to 262;
+`mpl-tests/test_simplification/hatch_simplify` went from fail to pass. No
+file went from pass to fail. Nine hatch/pattern-heavy files improved by 0.2
+to 2.7 points but still fail. One file dropped:
+`tikz/patterns_fill.svg` (and its `tikz-fonts` copy) went from 33.96 to
+33.60, a fail both before and after, and I did not investigate it in the
+timebox.
