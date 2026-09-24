@@ -3567,6 +3567,41 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           skip := 1
   return (nodes, budget)
 
+/-- T108: usvg's `fix_recursive_patterns` (`svgtree/parse.rs`), on the
+collected content instead of the attributes.  For each pattern `p` in
+document order, a content shape whose fill names `p` itself becomes `none`;
+one naming another pattern `l` instead cuts every shape in `l`'s *own*
+content that names `p` back.  Cut paint is `none`, never the `url()`
+fallback, and fill and stroke are done in two separate passes, as there.  So
+the first pattern of a mutual pair keeps its reference (`recursive-on-child`)
+and a self-reference paints nothing (`self-recursive`); `patternFuel` still
+bounds longer cycles.  usvg compares ids, not elements, hence `pt.ids`. -/
+def fixRecursivePatterns (pt : Pat.Defs) (pc : Array (Array Node)) : Array (Array Node) :=
+  let ids := pt.ids
+  let refId := fun (p : Paint) => match p with
+    | .pattern j => some (ids.getD j "")
+    | _ => none
+  let pass := fun (pc : Array (Array Node)) (get : Shape → Paint) (cut : Shape → Shape) => Id.run do
+    let mut pc := pc
+    for p in [0:pc.size] do
+      let pid := ids.getD p ""
+      if pid.isEmpty then continue
+      for k in [0:(pc.getD p #[]).size] do
+        let .shape s := (pc.getD p #[]).getD k .groupEnd | continue
+        let some lid := refId (get s) | continue
+        if lid == pid then
+          pc := pc.modify p (·.setIfInBounds k (.shape (cut s)))
+        else
+          -- `element_by_id`: the first pattern with that id.
+          let some l := pt.lookup lid | continue
+          for k2 in [0:(pc.getD l #[]).size] do
+            let .shape s2 := (pc.getD l #[]).getD k2 .groupEnd | continue
+            if refId (get s2) == some pid then
+              pc := pc.modify l (·.setIfInBounds k2 (.shape (cut s2)))
+    return pc
+  let pc := pass pc (·.style.fill) fun s => { s with style := { s.style with fill := .none } }
+  pass pc (·.style.stroke) fun s => { s with style := { s.style with stroke := .none } }
+
 /-- What the shapes under an element become (T20): rendered, nothing (under
 `defs`), or children of the `clipPath` with this table index. -/
 inductive ClipMode where
@@ -4927,6 +4962,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget
     textBudget := used
     patternContent := patternContent.push shs
+  patternContent := fixRecursivePatterns patTable patternContent
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,
