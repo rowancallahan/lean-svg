@@ -134,3 +134,50 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+**Implemented** `tests/freeze.py` (no renderer change; `LeanSvg/` untouched):
+- `record OUT.json [--warnings] [--jobs N] [--bin PATH]`: renders 4,286
+  (file, width) pairs — resvg suite at 100 and 200 px (2 × 2,103), `tests/svg/*.svg`
+  at native size (80; no `--width`, matching `tests/run_tests.py`, since the
+  task names no width for them), real-world corpus at 1000 px except
+  `plantuml/component_arch` and `plantuml/state_sampler` at 600 px. Stores per
+  key `set/rel@width`: exit code, SHA-256 of the PNG, and with `--warnings`
+  SHA-256 of `<out>.warnings.txt` (`null` when not written), plus the commit
+  and the `--warnings` setting. Refuses to overwrite an existing manifest.
+- `check OUT.json [--jobs N]`: re-renders with the manifest's `--warnings`
+  setting; prints every difference in sorted key order (`EXIT`, `PNG`,
+  `WARNINGS`, `MISSING` = in manifest but file gone, `EXTRA` = new file), then a
+  summary line; exit 1 on any difference.
+- Fails loudly (assert) on: any stdout/stderr output from the binary, a
+  warnings file written without `--warnings`, a render taking > 300 s, a
+  missing corpus, a missing 600 px file, or `check --warnings` against a
+  manifest recorded without it.
+- `docs/DECISIONS.md`: "Byte freeze" entry (how it will be used). No manifest
+  committed.
+
+**Determinism evidence** (4-core container, same build `b3283d5`):
+| run | jobs | wall | result |
+|---|---|---|---|
+| record a.json `--warnings` | 8 | 1m16s | 4,286 entries |
+| record b.json `--warnings` | 3 | 1m41s | entries byte-identical to a.json |
+| check a.json | 1 | — | identical, exit 0 |
+| check a.json | 4 | — | identical, exit 0 |
+| record nw.json (no warnings) / check | 4 / 2 | — | identical, exit 0 |
+| check of a.json with 5 injected edits (png, exit, warnings, one key removed, one fake key) | 4 | — | all 5 listed, exit 1 |
+
+Current exit-code mix in the set: 4,247 × 0, 27 × 2, 12 × 1.
+
+**Other checks:** `scripts/check-theorems.sh` → theorems ok;
+`tests/run_adversarial.py` → 170/170 clean. No corpus/local-test runs were
+needed for score deltas: no renderer code changed.
+
+**Skipped / notes:**
+- No `tests/svg/117_*.svg`: the task adds no renderer feature.
+- The manifest records the commit but not the binary's hash; a check against
+  a different build is exactly the intended use, so this is by design.
+- Wall time is ~1.3 min at `--jobs 8` on 4 cores; the 1000 px real-world
+  renders dominate.
