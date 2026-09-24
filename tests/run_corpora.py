@@ -1256,7 +1256,7 @@ def main():
     ).stdout.decode().strip() or "unknown"
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    resvg_args = resvg_font_args(args.no_font_pin)
+    resvg_args = resvg_font_args(args.no_font_pin, suite_generics=True)
     all_runs = []
     grand_start = time.perf_counter()
     refs_used = []

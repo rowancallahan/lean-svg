@@ -133,3 +133,126 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+**Finding: the local resvg oracle, not our renderer, was wrong for the
+generic-family files.** The task's premise ("its generic families map to the
+suite's own fonts") did not hold. `run_corpora.py` ran
+`resvg --skip-system-fonts --use-fonts-dir <suite fonts>` with the CLI's
+generic defaults (`crates/resvg/src/main.rs:614-618`: Times New Roman, Arial,
+Comic Sans MS, Impact, Courier New). None is in the suite's font dir, so
+resvg printed `No match for 'serif' font-family` and **drew no text** for
+`serif`, `sans-serif`, `cursive`, `fantasy`, `monospace` and for
+`fallback-1.svg` (usvg appends `serif` to every list,
+`crates/usvg/src/text/mod.rs:114`). The `resvg=1` verdicts come from resvg's
+integration harness (`crates/resvg/tests/integration/main.rs:28-32`), which
+maps serif → Noto Serif, sans-serif → Noto Sans, cursive → Yellowtail,
+fantasy → Sedgwick Ave Display, monospace → Noto Mono.
+
+**Change** (harness only, no Lean code): `run_tests.resvg_font_args` gets
+`suite_generics`; `run_corpora.py` passes it, so the oracle adds those five
+`--<generic>-family` flags. `tests/resvg_as_bin.py` passes the same flags.
+`run_tests.py` (local tests) keeps the CLI defaults: with the flags,
+`106_font_families` and `41_text_decoration` dropped 4.5 and 0.8 points
+because their generic-family text targets Chromium (T106), not resvg.
+
+This also fixes 5 other suite files. Each has an unparsable
+`font-family="Mplus 1p"` (the word starts with a digit), which usvg replaces
+by Times New Roman and then `serif`. The old oracle then drew nothing for the
+base font, and its per-character fallback differed. Under the harness mapping
+the oracle matches what we already draw (T91/T101 rules).
+
+### Per file (why each target still fails)
+
+| file | resvg (harness) picks | we pick | cause |
+|---|---|---|---|
+| font-family/sans-serif, bold-sans-serif | Noto Sans (Bold) | Arimo (Bold), T106 Chromium | conflicts with T106 |
+| font-family/serif | Noto Serif | Tinos | Chromium conflict + Noto Serif not embedded |
+| font-family/fallback-1 (`Invalid`) | Noto Serif | Noto Sans + T98 warning | same, plus the T98 default |
+| font-family/cursive | Yellowtail | Tinos | Chromium conflict + font not embedded |
+| font-family/fantasy | Sedgwick Ave Display | Tinos | Chromium conflict + font not embedded |
+| font-family/monospace | Noto Mono | DejaVu Sans Mono | Chromium conflict + font not embedded |
+| font-family/source-sans-pro, font-list | Source Sans Pro | Noto Sans + warning (`suiteOnlyFamilies`) | font not embedded |
+| font-stretch/extra-condensed, inherit, narrower | Noto Sans ExtraCondensed (`NotoSans-ExtraCondensed.ttf`, width 2) | Noto Sans Regular | face not embedded; `font-stretch` not parsed |
+
+Kerning and shaping are not the cause in any of these files. In every case
+the font differs. `noto-sans.svg`, `double-quoted.svg` and `fallback-2.svg`
+draw the same word in Noto Sans and pass at 99.99%.
+
+## Skipped (and why)
+
+- **Generics → suite fonts in the renderer.** A given input has to resolve
+  one way. Mapping `sans-serif` to Noto Sans would pass the two sans-serif
+  files, but T106 measured it as worse for real-world charts (web-vega,
+  plantuml). The other generics would also need fonts we do not embed. Only
+  corpus sniffing could satisfy both references, and that is not acceptable.
+  **Decision for Rowan:** either accept these 8 files as failing
+  (Chromium-first for generics), or give them a Chromium reference in
+  `criteria.csv`. I did not edit `criteria.csv`. Before T110 their Chromium
+  scores were 98.9-99.2% (T106 report).
+- **Fonts, reported and not added** (the task rule). All ship in the suite's
+  `fonts/` with licence files there. The sizes are the Lean module output of
+  `tests/gen_font_module.py --no-glyph-names`, with the default Latin ranges
+  and with `--unicodes='*'` (how the Noto faces were embedded):
+
+  | font | licence | TTF | Lean, Latin | Lean, `*` | files it would fix |
+  |---|---|---:|---:|---:|---|
+  | Source Sans Pro Regular | OFL 1.1 (Adobe, RFN "Source") | 290,156 | 45,370 | 193,561 | source-sans-pro, font-list (no Chromium conflict) |
+  | Noto Sans ExtraCondensed | OFL 1.1 | 307,508 | 39,364 | 278,704 | 3 font-stretch files, plus parsing `font-stretch` and a stretch column in `FontSet.styles`/`FamilyMatch.pick` (fontdb matches stretch before style). About 1-2 h. |
+  | Noto Serif Regular | OFL 1.1 | 552,144 | 54,388 | 357,872 | serif, fallback-1 (only with suite generics) |
+  | Noto Mono Regular | OFL 1.1 (Apache 2.0 in older Noto releases) | 107,848 | 27,144 | 74,304 | monospace (only with suite generics) |
+  | Yellowtail Regular | Apache 2.0 | 60,864 | 73,916 | 80,036 | cursive (only with suite generics) |
+  | Sedgwick Ave Display | OFL 1.1 | 135,996 | 65,142 | 98,742 | fantasy (only with suite generics) |
+
+  Recommendation: Source Sans Pro (+~0.2 MB) and Noto Sans ExtraCondensed
+  plus `font-stretch` (+~0.3 MB) can be added without conflicting with
+  Chromium. They would fix 5 of the 12 targets. The generic fonts only help
+  if Rowan chooses resvg over Chromium for generics.
+- **No `tests/svg/110_*.svg`.** The change is to the resvg-suite oracle
+  only, which the local tests do not use.
+
+## Report
+
+Baseline at `13cac51`, after at
+`4cdbc27`. `lake build` clean; `check-theorems.sh`: `invariants ok`,
+`theorems ok`; `run_tests.py` 63/80 before and after, no file's
+exact/within/within32 changed; `run_adversarial.py` 170/170 clean;
+`run_tiles.py` 80/80 byte-identical. Wall time: fast pass 13 s → 12.2 s,
+200 px 19.9 s → 20.1 s (within noise). No renderer code changed, so the
+realworld-vs-Chromium numbers are unchanged by construction. That run was
+skipped.
+
+**resvg suite** (`run_corpora.py --corpus resvg --route direct`):
+
+| width | pass before | pass after | pass→fail | fail→pass |
+|---|---:|---:|---:|---|
+| 100 (`--fast`) | 1543 / 1679 | 1548 / 1679 | 0 | the 5 below |
+| 200 | 1567 / 1679 | 1572 / 1679 | 0 | the 5 below |
+
+Newly passing (200 px within-8 before → after):
+`text/writing-mode/japanese-with-tb` 94.03 → 99.99,
+`text/textPath/complex` 95.13 → 99.62, `text/textPath/writing-mode=tb`
+96.15 → 99.77, `text/writing-mode/tb-and-punctuation` 98.23 → 99.92,
+`text/letter-spacing/non-ASCII-character` 98.44 → 99.88.
+
+**Target files at 200 px** (within-8, %). The "before" reference for the
+generic-family files was an empty frame:
+
+| file | before | after |
+|---|---:|---:|
+| font-family/bold-sans-serif | 97.30 | 97.78 |
+| font-family/cursive | 98.36 | 97.39 |
+| font-family/fallback-1 | 97.99 | 97.41 |
+| font-family/fantasy | 98.36 | 96.76 |
+| font-family/font-list | 97.65 | 97.65 |
+| font-family/monospace | 97.82 | 98.76 |
+| font-family/sans-serif | 97.91 | 97.83 |
+| font-family/serif | 98.36 | 97.16 |
+| font-family/source-sans-pro | 97.65 | 97.65 |
+| font-stretch/{extra-condensed,inherit,narrower} | 97.39 | 97.39 |
+
+The other score that moved: `text/font/simple-case` 95.46 → 95.25, fail →
+fail (no `font-family`, so the reference now draws Noto Serif).
