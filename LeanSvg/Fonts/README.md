@@ -7,17 +7,19 @@ by themselves; modified versions must not use the names "Bitstream Vera" or
 "Arev" — the embedded subsets keep the name "DejaVu"). The fonts are
 subsetted (hinting dropped, only the `kern` layout feature kept) and, for
 variable fonts, pinned to one static instance; the OFL permits both. None of
-the families embedded here uses a Reserved Font Name in its own name. Noto
-Sans SC/KR carry Adobe's copyright with the Reserved Font Name "Source" (from
+the families embedded here uses a Reserved Font Name in its own name. The
+licence of Noto Sans SC/KR declares the Reserved Font Name "Source" (from
 Source Han Sans); the modified versions here keep the family names "Noto Sans
 SC"/"Noto Sans KR" and do not use "Source".
 
 `LeanSvg/FontSet.lean` lists them in fallback order (the order below).
 
-The licence files linked in the table are byte-for-byte copies of the upstream
-files listed in `licenses/MANIFEST.csv`. Each font's own copyright record
-(`name` ID 0) is in `licenses/fonts/EMBEDDED-COPYRIGHTS.txt`; for some fonts
-it differs from the licence file's copyright line (see `NOTICE`).
+The licence files linked in the table are byte-for-byte copies of upstream
+files, listed with URL, SHA-256 and download date in `licenses/MANIFEST.csv`.
+The copyright notices are in those files and in each font's own copyright
+record (`name` ID 0), which the subsets keep unchanged;
+`python3 tests/check_licenses.py --online` checks that record against the
+upstream font. Where each font came from is in the "Sources" table below.
 
 | Module | Font | Version | Scripts | cmap entries | Embedded bytes | Lean source | Licence |
 |---|---|---|---|---:|---:|---:|---|
@@ -58,7 +60,51 @@ it differs from the licence file's copyright line (see `NOTICE`).
 | NotoSansExtraCondensed | Noto Sans ExtraCondensed | 2.000 | Latin, Greek, Cyrillic | 2793 | 266,481 | 356,958 | [NotoSans-OFL.txt](../../licenses/fonts/NotoSans-OFL.txt) |
 | **Total** | | | | | **24,023,425** | **32,173,565** | |
 
-Sources (all `glyf` TrueType outlines):
+## Sources
+
+The upstream font file each module was subset from, as listed in
+`licenses/FONT-SOURCES.csv` (which also gives each file's SHA-256). A URL
+with a `#` fragment names a file inside that archive.
+
+| Module | Upstream font file (pinned) | Downloaded |
+|---|---|---|
+| NotoSans | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-Regular.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-Regular.ttf) | 2026-09-24 |
+| NotoSansBold | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-Bold.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-Bold.ttf) | 2026-09-24 |
+| NotoSansItalic | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-Italic.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-Italic.ttf) | 2026-09-24 |
+| Mplus1p | [linebender/resvg-test-suite@d8e0643 `fonts/MPLUS1p-Regular.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/MPLUS1p-Regular.ttf) | 2026-09-24 |
+| NotoSansSC | [google/fonts@23e54b5 `ofl/notosanssc/NotoSansSC[wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf) | 2026-09-24 |
+| NotoSansKR | [google/fonts@23e54b5 `ofl/notosanskr/NotoSansKR[wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf) | 2026-09-24 |
+| NotoSansThai | [google/fonts@23e54b5 `ofl/notosansthai/NotoSansThai[wdth,wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansthai/NotoSansThai%5Bwdth,wght%5D.ttf) | 2026-09-24 |
+| NotoSansArmenian | [google/fonts@23e54b5 `ofl/notosansarmenian/NotoSansArmenian[wdth,wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansarmenian/NotoSansArmenian%5Bwdth,wght%5D.ttf) | 2026-09-24 |
+| NotoSansGeorgian | [google/fonts@23e54b5 `ofl/notosansgeorgian/NotoSansGeorgian[wdth,wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansgeorgian/NotoSansGeorgian%5Bwdth,wght%5D.ttf) | 2026-09-24 |
+| NotoSansEthiopic | [google/fonts@23e54b5 `ofl/notosansethiopic/NotoSansEthiopic[wdth,wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansethiopic/NotoSansEthiopic%5Bwdth,wght%5D.ttf) | 2026-09-24 |
+| Amiri | [linebender/resvg-test-suite@d8e0643 `fonts/Amiri-Regular.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Amiri-Regular.ttf) | 2026-09-24 |
+| NotoSansHebrew | [google/fonts@23e54b5 `ofl/notosanshebrew/NotoSansHebrew[wdth,wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanshebrew/NotoSansHebrew%5Bwdth,wght%5D.ttf) | 2026-09-24 |
+| NotoSansDevanagari | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSansDevanagari-Regular.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSansDevanagari-Regular.ttf) | 2026-09-24 |
+| NotoSansThin | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-Thin.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-Thin.ttf) | 2026-09-24 |
+| NotoSansLight | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-Light.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-Light.ttf) | 2026-09-24 |
+| NotoSansBlack | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-Black.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-Black.ttf) | 2026-09-24 |
+| DejaVuSans | [SourceForge `dejavu-fonts-ttf-2.37.tar.bz2`, member `dejavu-fonts-ttf-2.37/ttf/DejaVuSans.ttf`](https://sourceforge.net/projects/dejavu/files/dejavu/2.37/dejavu-fonts-ttf-2.37.tar.bz2/download#dejavu-fonts-ttf-2.37/ttf/DejaVuSans.ttf) | 2026-09-24 |
+| DejaVuSansBold | [SourceForge `dejavu-fonts-ttf-2.37.tar.bz2`, member `dejavu-fonts-ttf-2.37/ttf/DejaVuSans-Bold.ttf`](https://sourceforge.net/projects/dejavu/files/dejavu/2.37/dejavu-fonts-ttf-2.37.tar.bz2/download#dejavu-fonts-ttf-2.37/ttf/DejaVuSans-Bold.ttf) | 2026-09-24 |
+| DejaVuSansOblique | [SourceForge `dejavu-fonts-ttf-2.37.tar.bz2`, member `dejavu-fonts-ttf-2.37/ttf/DejaVuSans-Oblique.ttf`](https://sourceforge.net/projects/dejavu/files/dejavu/2.37/dejavu-fonts-ttf-2.37.tar.bz2/download#dejavu-fonts-ttf-2.37/ttf/DejaVuSans-Oblique.ttf) | 2026-09-24 |
+| DejaVuSansMono | [SourceForge `dejavu-fonts-ttf-2.37.tar.bz2`, member `dejavu-fonts-ttf-2.37/ttf/DejaVuSansMono.ttf`](https://sourceforge.net/projects/dejavu/files/dejavu/2.37/dejavu-fonts-ttf-2.37.tar.bz2/download#dejavu-fonts-ttf-2.37/ttf/DejaVuSansMono.ttf) | 2026-09-24 |
+| DejaVuSerif | [SourceForge `dejavu-fonts-ttf-2.37.tar.bz2`, member `dejavu-fonts-ttf-2.37/ttf/DejaVuSerif.ttf`](https://sourceforge.net/projects/dejavu/files/dejavu/2.37/dejavu-fonts-ttf-2.37.tar.bz2/download#dejavu-fonts-ttf-2.37/ttf/DejaVuSerif.ttf) | 2026-09-24 |
+| Arimo | [google/fonts@23e54b5 `ofl/arimo/Arimo[wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/arimo/Arimo%5Bwght%5D.ttf) | 2026-09-24 |
+| ArimoBold | [google/fonts@23e54b5 `ofl/arimo/Arimo[wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/arimo/Arimo%5Bwght%5D.ttf) | 2026-09-24 |
+| Tinos | [googlefonts/tinos@3b4482a `fonts/ttf/Tinos-Regular.ttf`](https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-Regular.ttf) | 2026-09-24 |
+| TinosBold | [googlefonts/tinos@3b4482a `fonts/ttf/Tinos-Bold.ttf`](https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-Bold.ttf) | 2026-09-24 |
+| TinosItalic | [googlefonts/tinos@3b4482a `fonts/ttf/Tinos-Italic.ttf`](https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-Italic.ttf) | 2026-09-24 |
+| Cousine | [google/fonts@23e54b5 `ofl/cousine/Cousine-Regular.ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/cousine/Cousine-Regular.ttf) | 2026-09-24 |
+| STIXTwoMath | [google/fonts@23e54b5 `ofl/stixtwomath/STIXTwoMath-Regular.ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwomath/STIXTwoMath-Regular.ttf) | 2026-09-24 |
+| STIXTwoText | [google/fonts@23e54b5 `ofl/stixtwotext/STIXTwoText[wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwotext/STIXTwoText%5Bwght%5D.ttf) | 2026-09-24 |
+| STIXTwoTextItalic | [google/fonts@23e54b5 `ofl/stixtwotext/STIXTwoText-Italic[wght].ttf`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwotext/STIXTwoText-Italic%5Bwght%5D.ttf) | 2026-09-24 |
+| CMUSerif | [SourceForge `cm-unicode-0.7.0-ttf.tar.xz`, member `cm-unicode-0.7.0/cmunrm.ttf`](https://sourceforge.net/projects/cm-unicode/files/cm-unicode/0.7.0/cm-unicode-0.7.0-ttf.tar.xz/download#cm-unicode-0.7.0/cmunrm.ttf) | 2026-09-24 |
+| CMUSerifItalic | [SourceForge `cm-unicode-0.7.0-ttf.tar.xz`, member `cm-unicode-0.7.0/cmunti.ttf`](https://sourceforge.net/projects/cm-unicode/files/cm-unicode/0.7.0/cm-unicode-0.7.0-ttf.tar.xz/download#cm-unicode-0.7.0/cmunti.ttf) | 2026-09-24 |
+| CMUSansSerif | [SourceForge `cm-unicode-0.7.0-ttf.tar.xz`, member `cm-unicode-0.7.0/cmunss.ttf`](https://sourceforge.net/projects/cm-unicode/files/cm-unicode/0.7.0/cm-unicode-0.7.0-ttf.tar.xz/download#cm-unicode-0.7.0/cmunss.ttf) | 2026-09-24 |
+| CMUTypewriter | [SourceForge `cm-unicode-0.7.0-ttf.tar.xz`, member `cm-unicode-0.7.0/cmuntt.ttf`](https://sourceforge.net/projects/cm-unicode/files/cm-unicode/0.7.0/cm-unicode-0.7.0-ttf.tar.xz/download#cm-unicode-0.7.0/cmuntt.ttf) | 2026-09-24 |
+| NotoSansExtraCondensed | [linebender/resvg-test-suite@d8e0643 `fonts/NotoSans-ExtraCondensed.ttf`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/NotoSans-ExtraCondensed.ttf) | 2026-09-24 |
+
+Notes on the sources (all `glyf` TrueType outlines):
 
 - Noto Sans Regular/Bold/Italic: https://github.com/notofonts/latin-greek-cyrillic,
   the `NotoSans-{Regular,Bold,Italic}.ttf` files of the resvg test suite
@@ -134,7 +180,7 @@ Chromium on Linux does):
 - **DejaVu Sans / Sans Mono / Serif 2.37** (matplotlib's default, and its
   `dejavusans` mathtext set; Chromium's `monospace`):
   https://github.com/dejavu-fonts/dejavu-fonts, release
-  `dejavu-fonts-ttf-2.37.tar.bz2`.  DejaVu Sans keeps symbols, arrows, maths
+  `dejavu-fonts-ttf-2.37.tar.bz2` (the SourceForge copy in "Sources").  DejaVu Sans keeps symbols, arrows, maths
   operators and mathematical alphanumerics, being the first fallback of every
   T106 family, and (T114) the Emoticons block U+1F600-1F64F, which matplotlib
   draws from it; the other faces keep text ranges only.
@@ -142,9 +188,10 @@ Chromium on Linux does):
   Liberation 2.x downloads (GitHub release assets, pagure) were refused by
   this session's network policy, and Liberation 2.x is built from these
   Chrome OS core fonts with the same metrics (Arial/Helvetica,
-  Times/Times New Roman, Courier/Courier New compatible).  From
-  https://github.com/google/fonts/tree/main/ofl/{arimo,tinos,cousine}
-  (OFL 1.1, no Reserved Font Name).  Arimo's variable font is pinned at
+  Times/Times New Roman, Courier/Courier New compatible).  Arimo and
+  Cousine from google/fonts `ofl/{arimo,cousine}`, Tinos from
+  googlefonts/tinos (google/fonts no longer has `ofl/tinos`); pinned URLs in
+  "Sources" above (OFL 1.1, no Reserved Font Name).  Arimo's variable font is pinned at
   wght 400 and 700.
 - **STIX Two Math 2.12 and STIX Two Text 2.13** (matplotlib's `stix`/`stixsans`
   sets, STIXGeneral, STIXSize*): https://github.com/google/fonts/tree/main/ofl/

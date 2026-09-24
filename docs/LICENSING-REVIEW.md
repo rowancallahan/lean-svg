@@ -7,7 +7,9 @@ credits that travel with any redistribution are in `NOTICE` and in README
 
 How this was checked:
 - each licence file here is a byte-for-byte copy of a pinned upstream file,
-  checked by SHA-256 (see "Byte-identical licence texts" below);
+  and each embedded font's copyright record is identical to its upstream
+  font's, both checked by `tests/check_licenses.py --online` (see
+  "Byte-identical licence texts and font sources" below);
 - the `name` table of every embedded font was decoded (from the Lean modules)
   and searched for Reserved Font Names;
 - `git ls-files` was used to list what is actually committed.
@@ -38,7 +40,7 @@ contains it.
 
 ### Per font
 
-| Font (modules) | Licence | Reserved Font Name | Embedded name (checked) | Licence file here | Upstream to compare |
+| Font (modules) | Licence | Reserved Font Name | Embedded name (checked) | Licence file here | Upstream licence file (pinned, downloaded 2026-09-24) |
 |---|---|---|---|---|---|
 | Noto Sans Regular, Bold, Italic, Thin, Light, Black, ExtraCondensed | OFL 1.1 | none | "Noto Sans …" | [`licenses/fonts/NotoSans-OFL.txt`](../licenses/fonts/NotoSans-OFL.txt) (the resvg test suite's copy; also covers Noto Sans Devanagari) | [linebender/resvg-test-suite@d8e0643 `fonts/Noto-LICENSE-OFL.txt`](https://raw.githubusercontent.com/linebender/resvg-test-suite/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Noto-LICENSE-OFL.txt) ([browse](https://github.com/linebender/resvg-test-suite/blob/d8e064337faf01bc5a9579187a56dbdbe3eacc72/fonts/Noto-LICENSE-OFL.txt)) |
 | Noto Sans SC, Noto Sans KR | OFL 1.1 | **"Source"** (Adobe) | "Noto Sans SC", "Noto Sans KR": RFN not used | [`licenses/fonts/NotoSansSC-OFL.txt`](../licenses/fonts/NotoSansSC-OFL.txt), [`licenses/fonts/NotoSansKR-OFL.txt`](../licenses/fonts/NotoSansKR-OFL.txt) | [google/fonts@23e54b5 `ofl/notosanssc/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanssc/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanssc/OFL.txt)); [google/fonts@23e54b5 `ofl/notosanskr/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanskr/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosanskr/OFL.txt)) |
@@ -50,6 +52,10 @@ contains it.
 | STIX Two Math, STIX Two Text (Regular, Italic) | OFL 1.1 | **"TM Math"** | "STIX Two …": RFN not used | [`licenses/fonts/STIXTwoMath-OFL.txt`](../licenses/fonts/STIXTwoMath-OFL.txt), [`licenses/fonts/STIXTwoText-OFL.txt`](../licenses/fonts/STIXTwoText-OFL.txt) | [google/fonts@23e54b5 `ofl/stixtwomath/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwomath/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwomath/OFL.txt)); [google/fonts@23e54b5 `ofl/stixtwotext/OFL.txt`](https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwotext/OFL.txt) ([browse](https://github.com/google/fonts/blob/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/stixtwotext/OFL.txt)) |
 | CMU Serif (Roman, Italic), Sans Serif, Typewriter 0.7.0 | OFL 1.1 | **"Computer Modern Unicode fonts"** (family name) | "CMU Serif", "CMU Sans Serif", "CMU Typewriter Text" | [`licenses/fonts/CMU-OFL.txt`](../licenses/fonts/CMU-OFL.txt) | [`cm-unicode-0.7.0-ttf.tar.xz` member `OFL.txt`](https://sourceforge.net/projects/cm-unicode/files/cm-unicode/0.7.0/cm-unicode-0.7.0-ttf.tar.xz/download#cm-unicode-0.7.0/OFL.txt) (SourceForge) |
 
+Each font's upstream file (pinned URL, SHA-256, download date) is in
+`licenses/FONT-SOURCES.csv` and in the "Sources" table of
+`LeanSvg/Fonts/README.md`.
+
 No embedded font's name records contain "Source", "TM Math", "Computer
 Modern Unicode", "Bitstream Vera" or "Vera".
 
@@ -58,43 +64,38 @@ Modern Unicode", "Bitstream Vera" or "Vera".
 - The old licence files (`LeanSvg/Fonts/LICENSE-*.txt`,
   `LeanSvg/LICENSE-*.txt`, `tests/corpora/realworld/LICENSES/`) were edited
   by hand: some combined several fonts, some had explanatory headers, and
-  copyright lines had been added to match the fonts. They were not verbatim.
-  They are replaced by byte-for-byte copies of the upstream files in
-  `licenses/`, one per upstream file, plus
-  `licenses/fonts/EMBEDDED-COPYRIGHTS.txt`, which holds each embedded font's
-  own copyright record (`name` ID 0, decoded from the Lean modules). The
-  explanatory headers moved to `NOTICE`.
-- Comparing the fonts' own records with the upstream licence files found
-  these differences; `NOTICE` lists them, and `EMBEDDED-COPYRIGHTS.txt` holds
-  the fonts' lines:
-  - Amiri: the font adds "Portions copyright (c) 2010, Sebastian Kosch";
-  - Arimo: the font says 2020, the licence file 2026;
-  - Noto Sans Hebrew: the font says 2024, the licence file 2022;
-  - Noto Sans (2.000 faces, Devanagari): the resvg test suite's licence file
-    has no copyright line;
-  - Mplus 1p: the resvg test suite's licence file has no copyright line; the
-    font says "Copyright 2016 The M+ Project Authors.".
+  copyright lines had been typed in. They were not verbatim. They are
+  replaced by byte-for-byte copies of the upstream files in `licenses/`, one
+  per upstream file, shipped as-is. The explanatory headers moved to
+  `NOTICE`.
+- `NOTICE`, the READMEs and this review no longer restate any third-party
+  copyright line. The notices are the upstream licence files and, per font,
+  the font's own copyright record (`name` ID 0), which the subsets keep
+  unchanged and which is identical to the upstream font's.
 
-### Byte-identical licence texts
+### Byte-identical licence texts and font sources
 
-Every file under `licenses/` (except `MANIFEST.csv` and
-`EMBEDDED-COPYRIGHTS.txt`) is a byte-for-byte copy of one upstream file.
-`licenses/MANIFEST.csv` has four columns: `file`, `sha256`, `source_url` (a
-URL pinned to a commit or tag) and `covers` (what in this repository the
-file licenses). `tests/check_licenses.py` checks it:
+Every file under `licenses/` except the two CSVs is a byte-for-byte copy of
+one upstream file:
 
-- `python3 tests/check_licenses.py` (offline; CI runs it) checks each
-  file's SHA-256, that the file set matches the manifest, and that
-  `EMBEDDED-COPYRIGHTS.txt` matches the fonts in `LeanSvg/Fonts/*.lean`;
-- `--online` also re-downloads every `source_url` and checks that the bytes
-  are identical;
-- `--write-copyrights` regenerates `EMBEDDED-COPYRIGHTS.txt`.
+- `licenses/MANIFEST.csv` lists each licence file with its SHA-256, pinned
+  source URL (a commit or tag), download date and what it covers.
+- `licenses/FONT-SOURCES.csv` lists, for each `LeanSvg/Fonts/*.lean` module,
+  the pinned URL of the upstream font file it was subset from, that file's
+  SHA-256 and the download date.
 
-The CMU licence is the `OFL.txt` member of the SourceForge
-`cm-unicode-0.7.0-ttf.tar.xz` archive (the URL's `#` fragment names it).
-Tinos's licence comes from googlefonts/tinos, because google/fonts no longer
-has `ofl/tinos` at HEAD; its copyright year, 2026, matches the font. The
-copyright mismatches between licence files and fonts are listed above.
+`tests/check_licenses.py` checks both:
+
+- `python3 tests/check_licenses.py` (offline; CI runs it) checks the licence
+  files' SHA-256 and that the file lists match;
+- `--online` also re-downloads every licence file and every upstream font,
+  checks their SHA-256, and checks that each embedded font's copyright
+  record is identical to the upstream font's (all 35 are).
+
+All were downloaded on 2026-09-24. A URL with a `#` fragment names a file
+inside a SourceForge archive (the CMU licence and fonts, the DejaVu fonts).
+Tinos's licence and fonts come from googlefonts/tinos, because google/fonts
+no longer has `ofl/tinos`.
 
 ### Open question: notices in a binary-only distribution
 
@@ -117,30 +118,30 @@ those files next to it.
 
 ## 2. Generated data and re-implemented algorithms
 
-| Component | Licence | What we ship | Licence text here |
-|---|---|---|---|
-| harfrust 0.12.0 (port of HarfBuzz) | MIT | tables in `LeanSvg/ShapeData.lean` and `Bidi.lean`; shaping algorithms re-implemented in Lean | [`licenses/code/harfrust-LICENSE.txt`](../licenses/code/harfrust-LICENSE.txt) |
-| unicode-bidi 0.3.18 | MIT OR Apache-2.0 (MIT chosen) | Bidi tables and the UAX #9 algorithm in `LeanSvg/Bidi.lean` | [`licenses/code/unicode-bidi-LICENSE-MIT.txt`](../licenses/code/unicode-bidi-LICENSE-MIT.txt) |
-| brotli 1.2.0 | MIT | static dictionary and transforms in `LeanSvg/BrotliData.lean`; decoder written from RFC 7932 | [`licenses/code/brotli-LICENSE.txt`](../licenses/code/brotli-LICENSE.txt) |
-| tiny-skia | BSD-3-Clause (Google 2011, Reizner 2020) | scan converter, strokes, dashes, blending and gradients re-implemented in Lean | [`licenses/code/tiny-skia-LICENSE.txt`](../licenses/code/tiny-skia-LICENSE.txt) (**added in this review**) |
-| Unicode Character Database (via harfrust) | Unicode License v3 | property values inside the generated tables | credited in `NOTICE` |
-| matplotlib 3.9.2 | Matplotlib License | STIXNonUnicode table in `LeanSvg/StixNonUnicodeTable.lean` | [`licenses/code/matplotlib-LICENSE.txt`](../licenses/code/matplotlib-LICENSE.txt) |
+| Component | Licence | What we ship | Licence text here | Upstream (downloaded) |
+|---|---|---|---|---|
+| harfrust 0.12.0 (port of HarfBuzz) | MIT | tables in `LeanSvg/ShapeData.lean` and `Bidi.lean`; shaping algorithms re-implemented in Lean | [`licenses/code/harfrust-LICENSE.txt`](../licenses/code/harfrust-LICENSE.txt) | [pinned](https://raw.githubusercontent.com/harfbuzz/harfrust/0.12.0/LICENSE), 2026-09-24 |
+| unicode-bidi 0.3.18 | MIT OR Apache-2.0 (MIT chosen) | Bidi tables and the UAX #9 algorithm in `LeanSvg/Bidi.lean` | [`licenses/code/unicode-bidi-LICENSE-MIT.txt`](../licenses/code/unicode-bidi-LICENSE-MIT.txt) | [pinned](https://raw.githubusercontent.com/servo/unicode-bidi/v0.3.18/LICENSE-MIT), 2026-09-24 |
+| brotli 1.2.0 | MIT | static dictionary and transforms in `LeanSvg/BrotliData.lean`; decoder written from RFC 7932 | [`licenses/code/brotli-LICENSE.txt`](../licenses/code/brotli-LICENSE.txt) | [pinned](https://raw.githubusercontent.com/google/brotli/v1.2.0/LICENSE), 2026-09-24 |
+| tiny-skia | BSD-3-Clause | scan converter, strokes, dashes, blending and gradients re-implemented in Lean | [`licenses/code/tiny-skia-LICENSE.txt`](../licenses/code/tiny-skia-LICENSE.txt) (**added in this review**) | [pinned](https://raw.githubusercontent.com/linebender/tiny-skia/5d4754777746eef0828be166896eaf482c49f8f2/LICENSE), 2026-09-24 |
+| Unicode Character Database (via harfrust) | Unicode License v3 | property values inside the generated tables | credited in `NOTICE` | |
+| matplotlib 3.9.2 | Matplotlib License | STIXNonUnicode table in `LeanSvg/StixNonUnicodeTable.lean` | [`licenses/code/matplotlib-LICENSE.txt`](../licenses/code/matplotlib-LICENSE.txt) | [pinned](https://raw.githubusercontent.com/matplotlib/matplotlib/v3.9.2/LICENSE/LICENSE), 2026-09-24 |
 
 MIT and BSD require the copyright notice and licence text to travel with
-copies. All these texts are in `licenses/code/`, byte-identical to the
-upstream files in `licenses/MANIFEST.csv`, and referenced from `NOTICE`.
+copies. The upstream licence files, which carry those notices, are in
+`licenses/code/` as-is and are referenced from `NOTICE`.
 
 ## 3. Test data committed to the repository (`tests/corpora/realworld/`)
 
 These are test inputs only; none is in the binary. `SOURCES.csv` lists the
 source URL (at a pinned commit), author and licence of every downloaded file.
 
-| Files | Licence | Licence text here |
-|---|---|---|
-| `mpl-tests/` (515 matplotlib test baseline SVGs) | Matplotlib License (PSF-based, BSD-compatible) | [`licenses/corpora/matplotlib-LICENSE.txt`](../licenses/corpora/matplotlib-LICENSE.txt) |
-| `web-tikz/` (50 files from janosh/diagrams) | MIT | [`licenses/corpora/janosh-diagrams-license.txt`](../licenses/corpora/janosh-diagrams-license.txt) |
-| `web-vega/` (31 Vega-Lite examples) | BSD-3-Clause | [`licenses/corpora/vega-lite-LICENSE.txt`](../licenses/corpora/vega-lite-LICENSE.txt) |
-| everything else (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib*/`, `src/`) | Apache-2.0: generated for this project from our own sources | none needed |
+| Files | Licence | Licence text here | Upstream (downloaded) |
+|---|---|---|---|
+| `mpl-tests/` (515 matplotlib test baseline SVGs) | Matplotlib License (PSF-based, BSD-compatible) | [`licenses/corpora/matplotlib-LICENSE.txt`](../licenses/corpora/matplotlib-LICENSE.txt) | [pinned](https://raw.githubusercontent.com/matplotlib/matplotlib/bc6a4dc0d3b5839a708791398b9c0be24b76d8b6/LICENSE/LICENSE), 2026-09-24 |
+| `web-tikz/` (50 files from janosh/diagrams) | MIT | [`licenses/corpora/janosh-diagrams-license.txt`](../licenses/corpora/janosh-diagrams-license.txt) | [pinned](https://raw.githubusercontent.com/janosh/diagrams/028a16ada31669870ed59a5d484aa1c8b4bedcbd/license), 2026-09-24 |
+| `web-vega/` (31 Vega-Lite examples) | BSD-3-Clause | [`licenses/corpora/vega-lite-LICENSE.txt`](../licenses/corpora/vega-lite-LICENSE.txt) | [pinned](https://raw.githubusercontent.com/vega/vega-lite/831e308cf9feba791db0c279dea5f7983ca98445/LICENSE), 2026-09-24 |
+| everything else (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib*/`, `src/`) | Apache-2.0: generated for this project from our own sources | none needed | |
 
 The `tikz-fonts/` SVGs embed WOFF2 subsets of the AMS Type 1 Computer Modern
 and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm). These are OFL 1.1,
