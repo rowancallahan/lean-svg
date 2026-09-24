@@ -820,6 +820,14 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           if k < p.rots.size then lastRot := a
           pos := pos.setIfInBounds (o + k) { pos.getD (o + k) {} with rot := a }
     | _ => pure ()
+  -- T102: the lists apply per grapheme, not per character: a nonspacing
+  -- mark's own `x`/`y`/`dx`/`dy` entries are ignored (not shifted onto the
+  -- next character), so it stays in its base's cluster and chunk
+  -- (`complex-graphemes-and-coordinates-list.svg`; usvg reads positions at
+  -- each cluster's first character).
+  for i in [1:total] do
+    if Bidi.bidiClass (chars.getD i 0) == .NSM then
+      pos := pos.setIfInBounds i { pos.getD i {} with x := none, y := none, dx := 0, dy := 0 }
   -- ---- 6. fonts (T91): every font's coverage, for fallback; each font
   -- itself is decoded and parsed the first time a character needs it
   let covs : Array (Array (Nat × Nat)) := FontSet.entries.map (fun e => Font.decodeRanges e.coverage)
