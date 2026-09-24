@@ -107,7 +107,8 @@ tiny-skia — https://github.com/linebender/tiny-skia
   subdivision counts, dash-splitting rules, lowp blend arithmetic, f32
   layer-compositing pipeline and gradient evaluation in
   LeanSvg/{Raster,Geom,Canvas,Shader}.lean are fixed-point Lean
-  re-implementations of its algorithms. No Rust or C++ source is included.
+  re-implementations of its algorithms. No Rust or C++ source is included. Licence
+  text: LeanSvg/LICENSE-tiny-skia.txt.
 
 HarfBuzz / harfrust — https://github.com/harfbuzz/harfrust
   MIT. The OpenType layout engine, normaliser and Arabic/Hebrew/Indic

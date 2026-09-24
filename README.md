@@ -95,6 +95,9 @@ python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
 
 ## Licensing and credits
 
+A per-component review with links to every upstream licence is in
+`docs/LICENSING-REVIEW.md`.
+
 lean-svg is licensed under the Apache License 2.0 (`LICENSE`). `NOTICE`
 carries these credits and accompanies any redistribution.
 
