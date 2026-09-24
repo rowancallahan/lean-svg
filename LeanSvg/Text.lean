@@ -1034,8 +1034,15 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
           let upem := if f.unitsPerEm == 0 then 1000 else f.unitsPerEm
           let gid := Font.glyphId f cp
           let mut fu : Int := Font.advance f gid
-          if pr.kerning && q + 1 < b && (asgOf (q - a)).getD (q + 1 - a) fi == fi then
-            let nextCp := chars.getD (rend.getD (q + 1) 0) 0
+          -- T112: the pair skips default-ignorables after this character, as
+          -- HarfBuzz's kerning does (`zero&#x200B;width` kerns o/w)
+          let mut nq := q + 1
+          for r in [q + 1:b] do
+            let c := chars.getD (rend.getD r 0) 0
+            nq := r
+            if !(c ≥ 0x80 && Shape.isDefaultIgnorable c) then break
+          if pr.kerning && nq < b && (asgOf (q - a)).getD (nq - a) fi == fi then
+            let nextCp := chars.getD (rend.getD nq 0) 0
             fu := fu + Font.kern f gid (Font.glyphId f nextCp)
           adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
         | none => pure ()
