@@ -6,6 +6,8 @@ import LeanSvg.Canvas
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use
+import LeanSvg.ForeignObject
+import LeanSvg.Oklab
 import LeanSvg.Filter
 import LeanSvg.Image
 import LeanSvg.SvgImage
@@ -612,7 +614,7 @@ structure Doc where
 deriving Inhabited
 
 /-- How deep compositing layers may nest.  A document may nest groups far
-deeper (the XML parser's own cap is `Xml.maxDepth` = 64) and every level would
+deeper (the XML parser's own cap is `Xml.maxDepth` = 2048) and every level would
 cost one canvas, so past this bound a group that asks for a layer is rendered
 as a plain group instead: its opacity is folded into its children's paint, as
 it was before T22, and its blend mode is ignored.  Ten is more than any real
@@ -924,6 +926,7 @@ def parseSolidColor (t : ByteArray) : Option Rgba :=
   else if startsWith t 0 "rgb(" then parseRgbFunc t 4
   else if startsWith t 0 "hsla(" then parseHslFunc t 5
   else if startsWith t 0 "hsl(" then parseHslFunc t 4
+  else if startsWith t 0 "oklab(" then Oklab.parse t   -- T104 (Chromium; usvg: invalid)
   else
     let s := toStr t
     match namedColors.find? (fun (n, _) => n == s) with
@@ -3853,6 +3856,9 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
         if styleDepth.isSome && styleOk then out := (out ++ bytes).push 32
     return out
   let rules := Css.parseStylesheet combinedCss
+  -- T104: XHTML labels in `foreignObject` become SVG text (after `use`
+  -- expansion, so copies are rewritten too; needs the stylesheet).
+  let events ← ForeignObject.rewrite rules events
   -- One bounded pre-pass over the same events collects every referenceable
   -- definition: T18's gradient paint servers, resolved here into an immutable
   -- table that is handed to the root element's `Style` and inherited by

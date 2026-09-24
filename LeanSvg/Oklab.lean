@@ -1,0 +1,133 @@
+import LeanSvg.Bytes
+import LeanSvg.Canvas
+
+/-!
+# `oklab()` colours (T104)
+
+CSS Color 4's `oklab(L a b [/ alpha])`, which TikZ output from recent
+toolchains writes for mixed colours (`web-tikz/materials-informatics`).
+usvg 0.48 does not parse it, so resvg paints such a fill black (invalid paint
+→ the inherited default); Chromium draws the colour.  No resvg suite file
+uses it.
+
+Float-free: the inputs are read as decimals at 10⁻⁶, Ottosson's matrices are
+taken at 10⁻¹⁰, and oklab → LMS → cube → linear sRGB runs in exact `Int`
+arithmetic.  The sRGB transfer function is not evaluated at all: a channel's
+8-bit value is the number of `thresholds` (the linear value of each 8-bit
+step's lower midpoint, `(k − ½)/255` decoded, at 10⁻¹²) the linear value
+reaches — `round(255·encode(v))` clipped to `[0, 255]`, which is what
+Chromium does for an out-of-gamut value.  `L` is a number (0–1) or a
+percentage, `a`/`b` numbers or percentages (100% = 0.4), alpha a number or a
+percentage; `none` is 0.
+-/
+
+namespace LeanSvg
+namespace Oklab
+
+open Bytes
+
+/-- Linear-light value of `(k − ½)/255` in sRGB, `k = 1..255`, times 10¹². -/
+def thresholds : Array Int := #[
+  151763492, 455290475, 758817459, 1062344442, 1365871426, 1669398410, 1972925393, 2276452377,
+  2579979360, 2883506344, 3188300904, 3509259350, 3848314933, 4205748030, 4581832741, 4976837250,
+  5391024160, 5824650784, 6277969427, 6751227633, 7244668422, 7758530499, 8293048455, 8848452952,
+  9424970891, 10022825575, 10642236852, 11283421259, 11946592149, 12631959813, 13339731595, 14070112002,
+  14823302800, 15599503114, 16398909516, 17221716113, 18068114625, 18938294463, 19832442802, 20750744649,
+  21693382909, 22660538450, 23652390157, 24669114996, 25710888059, 26777882627, 27870270208, 28988220594,
+  30131901898, 31301480604, 32497121605, 33718988245, 34967242353, 36242044285, 37543552956, 38871925877,
+  40227319184, 41609887671, 43019784821, 44457162835, 45922172661, 47414964016, 48935685422, 50484484222,
+  52061506608, 53666897648, 55300801301, 56963360448, 58654716908, 60375011458, 62124383859, 63902972867,
+  65710916261, 67548350853, 69415412513, 71312236178, 73238955878, 75195704746, 77182615035, 79199818135,
+  81247444584, 83325624088, 85434485532, 87574156993, 89744765753, 91946438317, 94179300418, 96443477037,
+  98739092407, 101066270032, 103425132695, 105815802469, 108238400727, 110693048155, 113179864762, 115698969888,
+  118250482214, 120834519775, 123451199966, 126100639551, 128782954675, 131498260868, 134246673059, 137028305580,
+  139843272177, 142691686015, 145573659690, 148489305232, 151438734116, 154422057266, 157439385068, 160490827368,
+  163576493489, 166696492229, 169850931872, 173039920196, 176263564474, 179521971485, 182815247518, 186143498378,
+  189506829391, 192905345413, 196339150832, 199808349574, 203313045112, 206853340465, 210429338210, 214041140482,
+  217688848981, 221372564977, 225092389315, 228848422417, 232640764293, 236469514539, 240334772343, 244236636492,
+  248175205375, 252150576986, 256162848929, 260212118424, 264298482307, 268422037038, 272582878703, 276781103016,
+  281016805327, 285290080624, 289601023534, 293949728329, 298336288932, 302760798914, 307223351504, 311724039589,
+  316262955716, 320840192099, 325455840621, 330109992834, 334802739967, 339534172925, 344304382294, 349113458346,
+  353961491035, 358848570009, 363774784607, 368740223861, 373744976503, 378789130965, 383872775383, 388995997598,
+  394158885159, 399361525329, 404604005081, 409886411105, 415208829812, 420571347332, 425974049517, 431417021948,
+  436900349932, 442424118506, 447988412442, 453593316244, 459238914154, 464925290155, 470652527968, 476420711061,
+  482229922645, 488080245680, 493971762875, 499904556690, 505878709341, 511894302797, 517951418786, 524050138795,
+  530190544071, 536372715628, 542596734239, 548862680450, 555170634572, 561520676687, 567912886649, 574347344086,
+  580824128401, 587343318776, 593904994170, 600509233323, 607156114757, 613845716777, 620578117476, 627353394731,
+  634171626209, 641032889365, 647937261448, 654884819498, 661875640350, 668909800636, 675987376783, 683108445018,
+  690273081369, 697481361664, 704733361534, 712029156416, 719368821550, 726752431985, 734180062577, 741651787993,
+  749167682708, 756727821013, 764332277009, 771981124613, 779674437559, 787412289396, 795194753491, 803021903034,
+  810893811031, 818810550313, 826772193532, 834778813167, 842830481518, 850927270715, 859069252715, 867256499300,
+  875489082086, 883767072518, 892090541873, 900459561259, 908874201622, 917334533738, 925840628223, 934392555527,
+  942990385940, 951634189589, 960324036444, 969059996312, 977842138845, 986670533535, 995545249721]
+
+/-- A decimal at 10⁻⁶ (`pct` = whether it ended in `%`). -/
+def parseDec (t : ByteArray) : Option (Int × Bool) := Id.run do
+  let t := trim t
+  if eqAscii t "none" then return some (0, false)
+  let mut i := 0
+  let neg := at' t 0 == 45
+  if neg || at' t 0 == 43 then i := 1
+  let mut ip : Nat := 0
+  let mut fp : Nat := 0
+  let mut fd : Nat := 0
+  let mut digits := 0
+  for _ in [0:t.size] do
+    if i < t.size && isDigit (at' t i) then
+      ip := ip * 10 + (at' t i).toNat - 48
+      digits := digits + 1
+      i := i + 1
+  if i < t.size && at' t i == 46 then
+    i := i + 1
+    for _ in [0:t.size] do
+      if i < t.size && isDigit (at' t i) then
+        if fd < 6 then
+          fp := fp * 10 + (at' t i).toNat - 48
+          fd := fd + 1
+        digits := digits + 1
+        i := i + 1
+  if digits == 0 then return none
+  let pct := i < t.size && at' t i == 37
+  let e := if pct then i + 1 else i
+  if e != t.size then return none
+  let v : Int := ip * 1000000 + fp * 10 ^ (6 - fd)
+  return some (if neg then -v else v, pct)
+
+/-- One linear channel (scale 10⁵⁸) to 8 bits. -/
+def encode (lin : Int) : Nat :=
+  thresholds.foldl (fun n th => if lin ≥ th * 10 ^ 46 then n + 1 else n) 0
+
+/-- `oklab(...)`, lower-cased and trimmed. -/
+def parse (t : ByteArray) : Option Rgba := do
+  if !startsWith t 0 "oklab(" || at' t (t.size - 1) != 41 then none
+  let inner := t.extract 6 (t.size - 1)
+  let slash := findByte inner 0 47
+  let body := inner.extract 0 slash
+  let parts := (splitTrim body 32).filter (·.size > 0)
+  if parts.size != 3 then none
+  let (L, lp) ← parseDec (parts.getD 0 default)
+  let (a, ap) ← parseDec (parts.getD 1 default)
+  let (b, bp) ← parseDec (parts.getD 2 default)
+  let L := if lp then L / 100 else L
+  let a := if ap then a * 4 / 1000 else a
+  let b := if bp then b * 4 / 1000 else b
+  let alpha ← if slash ≥ inner.size then some 255 else do
+    let (v, p) ← parseDec (inner.extract (slash + 1) inner.size)
+    let f := if p then v / 100 else v
+    let f := if f < 0 then 0 else if f > 1000000 then 1000000 else f
+    some ((f * 255 + 500000) / 1000000).toNat
+  -- LMS' at 10^16
+  let l_ := L * 10000000000 + 3963377774 * a + 2158037573 * b
+  let m_ := L * 10000000000 - 1055613458 * a - 638541728 * b
+  let s_ := L * 10000000000 - 894841775 * a - 12914855480 * b
+  let l := l_ ^ 3
+  let m := m_ ^ 3
+  let s := s_ ^ 3
+  -- linear sRGB at 10^58
+  let r := 40767416621 * l - 33077115913 * m + 2309699292 * s
+  let g := -12684380046 * l + 26097574011 * m - 3413193965 * s
+  let bl := -41960863 * l - 7034186147 * m + 17076147010 * s
+  some ⟨encode r, encode g, encode bl, alpha⟩
+
+end Oklab
+end LeanSvg

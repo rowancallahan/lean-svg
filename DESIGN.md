@@ -56,7 +56,7 @@ An attacker controls the input file completely. Goals we defend against:
 | External entities / local file read (XXE, librsvg CVE-2023-38633, Inkscape CVE-2026-4980) | DTD, `href`, XInclude | No code path resolves any reference; `Prog` cannot open a second file |
 | SSRF via remote resources (Batik) | `href`, `url()` | same |
 | Script execution | `<script>`, event attrs | skipped as unknown elements |
-| Stack exhaustion via nesting (librsvg CVE-2019-20446) | recursive parser/renderer | parser is iterative with a stack array; depth cap 64 |
+| Stack exhaustion via nesting (librsvg CVE-2019-20446) | recursive parser/renderer | parser is iterative with a stack array; depth cap 2048 (T104) |
 | Memory exhaustion via dimensions | canvas alloc | dimension and pixel caps checked before allocation |
 | CPU exhaustion via numbers (`1e999999999`, megabytes of digits) | number parsing, big-int math | 18 significant digits kept, exponent saturates at 10^5 and clamps at ±60, result clamped |
 | Malformed input crashes | parser | every read past the end returns 0; every array op is bounds-checked |

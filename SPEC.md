@@ -200,7 +200,7 @@ other limits have no corresponding resource theorem here.
 
 - Canvas dimensions ≤ 16384 and total pixels ≤ 16777216.
 - Input size ≤ 64 MiB (`maxInput`; proved above, `render_rejects_large`).
-- XML nesting depth ≤ 64; element count ≤ 1000000.
+- XML nesting depth ≤ 2048 (T104; pgfplots nests one `g` per path); element count ≤ 1000000.
 - Fuel limits on gradient `href` chains, clip nesting, composite glyphs.
 - A layer-pixel budget for group opacity.
 

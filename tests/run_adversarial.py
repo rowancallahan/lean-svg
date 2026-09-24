@@ -72,9 +72,13 @@ def generate_cases():
             + "\n</svg>\n"
         )
 
-    # parser caps nesting depth at 64: 200 should be rejected, 60 accepted.
-    write_text("deep_nesting_200.svg", nested(200))
+    # parser caps nesting depth at 2048 (T104; was 64): 3000 should be
+    # rejected, 60 and 2000 accepted, 2000 also under descendant selectors.
+    write_text("deep_nesting_3000.svg", nested(3000))
+    write_text("deep_nesting_2000.svg", nested(2000))
     write_text("deep_nesting_60.svg", nested(60))
+    write_text("deep_nesting_2000_css.svg", nested(2000).replace(
+        '<g>', '<style>g g g rect{fill:red} svg g g rect{stroke:blue}</style><g>', 1))
 
     # --- T86 namespaces -----------------------------------------------------
     # Namespace scopes nest with the elements.  60 levels each binding a
