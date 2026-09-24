@@ -278,3 +278,9 @@ plus a warning instead of a silent blank.
 - `run_adversarial.py`: 142/142 clean.
 - `run_tiles.py`: 66/66 byte-identical.
 - `tests/check_warnings.py`: `warnings ok`.
+
+**Decision (Rowan):** the 10 suite pass→fail files and `41_text_decoration`
+are accepted. Something should be drawn there. For these files the live-resvg
+comparison is not a valid reference: the oracle's fonts are pinned to the
+suite directory, which has no fonts for the generic families, so it draws
+nothing. The suite's own rated-correct PNGs do draw the text.
