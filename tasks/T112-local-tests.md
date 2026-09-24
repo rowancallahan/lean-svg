@@ -128,3 +128,55 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+Scored against resvg (pinned to the suite's font dir) and against headless
+Chromium at the same width (images white-composited, ours | resvg | Chromium |
+diff). Chromium's font set here is DejaVu/WenQuanYi/IPA only (no Noto Sans,
+Tinos, Arimo, Mplus, Noto CJK), so it is only a layout check for text files.
+`o-r` / `o-c` / `r-c` = fraction of pixels differing by >8 between ours,
+resvg and Chromium.
+
+Classes: **a** our bug, **b** resvg wrong (Chromium noted), **c** oracle
+cannot represent it (fonts / deliberately different reference).
+
+| file | before | after | class | cause | action |
+|---|---|---|---|---|---|
+| 106_soft_hyphen | 98.45 | **99.93 PASS** | a | Non-shaped path kerned a character against the default-ignorable after it (U+200B/U+2060), so `zero​width` lost the o/w kern (~0.3 px shift). HarfBuzz skips ignorables when pairing. | **Fixed** (`Text.lean`, kern pair skips following ignorables); new `112_ignorable_kern.svg` |
+| 12_badge, 14_flower_transforms, 15_spiral_stroke, 16_stress_2000 | 98.6 / 98.6 / 97.5 / 97.5 | same | a (not small) | Edge anti-aliasing only: 0 px differ by >64 (16: 15 px), within-32 ≥ 99.86. Our AA/stroker is not bit-exact with tiny-skia (hairline path, f32 flattening; see T1). | None. Fix = bit-exact tiny-skia stroke/AA port; large, speed-sensitive (T1 doubled render time). |
+| 92_basic_shapes | 64.36 | same | b | usvg ignores CSS basic shapes in `clip-path` (only `url()`), draws unclipped. o-c 0.008. | Reference should be Chromium. |
+| 92_css_units | 88.98 | same | b | usvg has no CSS Values 4 units (vw, vmin, ch, cap, lh, rem, ...), so those rects drop. Chromium draws them; residual o-c 0.068 is font-relative units under Chromium's different font. | Reference should be Chromium / Rowan. |
+| 99_feoffset_subregion | 84.67 | same | b | resvg does not clip feOffset to its subregion. o-c 0.000. | Reference should be Chromium. |
+| 102_invalid_paint_transform | 75.90 | same | b | resvg uses identity for a singular gradient/pattern transform; Chromium paints nothing (DECISIONS, T102). o-c 0.002. | Reference should be Chromium. |
+| 90_filter_rotate | 89.26 | same | b | resvg filters rotated elements axis-aligned (DECISIONS, T90). o-c 0.018. | Reference should be Chromium. |
+| 44_turbulence | 74.35 | same | b | resvg does not rotate turbulence with the element (T90). The rotated square matches Chromium; the rest is noise-level. | Reference should be Chromium. |
+| 40_feimage | 97.46 | same | b | resvg clips the rotated `f3` feImage to a sliver (axis-aligned region, T90); o-c 0.016. Chromium draws that square crisp (it appears to drop the referenced element's own blur); ours keeps the blur, as usvg's model does. | Reference should be Chromium except that square: Rowan's verdict. |
+| 101_spotlight_cone | 95.12 | same | b | resvg's hard cone edge; Rowan chose the suite/Skia soft fade (DECISIONS). o-r 0.049, o-c 0.031. | Reference should be the soft edge (Chromium). |
+| 102_vertical_text | 97.28 | same | b/c | Intentional T102 choices: rtl vertical run ends at its y (Chromium's placement); x/y list per grapheme (suite PNG; resvg and Chromium go per code point); negative font-size draws nothing (Chromium falls back to 16 px). | Rowan's verdict (already recorded under T102). |
+| 101_xml_lang | 95.40 | same | c | Row 3 (`zh-Hans` / `ko`) picks Noto Sans SC / KR by language; resvg ignores `xml:lang` and its font dir has only Mplus 1p for CJK. Chromium here lacks those fonts. | Rowan's verdict. |
+| 106_font_families | 90.81 | same | c | The file says so itself: resvg's pinned font dir has none of these families (DejaVu, Tinos, Arimo, Cousine, CMU, STIX). | Needs Chromium with our fonts, or Rowan's verdict. |
+| 41_text_decoration | 98.60 | same | c | `font-family="serif"` row: resvg's font dir has no serif match, draws nothing; since T106 we map serif → Tinos and draw it, like Chromium. 99.92 if that row is masked. The SVG comment ("draws nothing") is stale since T106. | Reference should be Chromium for that row. SVG not edited (it is valid). |
+
+Summary: one real bug fixed (16 → 15 files remain failing... plus the new
+test passes, so 65/81). 4 are our AA mismatch (not small), 9 are resvg
+wrong where we follow Chromium or a recorded decision, 3 are oracle font
+limits. `criteria.csv` lists all local files as `reference=resvg`; for the
+b/c rows above that reference is wrong (evidence: o-c vs o-r numbers). Not
+changed, per the rules. `106_soft_hyphen` and `112_ignorable_kern` have no
+`criteria.csv` row.
+
+### Verification
+
+- `run_tests.py`: 63/80 → 65/81 (106_soft_hyphen 98.45 → 99.93; new
+  112_ignorable_kern 99.85). No other file changed (the change only
+  affects text containing default-ignorables; only 106 has any).
+- resvg suite, 100 px: 1543 pass before and after, 0 files moved > 0.1.
+- resvg suite, 200 px: 1567 pass before and after, 0 files moved > 0.1.
+- Real-world vs Chromium: 261/848 pass before and after, no score change;
+  wall time 303.9 s → 303.5 s.
+- `lake build` clean, no warnings; `check-theorems.sh`: theorems ok;
+  `run_adversarial.py` 170/170 clean; `run_tiles.py` 80/80 byte-identical
+  (81 after the new file's first run is not needed; tiles ran before it).
