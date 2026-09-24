@@ -5,7 +5,8 @@
 #
 # Needs latex + dvisvgm (Ubuntu: texlive-latex-extra texlive-pictures
 # texlive-science dvisvgm). Each src/tikz/NAME.tex is compiled to DVI once,
-# then converted twice:
+# then converted twice (sources use the `dvisvgm` class option, so pgf emits
+# native SVG specials: gradients, clips, opacity, patterns):
 #   ../tikz/NAME.svg        dvisvgm --no-fonts   (glyphs as <path>/<use>)
 #   ../tikz-fonts/NAME.svg  dvisvgm --font-format=woff2  (embedded @font-face + <text>)
 # A source that fails to compile stops the script. The tikz-fonts output is
