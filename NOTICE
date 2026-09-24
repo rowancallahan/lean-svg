@@ -119,6 +119,13 @@ HarfBuzz / harfrust — https://github.com/harfbuzz/harfrust
 unicode-bidi — https://github.com/servo/unicode-bidi
   MIT OR Apache-2.0. LeanSvg/Bidi.lean re-implements its UAX #9 algorithm.
 
+matplotlib — https://github.com/matplotlib/matplotlib
+  Matplotlib License (PSF-based, BSD-compatible). LeanSvg/StixNonUnicodeTable.lean
+  is generated (tests/gen_stix_nonunicode.py) from matplotlib v3.9.2's
+  `stix_virtual_fonts` table in lib/matplotlib/_mathtext_data.py: which
+  private-use code point of the STIX 1.x "STIXNonUnicode" font stands for which
+  letter. Licence text: tests/corpora/realworld/LICENSES/LICENSE-matplotlib.txt.
+
 Brotli — RFC 7932 and https://github.com/google/brotli
   MIT. LeanSvg/Brotli.lean is a Lean decoder written from RFC 7932, checked
   against the brotli 1.2.0 C decoder's tables. No C source is included.

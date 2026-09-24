@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120" font-size="28">
+  <!-- T119: matplotlib writes \mathcal{N} and \mathbb{E} as private-use code points in
+       'STIXNonUnicode'; lean-svg maps them to U+1D4A9 and U+1D53C (drawn in STIX Two Math).
+       The same code points in any other family are left alone. -->
+  <text x="20" y="45" style="font-family: 'STIXNonUnicode'; font-style: italic">&#xe23a;&#xe156;</text>
+  <text x="20" y="95" font-family="STIX Two Math">&#x1d4a9;&#x1d53c;</text>
+</svg>
