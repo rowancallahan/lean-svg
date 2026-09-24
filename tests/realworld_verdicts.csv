@@ -76,11 +76,11 @@ matplotlib/streamplot_field.svg,pass,font ok here somehow,ff28f7be22056d2a,2026-
 matplotlib/surface_3d.svg,pass,,7bf452a6f0bdbd5c,2026-09-24T05:17:10.299Z,current
 matplotlib/time_series_bands.svg,pass,,3886423f070b96d9,2026-09-24T05:26:32.616Z,current
 matplotlib/wireframe_3d.svg,pass,,11327eb659d26f77,2026-09-24T05:09:25.924Z,current
-mermaid/class_distributions.svg,fail,missing a ton here,00d710e9fc3ef43a,2026-09-24T05:24:08.112Z,changed-since
+mermaid/class_distributions.svg,pass,,6269f2432674e76a,2026-09-24T06:06:50.899Z,current
 mermaid/er_schema.svg,pass,,d1588c8292d99fb0,2026-09-24T05:31:03.094Z,current
-mermaid/flowchart_mcmc.svg,fail,missing all text,f8d3b64fc7b213d6,2026-09-24T05:24:18.815Z,changed-since
+mermaid/flowchart_mcmc.svg,pass,,d3d7acf4df6215a6,2026-09-24T06:07:01.017Z,current
 mermaid/gantt_project.svg,pass,,1a8eeb0471017d07,2026-09-24T05:24:02.284Z,current
-mermaid/mindmap_bayes.svg,fail,missing all text,3486d7ed92378a8f,2026-09-24T05:24:13.356Z,changed-since
+mermaid/mindmap_bayes.svg,pass,,f430c70171f45b7c,2026-09-24T06:06:54.004Z,current
 mermaid/pie_budget.svg,fail,font,3e15ecac87783b84,2026-09-24T05:24:24.916Z,current
 mermaid/sequence_inference.svg,pass,,4474a996a9f83f7d,2026-09-24T05:23:58.497Z,current
 mermaid/state_chain.svg,pass,fixed,f9fea51f468e2fd3,2026-09-24T05:29:45.645Z,current
@@ -103,12 +103,12 @@ mpl-tests/test_bbox_tight/bbox_inches_tight.svg,pass,,562816f2655ca102,2026-09-2
 mpl-tests/test_bbox_tight/bbox_inches_tight_raster.svg,pass,,73f6bca0fb89e279,2026-09-24T04:31:08.388Z,current
 mpl-tests/test_constrainedlayout/constrained_layout4.svg,pass,,5cf26ffcd675c156,2026-09-24T04:27:48.854Z,current
 mpl-tests/test_contour/contour_log_locator.svg,pass,,0f75b690c429927c,2026-09-24T04:26:50.978Z,current
-mpl-tests/test_contour/contour_manual_labels.svg,pass,,67d6c4a3d3a4f1c2,2026-09-24T04:28:18.233Z,changed-since
+mpl-tests/test_contour/contour_manual_labels.svg,pass,,7393d2a397d3f8cb,2026-09-24T06:07:15.136Z,current
 mpl-tests/test_figure/figure_align_labels.svg,pass,,29f648f254d733ac,2026-09-24T04:26:01.765Z,current
 mpl-tests/test_figure/tightbbox_box_aspect.svg,pass,,c6026a5b5ae43b3b,2026-09-24T04:27:06.152Z,current
 mpl-tests/test_ft2font/last_resort.svg,pass,[judged at 300 px],56814eed42457e75,2026-09-24T04:10:26.369Z,current
 mpl-tests/test_image/image_clip.svg,pass,,5f5c55094c023a0a,2026-09-24T04:28:08.920Z,current
-mpl-tests/test_image/image_placement.svg,pass,,76f9b3053c3bd3e4,2026-09-24T04:28:31.385Z,changed-since
+mpl-tests/test_image/image_placement.svg,pass,,ad0a911dcc227988,2026-09-24T06:07:08.459Z,current
 mpl-tests/test_image/imshow_masked_interpolation.svg,pass,,90c5a78db09d33d2,2026-09-24T04:26:12.905Z,current
 mpl-tests/test_image/interp_nearest_vs_none.svg,pass,,5a1eb89cd16e2832,2026-09-24T04:27:01.690Z,current
 mpl-tests/test_image/rasterize_10dpi.svg,pass,,552f37eba39b3d80,2026-09-24T05:19:15.863Z,current
