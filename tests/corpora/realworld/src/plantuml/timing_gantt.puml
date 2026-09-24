@@ -1,0 +1,7 @@
+@startgantt
+[Collect data] lasts 10 days
+[Clean data] lasts 5 days
+[Clean data] starts at [Collect data]'s end
+[Fit model] lasts 8 days
+[Fit model] starts at [Clean data]'s end
+@endgantt

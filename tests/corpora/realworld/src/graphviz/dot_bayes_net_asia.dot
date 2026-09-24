@@ -1,0 +1,8 @@
+digraph asia {
+  node [shape=ellipse, style=filled, fillcolor=lightyellow];
+  asia [label="Visit to Asia"]; smoke [label="Smoking"]; tub [label="Tuberculosis"];
+  lung [label="Lung cancer"]; bronc [label="Bronchitis"]; either [label="Tub. or cancer"];
+  xray [label="X-ray", fillcolor=lightgray]; dysp [label="Dyspnoea", fillcolor=lightgray];
+  asia -> tub; smoke -> lung; smoke -> bronc; tub -> either; lung -> either;
+  either -> xray; either -> dysp; bronc -> dysp;
+}

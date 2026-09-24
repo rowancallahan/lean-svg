@@ -1,0 +1,19 @@
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-3dplot}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\tdplotsetmaincoords{70}{110}
+\begin{tikzpicture}[tdplot_main_coords, scale=3, >=Stealth]
+\draw[->] (0,0,0) -- (1,0,0) node[anchor=north east] {$x$};
+\draw[->] (0,0,0) -- (0,1,0) node[anchor=north west] {$y$};
+\draw[->] (0,0,0) -- (0,0,1) node[anchor=south] {$z$};
+\tdplotsetcoord{P}{0.8}{50}{60}
+\draw[thick, ->, red] (0,0,0) -- (P) node[above right] {$P$};
+\draw[dashed] (0,0,0) -- (Pxy) -- (P);
+\tdplotdrawarc{(0,0,0)}{0.3}{0}{60}{anchor=north}{$\phi$}
+\tdplotsetthetaplanecoords{60}
+\tdplotdrawarc[tdplot_rotated_coords]{(0,0,0)}{0.4}{0}{50}{anchor=south west}{$\theta$}
+\end{tikzpicture}
+\end{document}

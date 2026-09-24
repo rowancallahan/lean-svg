@@ -1,0 +1,13 @@
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{pgfplots}\pgfplotsset{compat=1.18}\usepgfplotslibrary{polar}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzpicture}
+\begin{polaraxis}[width=7cm]
+\addplot[domain=0:360, samples=200, thick, blue] {1+cos(x)};
+\addplot[domain=0:360, samples=200, thick, red] {abs(sin(3*x))};
+\end{polaraxis}
+\end{tikzpicture}
+\end{document}

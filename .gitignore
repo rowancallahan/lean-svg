@@ -8,5 +8,6 @@
 __pycache__/
 learn/
 learn/hello-effects/.lake/
-tests/corpora/
+tests/corpora/*
+!tests/corpora/realworld/
 tests/out/

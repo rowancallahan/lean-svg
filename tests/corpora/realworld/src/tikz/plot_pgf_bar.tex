@@ -1,0 +1,14 @@
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{pgfplots}\pgfplotsset{compat=1.18}\usepgfplotslibrary{polar}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[ybar, bar width=10pt, symbolic x coords={A,B,C,D,E}, xtick=data, nodes near coords, ymin=0, width=9cm, height=6cm, legend style={at={(0.5,-0.15)}, anchor=north, legend columns=-1}]
+\addplot coordinates {(A,3) (B,7) (C,5) (D,9) (E,4)};
+\addplot coordinates {(A,4) (B,5) (C,8) (D,6) (E,2)};
+\legend{2023, 2024}
+\end{axis}
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,5 @@
+digraph radial {
+  layout=twopi; ranksep=1.2; root=c; node [shape=circle, style=filled, width=0.35, label="", fillcolor="#ce93d8"];
+  c [fillcolor="#6a1b9a", width=0.5];
+  c -> {a1 a2 a3 a4 a5}; a1 -> {b1 b2 b3}; a2 -> {b4 b5}; a3 -> {b6 b7 b8 b9}; a4 -> b10; a5 -> {b11 b12};
+}

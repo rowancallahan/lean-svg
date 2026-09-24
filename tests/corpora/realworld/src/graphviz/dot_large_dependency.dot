@@ -1,0 +1,6 @@
+digraph big {
+  rankdir=LR; node [shape=box, fontsize=9, height=0.25];
+  Main -> {Render Svg Png Font}; Render -> {Raster Paint Stroke Clip Mask Filter}; Svg -> {Css Units Parse Style};
+  Png -> {Zlib Crc}; Font -> {Shape Bidi Glyph}; Stroke -> {Dash Path}; Raster -> {Path Coverage}; Filter -> {Blur Blend Raster};
+  Paint -> {Gradient Pattern}; Clip -> Raster; Mask -> Raster; Parse -> Xml; Style -> Css; Glyph -> Path;
+}

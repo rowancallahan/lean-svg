@@ -1,0 +1,11 @@
+digraph html {
+  node [shape=plaintext];
+  t [label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+      <TR><TD COLSPAN="3" BGCOLOR="#4a6fa5"><FONT COLOR="white"><B>Posterior summary</B></FONT></TD></TR>
+      <TR><TD><I>param</I></TD><TD>mean</TD><TD>94% HDI</TD></TR>
+      <TR><TD>α</TD><TD>1.02</TD><TD>[0.71, 1.33]</TD></TR>
+      <TR><TD BGCOLOR="#fde2e2">β</TD><TD>−0.45</TD><TD>[−0.61, −0.30]</TD></TR>
+      <TR><TD>σ</TD><TD>0.88</TD><TD>[0.79, 0.97]</TD></TR>
+    </TABLE>>];
+}

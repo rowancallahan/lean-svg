@@ -1,0 +1,4 @@
+digraph causal {
+  rankdir=LR; node [shape=plaintext, fontname="Times-Italic", fontsize=16];
+  Z -> X; Z -> Y; X -> M -> Y; U [fontcolor=gray]; U -> X [style=dashed, color=gray]; U -> Y [style=dashed, color=gray];
+}

@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant U as User
+    participant M as Model
+    participant S as Sampler
+    U->>M: define priors + likelihood
+    M->>S: log density + gradient
+    loop warmup
+        S->>S: adapt step size
+    end
+    S-->>U: draws, diagnostics
+    Note over U,S: check divergences

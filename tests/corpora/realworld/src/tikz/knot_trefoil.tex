@@ -1,0 +1,12 @@
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzpicture}[scale=1.6, use Hobby shortcut]
+\begin{knot}[consider self intersections=true, flip crossing=2, clip width=4]
+\strand[very thick, blue] ([closed]90:2) foreach \a in {1,2,3,4,5} { .. (90+144*\a:2) } ;
+\end{knot}
+\end{tikzpicture}
+\end{document}

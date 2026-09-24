@@ -1,0 +1,6 @@
+digraph deps {
+  rankdir=TB; ranksep=0.4; node [shape=box, fontsize=10];
+  {rank=same; "lean" ; "resvg"; }
+  "lean" -> "lake build" -> "lean-svg"; "resvg" -> "reference PNGs";
+  "lean-svg" -> "compare"; "reference PNGs" -> "compare"; "compare" -> "report";
+}

@@ -1,0 +1,4 @@
+digraph cyc {
+  layout=circo; node [shape=circle, style=filled, fillcolor="#b3e5fc"];
+  1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 1; 1 -> 5 [color=red]; 3 -> 7 [color=red];
+}

@@ -1,0 +1,7 @@
+digraph classes {
+  node [shape=record, fontname="Courier", fontsize=10];
+  Dist [label="{Distribution|+ mean()\l+ var()\l+ logpdf(x)\l}"];
+  Normal [label="{Normal|mu: float\lsigma: float\l}"]; Beta [label="{Beta|a: float\lb: float\l}"];
+  Gamma [label="{Gamma|k: float\ltheta: float\l}"]; Exp [label="{Exponential|lambda: float\l}"];
+  edge [arrowhead=empty]; Normal -> Dist; Beta -> Dist; Gamma -> Dist; Exp -> Gamma;
+}

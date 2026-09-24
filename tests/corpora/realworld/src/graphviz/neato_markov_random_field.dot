@@ -1,0 +1,6 @@
+graph mrf {
+  layout=neato; node [shape=circle, fixedsize=true, width=0.45];
+  x11 [pos="0,0!"]; x12 [pos="1,0!"]; x13 [pos="2,0!"]; x21 [pos="0,1!"]; x22 [pos="1,1!"]; x23 [pos="2,1!"]; x31 [pos="0,2!"]; x32 [pos="1,2!"]; x33 [pos="2,2!"];
+  x11 -- x12 -- x13; x21 -- x22 -- x23; x31 -- x32 -- x33; x11 -- x21 -- x31; x12 -- x22 -- x32; x13 -- x23 -- x33;
+  node [style=filled, fillcolor=gray80, width=0.35]; y22 [pos="1.4,1.4!"]; x22 -- y22;
+}

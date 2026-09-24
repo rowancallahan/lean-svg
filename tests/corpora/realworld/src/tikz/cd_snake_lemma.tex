@@ -1,0 +1,13 @@
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzcd}[column sep=small]
+& \ker a \arrow[r] \arrow[d] & \ker b \arrow[r] \arrow[d] & \ker c \arrow[d] \arrow[dddll, rounded corners, to path={ -- ([xshift=2ex]\tikztostart.east) |- node[pos=0.25,right]{$\partial$} ([yshift=1.3ex]$(\tikztostart)!0.5!(\tikztotarget)$) -| ([xshift=-2ex]\tikztotarget.west) -- (\tikztotarget)}] & \\
+& A \arrow[r] \arrow[d, "a"] & B \arrow[r] \arrow[d, "b"] & C \arrow[r] \arrow[d, "c"] & 0 \\
+0 \arrow[r] & A' \arrow[r] \arrow[d] & B' \arrow[r] \arrow[d] & C' \arrow[d] & \\
+& \operatorname{coker} a \arrow[r] & \operatorname{coker} b \arrow[r] & \operatorname{coker} c &
+\end{tikzcd}
+\end{document}

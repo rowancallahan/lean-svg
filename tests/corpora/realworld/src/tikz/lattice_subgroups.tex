@@ -1,0 +1,14 @@
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzpicture}[node distance=1.5cm]
+\node (top) {$\mathbb{Z}_{12}$};
+\node (a) [below left of=top] {$\langle 2 \rangle$}; \node (b) [below right of=top] {$\langle 3 \rangle$};
+\node (c) [below left of=a] {$\langle 4 \rangle$}; \node (d) [below right of=a] {$\langle 6 \rangle$};
+\node (bot) [below right of=c] {$\{0\}$};
+\draw (top) -- (a) -- (c) -- (bot) -- (d) -- (a); \draw (top) -- (b) -- (d);
+\end{tikzpicture}
+\end{document}
