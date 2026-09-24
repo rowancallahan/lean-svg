@@ -178,3 +178,14 @@ three SVG 2 unit files were confirmed against Chromium). Follow-ups:
    byte-identical output from then on, alongside all theorems.
 4. **Optimise:** speed work under that lock; every change must keep the
    bytes identical and the theorems passing.
+
+## Possible tool: FloatLib (Rowan, 2026-09-24; no changes made)
+
+https://github.com/lean-dojo/FloatLib — proved IEEE binary32/64 in software
+(Lean 4.34.0, requires Mathlib). Assessment: not a speed win (proved binary64
+is ~140–330 ns/op vs ~1 ns for our integer ops; the fast host-FPU path is
+explicitly unchecked, the same trust as `Float`, and risks byte-identical
+output across platforms). Possible later uses: bit-exact emulation of
+resvg's f32 arithmetic on specific paths (AA coverage, curve flattening) to
+close "edge smoothing only" differences; real-number error-bound theorems.
+Both would add Mathlib as a dependency.
