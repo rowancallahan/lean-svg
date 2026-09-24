@@ -160,7 +160,7 @@ another.
   (89.84% → 99.79%, fail → pass); every other file's score is identical.
 - Timing (wall): fast 11.7 s → 11.8 s, 200 px 19.4 s → 19.0 s, real-world
   307 s → 302 s. The difference is within noise, well inside the 5% budget.
-- Binary 47.1 MB → 47.4 MB (< 75 MB).
+- Binary 46.8 MB → 47.2 MB (< 75 MB).
 - Merge notes: `SpanProps` gets T116's `weight`/`italic` and T118's
   `stretch`; T116's real-world italic pick also passes the stretch;
   `Synth.realWorld` now excludes Noto Sans ExtraCondensed, because usvg never
