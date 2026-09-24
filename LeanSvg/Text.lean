@@ -3,6 +3,7 @@ import LeanSvg.TextPath
 import LeanSvg.Font
 import LeanSvg.Baseline
 import LeanSvg.FontSet
+import LeanSvg.FamilyMatch
 import LeanSvg.ShapeText
 import LeanSvg.VertOrient
 
@@ -52,7 +53,8 @@ open Bytes
 
 The embedded fonts are `FontSet.entries` (T91).  `font-family` picks a base
 font per span (`SpanProps.family`, resolved by `Svg.resolveFontFamily`); for
-the "Noto Sans" family, weight and slant pick among its six faces.  A
+the "Noto Sans" family, weight and slant pick among its six faces, and for
+the T106 families among theirs (`FamilyMatch.pick`).  A
 character the base font does not map falls back through the other embedded
 fonts in `FontSet` order (`assignFonts`). -/
 
@@ -97,7 +99,12 @@ def pickFace (weight : Nat) (italic : Bool) : Face :=
 /-- The `FontSet` index of a span's base font: `family` is a `FontSet` index
 (0 = "Noto Sans"); only Noto Sans has more than one face. -/
 def baseFont (family : Nat) (face : Face) : Nat :=
-  if family != 0 then family
+  -- T106: the other multi-face families pick by the face's weight and slant
+  if family != 0 then
+    let (w, it) := match face with
+      | .regular => (400, false) | .bold => (700, false) | .italic => (400, true)
+      | .thin => (100, false) | .light => (300, false) | .black => (900, false)
+    FamilyMatch.pick family w it matchWeight
   else match face with
     | .regular => 0
     | .bold => 1
@@ -124,7 +131,12 @@ T101 (Chromium's behaviour): when the missing character is Han, the CJK font
 of the span's language tag `lang` (`SpanProps.lang`) is tried first:
 `ja` → Mplus 1p, `ko` → Noto Sans KR, any other tag → Noto Sans SC.  Without
 a tag, and for other characters, the order is `FontSet`'s, as usvg's (which
-ignores the tag). -/
+ignores the tag).
+
+T106: a base font from `FamilyMatch` (index ≥ `FamilyMatch.first`) tries
+DejaVu Sans and STIX Two Math first (`FamilyMatch.fallbackOrder`) and falls
+back per character, as Chromium does: a fallback font covering the whole
+chunk does not replace the base font's own glyphs. -/
 def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Nat)
     (lang : Nat := 0) : Array Nat := Id.run do
   let has := fun (k cp : Nat) => Font.inRanges (covs.getD k #[]) cp
@@ -140,13 +152,15 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
     | none => break
     | some i =>
       let cp := cps.getD i 0
+      let dflt := FamilyMatch.fallbackOrder base covs.size
       let order := match pref with
-        | some p => if isHan cp then p :: List.range covs.size else List.range covs.size
-        | none => List.range covs.size
+        | some p => if isHan cp then p :: dflt else dflt
+        | none => dflt
       match order.find? (fun k => !tried.contains k && has k cp) with
       | none => break
       | some k =>
-        if cps.all (has k) then
+        -- T106: a T106 base falls back per character, as Chromium does
+        if base < FamilyMatch.first && cps.all (has k) then
           res := cps.map (fun _ => some k)
           break
         res := (List.range cps.size).toArray.map (fun j =>
@@ -154,7 +168,11 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
           | some v => some v
           | none => if has k (cps.getD j 0) then some k else none)
         tried := tried.push k
-  return res.map (·.getD base)
+  -- T106: a character no font maps keeps the base font's `.notdef`; for a
+  -- T106 base that is Noto Sans's light box, not e.g. CMU's heavy crossed one
+  -- (dvisvgm's private-use code points, drawn by the file's own fonts, T105)
+  let tofu := if base < FamilyMatch.first then base else 0
+  return res.map (·.getD tofu)
 
 /-! ## What `Svg.lean` resolves for us -/
 
@@ -1018,6 +1036,18 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
             fu := fu + Font.kern f gid (Font.glyphId f nextCp)
           adv := Int.ediv (fu * (pr.size * 256) + (upem / 2 : Nat)) upem
         | none => pure ()
+        -- T106: HarfBuzz hides a default-ignorable character (U+00AD soft
+        -- hyphen, ZWJ, ...) as the space glyph with no advance; drawn with
+        -- its own glyph, matplotlib's TeX-encoded `cmex10` U+00AD showed a
+        -- stray hyphen (`mathtext0_cm_03.svg`)
+        if cp ≥ 0x80 && Shape.isDefaultIgnorable cp then
+          match fonts.getD fi none with
+          | some f =>
+            cl := cl.push { cp := cp, styleIdx := cStyle.getD i 0, props := pr, adv := 0, width := 0,
+                            natWidth := 0, font := fi, base := bases.getD (q - a) 0, off := q - a,
+                            glyphs := #[(fi, Font.glyphId f 0x20, 0, 0)] }
+          | none => pure ()
+          continue
         -- T96: a nonspacing mark joins the cluster before it (usvg shapes
         -- every chunk, and a mark never starts a cluster), so it takes that
         -- cluster's position-list slot and turns with its `rotate`

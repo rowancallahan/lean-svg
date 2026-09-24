@@ -6,7 +6,8 @@ Runs the built `lean-svg` binary on small inline SVGs and asserts:
     font draws in Noto Sans, exit 2, the PNG only (no warnings file);
   * `--warnings` with warnings: exit 2, the PNG and `<png>.warnings.txt`
     (one deduplicated line); at most `Warn.maxWarnings` (32) lines;
-  * no warnings (an embedded family, or generic `sans-serif`/`system-ui`):
+  * no warnings (an embedded family, an alias such as `Times`, or a CSS
+    generic, all matched by `FamilyMatch`, T106):
     exit 0 and one file, in both modes;
   * no-clobber: an existing PNG makes either mode exit 1 and write nothing;
     under `--warnings` an existing warnings file does too, even for a render
@@ -92,13 +93,14 @@ def main() -> None:
         for flags in ([], ["--warnings"]):
             rc, png, warn = run(tmp, PRESENT, "present" + "".join(flags), *flags)
             assert rc == 0 and png.is_file() and not warn.exists(), (flags, rc)
-        for fam in ("sans-serif", "system-ui", "Foo, sans-serif"):
+        for fam in ("sans-serif", "system-ui", "Foo, sans-serif", "serif", "monospace",
+                    "cursive", "Times", "Helvetica", "DejaVu Sans", "cmr10"):
             rc, png, warn = run(tmp, GENERIC % fam, "gen", "--warnings")
             assert rc == 0 and not warn.exists(), (fam, rc)
             png.unlink()
-        rc, png, warn = run(tmp, GENERIC % "serif", "serif", "--warnings")
+        rc, png, warn = run(tmp, GENERIC % "Foo", "foo", "--warnings")
         assert rc == 2 and warn.is_file(), rc
-        print("-- no warnings (embedded family, sans-serif, system-ui): exit 0, one file")
+        print("-- no warnings (embedded family, alias, generic): exit 0, one file")
 
         rc, png, warn = run(tmp, NEGATIVE, "negative", "--warnings")
         assert rc == 2, rc
