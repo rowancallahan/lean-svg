@@ -166,3 +166,15 @@ three SVG 2 unit files were confirmed against Chromium). Follow-ups:
   one grapheme, so three boxes, not more).
 - **Noted:** `feColorMatrix type=saturate` with a large coefficient looks less
   saturated than Chromium's, but Chromium has banding; ours is accepted.
+
+## Next phases (Rowan, 2026-09-24)
+
+1. After T101/T102: render our images for every example and re-review.
+2. **Real-world corpus** (T103): diagrams, TikZ output, mathematical plots,
+   Bayesian/statistics figures, from the web (openly licensed) and generated
+   locally; Rowan reviews ours vs Chromium side by side.
+3. **Lock it:** once those look good, record our current output for the whole
+   corpus (resvg suite, local tests, real-world corpus) and require
+   byte-identical output from then on, alongside all theorems.
+4. **Optimise:** speed work under that lock; every change must keep the
+   bytes identical and the theorems passing.
