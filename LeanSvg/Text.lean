@@ -53,7 +53,8 @@ open Bytes
 
 The embedded fonts are `FontSet.entries` (T91).  `font-family` picks a base
 font per span (`SpanProps.family`, resolved by `Svg.resolveFontFamily`); for
-the "Noto Sans" family, weight and slant pick among its six faces.  A
+the "Noto Sans" family, weight and slant pick among its six faces, and for
+the T106 families among theirs (`FamilyMatch.pick`).  A
 character the base font does not map falls back through the other embedded
 fonts in `FontSet` order (`assignFonts`). -/
 
@@ -130,7 +131,12 @@ T101 (Chromium's behaviour): when the missing character is Han, the CJK font
 of the span's language tag `lang` (`SpanProps.lang`) is tried first:
 `ja` → Mplus 1p, `ko` → Noto Sans KR, any other tag → Noto Sans SC.  Without
 a tag, and for other characters, the order is `FontSet`'s, as usvg's (which
-ignores the tag). -/
+ignores the tag).
+
+T106: a base font from `FamilyMatch` (index ≥ `FamilyMatch.first`) tries
+DejaVu Sans and STIX Two Math first (`FamilyMatch.fallbackOrder`) and falls
+back per character, as Chromium does: a fallback font covering the whole
+chunk does not replace the base font's own glyphs. -/
 def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Nat)
     (lang : Nat := 0) : Array Nat := Id.run do
   let has := fun (k cp : Nat) => Font.inRanges (covs.getD k #[]) cp

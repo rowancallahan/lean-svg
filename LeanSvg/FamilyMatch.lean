@@ -13,11 +13,12 @@ Linux, as far as the embedded fonts go.  Each name of the list, in order:
    Courier → Cousine; Arimo, Tinos and Cousine are the fonts Liberation
    Sans/Serif/Mono 2.x are built from, with the same metrics), matplotlib's
    names (Bitstream Vera, `cmr10`/`cmmi10`/… Computer Modern, STIX);
-3. an unquoted CSS generic (`generic`): Chromium's Linux defaults — `serif`,
-   `cursive` and `fantasy` → Times New Roman (Tinos), `monospace` → DejaVu
-   Sans Mono.  `sans-serif` and `system-ui` stay Noto Sans (T98b): the resvg
-   test suite's references draw them in Noto Sans, where Chromium uses
-   Liberation Sans (Arimo) and DejaVu Sans.
+3. an unquoted CSS generic (`generic`): Chromium's Linux defaults, measured
+   in this container's Chromium — `serif`, `cursive` and `fantasy` → Times
+   New Roman (Tinos), `sans-serif` → Arial (Arimo), `monospace` → DejaVu Sans
+   Mono, `system-ui` → DejaVu Sans.  (T98b had `sans-serif`/`system-ui` →
+   Noto Sans; the suite's `text/font-family/*sans-serif.svg` fail either way,
+   and Arimo moves them by +0.3 / −0.02 points.)
 
 A name that matches nothing is skipped; a list that matches nothing is
 `none` (Noto Sans with a warning, T98).  The suite-only families and the
@@ -82,10 +83,10 @@ def texName (lname : ByteArray) : Option Nat :=
     some cmuSerif
   else none
 
-/-- An unquoted CSS generic family → Chromium's Linux default (see above);
-`some 0` is Noto Sans. -/
+/-- An unquoted CSS generic family → Chromium's Linux default (see above). -/
 def generic (lname : ByteArray) : Option Nat :=
-  if lname == "sans-serif".toUTF8 || lname == "system-ui".toUTF8 then some 0
+  if lname == "sans-serif".toUTF8 then some arimo
+  else if lname == "system-ui".toUTF8 then some dejaVuSans
   else if lname == "serif".toUTF8 || lname == "cursive".toUTF8 || lname == "fantasy".toUTF8 then
     some tinos
   else if lname == "monospace".toUTF8 then some dejaVuSansMono
