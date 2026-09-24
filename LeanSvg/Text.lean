@@ -1063,10 +1063,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     -- anchored chunk: the whole run shifts by its own width
     let width := cl.foldl (fun w c => w + c.adv) 0
     -- the chunk's anchor is its first character's; with `direction: rtl`
-    -- (T93, Chromium) `start` and `end` name the right and left edges
+    -- (T93, Chromium) `start` and `end` name the right and left edges; in
+    -- vertical text (T102, Chromium) the bottom and top ones, while the
+    -- glyphs still run top to bottom
     let anchor : Anchor := match p0.anchor with
-      | .start => if rtlPara then .atEnd else .start
-      | .atEnd => if rtlPara then .start else .atEnd
+      | .start => if p0.rtl then .atEnd else .start
+      | .atEnd => if p0.rtl then .start else .atEnd
       | .middle => .middle
     let x0 : Int := match anchor with
       | .start => 0
