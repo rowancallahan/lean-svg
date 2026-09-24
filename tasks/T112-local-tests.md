@@ -160,8 +160,8 @@ cannot represent it (fonts / deliberately different reference).
 | 106_font_families | 90.81 | same | c | The file says so itself: resvg's pinned font dir has none of these families (DejaVu, Tinos, Arimo, Cousine, CMU, STIX). | Needs Chromium with our fonts, or Rowan's verdict. |
 | 41_text_decoration | 98.60 | same | c | `font-family="serif"` row: resvg's font dir has no serif match, draws nothing; since T106 we map serif → Tinos and draw it, like Chromium. 99.92 if that row is masked. The SVG comment ("draws nothing") is stale since T106. | Reference should be Chromium for that row. SVG not edited (it is valid). |
 
-Summary: one real bug fixed (16 → 15 files remain failing... plus the new
-test passes, so 65/81). 4 are our AA mismatch (not small), 9 are resvg
+Summary: 17 files: 1 real bug fixed (now passes); of the 16 still failing,
+4 are our AA mismatch (not small), 9 are resvg
 wrong where we follow Chromium or a recorded decision, 3 are oracle font
 limits. `criteria.csv` lists all local files as `reference=resvg`; for the
 b/c rows above that reference is wrong (evidence: o-c vs o-r numbers). Not
@@ -178,5 +178,4 @@ changed, per the rules. `106_soft_hyphen` and `112_ignorable_kern` have no
 - Real-world vs Chromium: 261/848 pass before and after, no score change;
   wall time 303.9 s → 303.5 s.
 - `lake build` clean, no warnings; `check-theorems.sh`: theorems ok;
-  `run_adversarial.py` 170/170 clean; `run_tiles.py` 80/80 byte-identical
-  (81 after the new file's first run is not needed; tiles ran before it).
+  `run_adversarial.py` 170/170 clean; `run_tiles.py` 81/81 byte-identical.
