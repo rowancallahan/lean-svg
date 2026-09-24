@@ -872,11 +872,15 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     counts := counts.setIfInBounds o (off - offsets.getD o 0)
   let mut pos : Array CharPos := Array.replicate total {}
   let mut lastRot : Fx := 0
+  -- T114: characters that start an element carrying its own `x`/`y`/`dx`/`dy`
+  let mut ownStart : Array Bool := Array.replicate total false
   for j in [0:evs.size] do
     match evs.getD j default with
     | .open_ p | .openPath p _ _ _ =>
       let o := offsets.getD j 0
       let c := counts.getD j 0
+      if c > 0 && (p.xs.size > 0 || p.ys.size > 0 || p.dxs.size > 0 || p.dys.size > 0) then
+        ownStart := ownStart.setIfInBounds o true
       for k in [0:Nat.min p.xs.size c] do
         pos := pos.setIfInBounds (o + k) { pos.getD (o + k) {} with x := some (p.xs.getD k 0) }
       for k in [0:Nat.min p.ys.size c] do
@@ -897,9 +901,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
   -- mark's own `x`/`y`/`dx`/`dy` entries are ignored (not shifted onto the
   -- next character), so it stays in its base's cluster and chunk
   -- (`complex-graphemes-and-coordinates-list.svg`; usvg reads positions at
-  -- each cluster's first character).
+  -- each cluster's first character).  T114: except a mark that is the first
+  -- character of an element with its own positions (matplotlib's mathtext
+  -- accents, `<tspan x=".." y="..">&#x302;</tspan>`): usvg starts a chunk
+  -- there and Chromium places it there too.
   for i in [1:total] do
-    if Bidi.bidiClass (chars.getD i 0) == .NSM then
+    if Bidi.bidiClass (chars.getD i 0) == .NSM && !ownStart.getD i false then
       pos := pos.setIfInBounds i { pos.getD i {} with x := none, y := none, dx := 0, dy := 0 }
   -- ---- 6. fonts (T91): every font's coverage, for fallback; each font
   -- itself is decoded and parsed the first time a character needs it
