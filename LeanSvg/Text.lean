@@ -99,13 +99,14 @@ def pickFace (weight : Nat) (italic : Bool) : Face :=
 
 /-- The `FontSet` index of a span's base font: `family` is a `FontSet` index
 (0 = "Noto Sans"); only Noto Sans has more than one face. -/
-def baseFont (family : Nat) (face : Face) : Nat :=
+def baseFont (family : Nat) (face : Face) (stretch : Nat := 5) : Nat :=
   -- T106: the other multi-face families pick by the face's weight and slant
-  if family != 0 then
+  -- (T118: and a non-normal stretch, Noto Sans included)
+  if family != 0 || stretch != 5 then
     let (w, it) := match face with
       | .regular => (400, false) | .bold => (700, false) | .italic => (400, true)
       | .thin => (100, false) | .light => (300, false) | .black => (900, false)
-    FamilyMatch.pick family w it matchWeight
+    FamilyMatch.pick family w it matchWeight stretch
   else match face with
     | .regular => 0
     | .bold => 1
@@ -162,7 +163,7 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
       | none => break
       | some k =>
         -- T106: a T106 base falls back per character, as Chromium does
-        if base < FamilyMatch.first && cps.all (has k) then
+        if FamilyMatch.suite base && cps.all (has k) then
           res := cps.map (fun _ => some k)
           break
         res := (List.range cps.size).toArray.map (fun j =>
@@ -173,7 +174,7 @@ def assignFonts (covs : Array (Array (Nat × Nat))) (base : Nat) (cps : Array Na
   -- T106: a character no font maps keeps the base font's `.notdef`; for a
   -- T106 base that is Noto Sans's light box, not e.g. CMU's heavy crossed one
   -- (dvisvgm's private-use code points, drawn by the file's own fonts, T105)
-  let tofu := if base < FamilyMatch.first then base else 0
+  let tofu := if FamilyMatch.suite base then base else 0
   return res.map (·.getD tofu)
 
 /-! ## What `Svg.lean` resolves for us -/
@@ -193,6 +194,8 @@ structure SpanProps where
   and `Synth`. -/
   weight : Nat := 400
   italic : Bool := false
+  /-- T118: `font-stretch`, an OS/2 width class (5 = normal). -/
+  stretch : Nat := 5
   /-- T97: `font-variant: small-caps`, shaped with the font's `smcp`. -/
   smallCaps : Bool := false
   /-- The base font's family, as a `FontSet` index (T91). -/
@@ -962,8 +965,8 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     let bases : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       let pr := cProps.getD (rend.getD (a + q) 0) default
       -- T116: a T106 family picks its italic face by the requested weight
-      if pr.italic && Synth.realWorld pr.family then FamilyMatch.pick pr.family pr.weight true matchWeight
-      else baseFont pr.family pr.face)
+      if pr.italic && Synth.realWorld pr.family then FamilyMatch.pick pr.family pr.weight true matchWeight pr.stretch
+      else baseFont pr.family pr.face pr.stretch)
     -- (T101: and each language tag, keyed `base · 4 + lang`)
     let langs : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       (cProps.getD (rend.getD (a + q) 0) default).lang)

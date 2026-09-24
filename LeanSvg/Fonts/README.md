@@ -50,7 +50,8 @@ SC"/"Noto Sans KR" and do not use "Source".
 | CMUSerifItalic | CMU Serif Italic | 0.7.0 | Latin, Greek, Cyrillic | 829 | 143,974 | 193,966 | LICENSE-OFL-CMU.txt |
 | CMUSansSerif | CMU Sans Serif Medium | 0.7.0 | Latin, Greek, Cyrillic | 889 | 80,664 | 109,603 | LICENSE-OFL-CMU.txt |
 | CMUTypewriter | CMU Typewriter Text Regular | 0.7.0 | Latin, Greek, Cyrillic | 877 | 106,030 | 143,461 | LICENSE-OFL-CMU.txt |
-| **Total** | | | | | **23,756,944** | **31,816,607** | |
+| NotoSansExtraCondensed | Noto Sans ExtraCondensed | 2.000 | Latin, Greek, Cyrillic | 2793 | 266,481 | 356,958 | LICENSE-OFL.txt |
+| **Total** | | | | | **24,023,425** | **32,173,565** | |
 
 Sources (all `glyf` TrueType outlines):
 
@@ -160,7 +161,25 @@ python3 tests/gen_font_module.py DejaVuSans.ttf DejaVuSans --no-glyph-names --un
 python3 tests/gen_font_module.py 'Arimo[wght].ttf' ArimoBold --instance wght=700 --no-glyph-names --unicodes=...
 ```
 
+## Noto Sans ExtraCondensed (T118)
+
+The suite's `NotoSans-ExtraCondensed.ttf` (typographic family "Noto Sans",
+OS/2 width class 2), the face `font-stretch` selects (`FamilyMatch.pick`
+matches stretch before style and weight, as fontdb does). Same options as the
+T97 faces:
+
+```
+python3 tests/gen_font_module.py NotoSans-ExtraCondensed.ttf NotoSansExtraCondensed --unicodes='*' \
+  --layout-features='kern,mark,mkmk,ccmp,locl,smcp,liga' --no-glyph-names
+```
+
 ## Not embedded
+
+- **Source Sans Pro** (T118, not embedded): Adobe's OFL 1.1 names the Reserved
+  Font Name "Source"; the OFL counts deleting components or changing formats
+  as a Modified Version (subsetting and the Lean module encoding are both),
+  and §3 forbids a Modified Version from using the RFN without Adobe's written
+  permission. Awaiting Rowan's decision (see `tasks/T118-font-stretch.md`).
 
 - **Emoji**: not now (Rowan's decision); colour emoji are bitmap/COLR, not `glyf`.
 - T106, skipped: Liberation fonts themselves (download refused, see above;

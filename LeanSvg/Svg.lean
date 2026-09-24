@@ -174,6 +174,8 @@ structure Style where
   /-- T97: `font-variant: small-caps` (usvg: the inherited value is exactly
   `small-caps`), drawn with the font's `smcp` feature. -/
   fontSmallCaps : Bool := false
+  /-- T118: `font-stretch` as an OS/2 width class (1–9, 5 = normal). -/
+  fontStretch : Nat := 5
   letterSpacing : Fx := 0
   wordSpacing : Fx := 0
   /-- T90: CSS Fonts 4 `font-size-adjust` (number form, `ex-height`), as an
@@ -1830,6 +1832,21 @@ def parseFontWeight (parent : Nat) (bs : ByteArray) : Nat :=
     | some n => if n ≥ 256 && n ≤ 256000 then (n / 256).toNat else parent
     | none => parent
 
+/-- `font-stretch` as usvg's `conv_font_stretch` reads it (T118): the nine
+keywords give width classes 1–9, `narrower` is `condensed` and `wider` is
+`expanded` (absolute, not relative to the parent), `inherit` keeps the
+parent's, and anything else, percentages included, is normal. -/
+def parseFontStretch (parent : Nat) (bs : ByteArray) : Nat :=
+  let t := trim bs
+  let kws := #["ultra-condensed", "extra-condensed", "condensed", "semi-condensed", "normal",
+    "semi-expanded", "expanded", "extra-expanded", "ultra-expanded"]
+  if eqAscii t "inherit" then parent
+  else if eqAscii t "narrower" then 3
+  else if eqAscii t "wider" then 7
+  else match kws.findIdx? (eqAscii t ·) with
+    | some i => i + 1
+    | none => 5
+
 /-- Strip one matching layer of straight quotes (CSS allows a quoted family
 name in a `font-family` list). -/
 def stripQuotes (bs : ByteArray) : ByteArray :=
@@ -2310,6 +2327,7 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
   -- `Svg.textShapes` ever reads them.
   | "font-size" => { st with fontSize := parseFontSize st.fontSize v st.rootFontSize }
   | "font-weight" => { st with fontWeight := parseFontWeight st.fontWeight v }
+  | "font-stretch" => { st with fontStretch := parseFontStretch st.fontStretch v }
   | "font-family" =>
     match resolveFontFamily v st.docFaces with
     | some k => { st with fontAvailable := true, fontFamily := k, fontFamilyRaw := trim v }
@@ -2348,7 +2366,10 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     | some (italic, weight, size, family) =>
       let st := { st with fontItalic := italic, fontWeight := 400, textKerning := true,
                           fontSizeAdjust := none,
-                          fontSmallCaps := (Bytes.splitTrim v 32).any (eqAscii · "small-caps") }
+                          fontSmallCaps := (Bytes.splitTrim v 32).any (eqAscii · "small-caps"),
+                          -- T118: reset, then a stretch keyword the shorthand names
+                          fontStretch := ((Bytes.splitTrim v 32).map (parseFontStretch 5 ·)).foldl
+                            (fun a k => if k != 5 then k else a) 5 }
       let st := match weight with
         | some w => { st with fontWeight := parseFontWeight st.fontWeight w }
         | none => st
@@ -2984,6 +3005,7 @@ def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     weight := st.fontWeight,
     italic := st.fontItalic,
+    stretch := st.fontStretch,
     smallCaps := st.fontSmallCaps,
     -- T105: a document family picks its face by weight and style
     family := if st.fontFamily < FontSet.count then st.fontFamily

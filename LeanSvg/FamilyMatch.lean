@@ -49,6 +49,13 @@ def cmuTypewriter : Nat := 33
 /-- The first T106 font: every font before it is the resvg suite's set. -/
 def first : Nat := 16
 
+/-- T118's Noto Sans ExtraCondensed: a resvg-suite face appended after the
+T106 fonts, so it follows usvg's rules (no synthesis, whole-chunk fallback). -/
+def notoSansExtraCondensed : Nat := 34
+
+/-- A resvg-suite font: usvg's font rules apply to it. -/
+def suite (k : Nat) : Bool := k < first || k == notoSansExtraCondensed
+
 /-- Lowercase alias → `FontSet` index.  An index that is not the first face
 of its family (`cmuSerifItalic`) locks that face: `pick` keeps it. -/
 def aliases : Array (String × Nat) := #[
@@ -108,21 +115,38 @@ def lookup (name : ByteArray) (quoted : Bool) : Option Nat := Id.run do
   if quoted then return none
   return generic l
 
-/-- The face of the family `head` names for `weight` and `italic`, as
-fontdb's `find_best_match` (and Chromium) choose: style first (an italic
-face when one exists, else upright; nothing is synthesised), then
-`matchWeight` among that style's weights.  `head` itself when it is a locked
-face (not its family's first entry). -/
-def pick (head weight : Nat) (italic : Bool) (matchWeight : List Nat → Nat → Nat) : Nat :=
+/-- fontdb's `find_best_match` stretch step (CSS Fonts 4 §5.2 4a) over the
+available width classes `avail`: `s` itself when present; else, for `s` at
+or below normal, the nearest narrower one, then the nearest wider; above
+normal, the nearest wider, then the nearest narrower (T118). -/
+def matchStretch (avail : List Nat) (s : Nat) : Nat :=
+  if avail.contains s then s
+  else
+    let narrower := avail.filter (· < s)
+    let wider := avail.filter (· > s)
+    let nearest := fun (l : List Nat) => l.foldl (fun b x =>
+      if (if x < s then s - x else x - s) < (if b < s then s - b else b - s) then x else b) (l.headD s)
+    if s ≤ 5 then (if narrower.isEmpty then nearest wider else nearest narrower)
+    else (if wider.isEmpty then nearest narrower else nearest wider)
+
+/-- The face of the family `head` names for `weight`, `italic` and
+`stretch`, as fontdb's `find_best_match` (and Chromium) choose: stretch first
+(`matchStretch`), then style (an italic face when one exists, else upright;
+nothing is synthesised), then `matchWeight` among that style's weights.
+`head` itself when it is a locked face (not its family's first entry). -/
+def pick (head weight : Nat) (italic : Bool) (matchWeight : List Nat → Nat → Nat)
+    (stretch : Nat := 5) : Nat :=
   let fam := ((FontSet.entries[head]?).map (·.family)).getD ""
   let prevFam := if head == 0 then "" else ((FontSet.entries[head - 1]?).map (·.family)).getD ""
   if prevFam == fam then head
   else
-    let faces := (List.range FontSet.entries.size).filter (fun k =>
+    let all := (List.range FontSet.entries.size).filter (fun k =>
       ((FontSet.entries[k]?).map (·.family)).getD "" == fam)
-    let styleOf := fun (k : Nat) => (FontSet.styles.getD k (400, false))
-    let slanted := faces.filter (fun k => (styleOf k).2)
-    let cands := if italic && !slanted.isEmpty then slanted else faces.filter (fun k => !(styleOf k).2)
+    let styleOf := fun (k : Nat) => (FontSet.styles.getD k (400, false, 5))
+    let st := matchStretch (all.map (fun k => (styleOf k).2.2)) stretch
+    let faces := all.filter (fun k => (styleOf k).2.2 == st)
+    let slanted := faces.filter (fun k => (styleOf k).2.1)
+    let cands := if italic && !slanted.isEmpty then slanted else faces.filter (fun k => !(styleOf k).2.1)
     let w := matchWeight (cands.map (fun k => (styleOf k).1)) weight
     (cands.find? (fun k => (styleOf k).1 == w)).getD head
 
@@ -131,7 +155,7 @@ suite's fonts keep `FontSet` order (usvg's); a T106 base tries DejaVu Sans
 then STIX Two Math first (fontconfig's usual first fallbacks on Linux, and
 the widest symbol coverage embedded). -/
 def fallbackOrder (base count : Nat) : List Nat :=
-  if base < first then List.range count
+  if suite base then List.range count
   else dejaVuSans :: stixTwoMath :: List.range count
 
 end FamilyMatch
@@ -139,6 +163,9 @@ end LeanSvg
 
 namespace LeanSvg
 namespace FamilyMatch
+
+-- T118's face sits at `notoSansExtraCondensed` (width class 2).
+example : (FontSet.styles.getD notoSansExtraCondensed (0, false, 0)).2.2 = 2 := by rfl
 
 -- The index constants and the style table must agree with `FontSet`.
 example : FontSet.styles.size = FontSet.entries.size := by rfl

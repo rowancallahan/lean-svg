@@ -33,6 +33,7 @@ import LeanSvg.Fonts.CMUSerif
 import LeanSvg.Fonts.CMUSerifItalic
 import LeanSvg.Fonts.CMUSansSerif
 import LeanSvg.Fonts.CMUTypewriter
+import LeanSvg.Fonts.NotoSansExtraCondensed
 
 /-!
 # The embedded font set (T91)
@@ -51,9 +52,9 @@ that Mplus 1p only partly covers still ends up wholly in Noto Sans SC (usvg's
 `Text.assignFonts`).
 
 usvg skips a fallback face only when its style, weight *and* stretch all
-differ from the base face's.  Every face here has normal stretch and the base
-face always does too (`font-stretch` selects nothing), so no face is ever
-skipped on that ground.
+differ from the base face's.  Every face but Noto Sans ExtraCondensed (T118)
+has normal stretch, and a condensed base face is upright weight 400, which
+nearly every fallback face shares, so no face is skipped on that ground.
 
 T97 appends Noto Sans Thin, Light and Black, the other weights `Text.pickFace`
 chooses among.  They sit last so that the fallback order of every other font
@@ -64,6 +65,10 @@ T106 appends the families real-world charts name (DejaVu, the Liberation-
 metric Arimo/Tinos/Cousine, STIX Two, Computer Modern Unicode), again last so
 the resvg suite's fallback order is unchanged.  `FamilyMatch` resolves
 `font-family` to them and gives them their own fallback chain.
+
+T118 appends Noto Sans ExtraCondensed (typographic family "Noto Sans", width
+class 2), the face `font-stretch` selects; it maps what Noto Sans Regular
+maps, so fallback never reaches it.
 -/
 
 namespace LeanSvg
@@ -114,18 +119,24 @@ def entries : Array Entry := #[
   ⟨"CMU Serif", Fonts.CMUSerif.font, Fonts.CMUSerif.coverage⟩,
   ⟨"CMU Serif", Fonts.CMUSerifItalic.font, Fonts.CMUSerifItalic.coverage⟩,
   ⟨"CMU Sans Serif", Fonts.CMUSansSerif.font, Fonts.CMUSansSerif.coverage⟩,
-  ⟨"CMU Typewriter Text", Fonts.CMUTypewriter.font, Fonts.CMUTypewriter.coverage⟩
+  ⟨"CMU Typewriter Text", Fonts.CMUTypewriter.font, Fonts.CMUTypewriter.coverage⟩,
+  -- T118: the face `font-stretch` selects
+  ⟨"Noto Sans", Fonts.NotoSansExtraCondensed.font, Fonts.NotoSansExtraCondensed.coverage⟩
 ]
 
-/-- Each entry's weight and slant (`true` = italic/oblique), for
+/-- Each entry's weight, slant (`true` = italic/oblique) and stretch (the
+OS/2 width class: 1 ultra-condensed … 5 normal … 9 ultra-expanded, T118), for
 `FamilyMatch.pick` among the faces of one family (T106). -/
-def styles : Array (Nat × Bool) := #[
-  (400, false), (700, false), (400, true), (400, false), (400, false), (400, false),
-  (400, false), (400, false), (400, false), (400, false), (400, false), (400, false),
-  (400, false), (100, false), (300, false), (900, false),
-  (400, false), (700, false), (400, true), (400, false), (400, false),
-  (400, false), (700, false), (400, false), (700, false), (400, true), (400, false),
-  (400, false), (400, false), (400, true), (400, false), (400, true), (400, false), (400, false)]
+def styles : Array (Nat × Bool × Nat) := #[
+  (400, false, 5), (700, false, 5), (400, true, 5), (400, false, 5), (400, false, 5),
+  (400, false, 5), (400, false, 5), (400, false, 5), (400, false, 5), (400, false, 5),
+  (400, false, 5), (400, false, 5), (400, false, 5), (100, false, 5), (300, false, 5),
+  (900, false, 5),
+  (400, false, 5), (700, false, 5), (400, true, 5), (400, false, 5), (400, false, 5),
+  (400, false, 5), (700, false, 5), (400, false, 5), (700, false, 5), (400, true, 5),
+  (400, false, 5), (400, false, 5), (400, false, 5), (400, true, 5), (400, false, 5),
+  (400, true, 5), (400, false, 5), (400, false, 5),
+  (400, false, 2)]
 
 /-- The `entries` indices of Noto Sans Thin, Light and Black (T97). -/
 def notoSansThin : Nat := 13
@@ -157,7 +168,8 @@ def byModule (name : String) : Option Font :=
     "NotoSansKR", "NotoSansThai", "NotoSansArmenian", "NotoSansGeorgian", "NotoSansEthiopic",
     "Amiri", "NotoSansHebrew", "NotoSansDevanagari", "NotoSansThin", "NotoSansLight", "NotoSansBlack",
     "DejaVuSans", "DejaVuSansBold", "DejaVuSansOblique", "DejaVuSansMono", "DejaVuSerif",
-    "Arimo", "ArimoBold", "Tinos", "TinosBold", "TinosItalic", "Cousine", "STIXTwoMath", "STIXTwoText", "STIXTwoTextItalic", "CMUSerif", "CMUSerifItalic", "CMUSansSerif", "CMUTypewriter"]
+    "Arimo", "ArimoBold", "Tinos", "TinosBold", "TinosItalic", "Cousine", "STIXTwoMath", "STIXTwoText", "STIXTwoTextItalic", "CMUSerif", "CMUSerifItalic", "CMUSansSerif", "CMUTypewriter",
+    "NotoSansExtraCondensed"]
   match names.findIdx? (· == name) with
   | some i => (entries[i]?).bind (fun e => e.font ())
   | none => none

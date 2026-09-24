@@ -23,15 +23,15 @@ namespace LeanSvg
 namespace Synth
 
 /-- A T106 embedded font: the only ones that synthesise. -/
-def realWorld (k : Nat) : Bool := FamilyMatch.first ≤ k && k < FontSet.count
+def realWorld (k : Nat) : Bool := !FamilyMatch.suite k && k < FontSet.count
 
 /-- Font `k` drawn for `weight` gets a fake-bold outline. -/
 def bold (k weight : Nat) : Bool :=
-  realWorld k && 600 ≤ weight && (FontSet.styles.getD k (400, false)).1 < 600
+  realWorld k && 600 ≤ weight && (FontSet.styles.getD k (400, false, 5)).1 < 600
 
 /-- Font `k` drawn for italic/oblique text gets a -1/4 skew. -/
 def oblique (k : Nat) (italic : Bool) : Bool :=
-  realWorld k && italic && !(FontSet.styles.getD k (400, false)).2
+  realWorld k && italic && !(FontSet.styles.getD k (400, false, 5)).2.1
 
 /-- The 16.16 linear part `[la lc; lb ld]` followed by the skew: `L · [1 -1/4; 0 1]`. -/
 def skew (la lb lc ld : Int) : Int × Int × Int × Int :=
