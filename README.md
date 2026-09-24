@@ -108,7 +108,13 @@ files and package manifests on 2026-09-21.
 | **Noto Sans** Regular, Bold, Italic, Thin, Light and Black (Latin/Greek/Cyrillic), **Mplus 1p**, **Noto Sans SC/KR/Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari**, **Amiri** — subsets generated into `LeanSvg/Fonts/*.lean` and compiled into the binary | SIL Open Font License 1.1, all of them. Copyright 2015 Google Inc. (Noto Sans; Noto is a trademark of Google Inc., not licensed under the OFL), 2016 The M+ Project Authors (Mplus 1p), 2014-2021 Adobe with Reserved Font Name 'Source' (Noto Sans SC/KR), 2022 The Noto Project Authors (Thai/Armenian/Georgian/Ethiopic/Hebrew/Devanagari), 2010-2016 Khaled Hosny (Amiri). Versions, sources and licence texts: `LeanSvg/Fonts/README.md` and `LeanSvg/Fonts/LICENSE-OFL*.txt`. The fonts are subsetted and instanced, which the OFL permits; no embedded font uses a Reserved Font Name. |
 | **DejaVu Sans** (Regular, Bold, Oblique), **DejaVu Sans Mono**, **DejaVu Serif** 2.37 — subsets in `LeanSvg/Fonts/*.lean` | Bitstream Vera / Arev licence (permissive). Bitstream Vera Fonts Copyright (c) 2003 Bitstream, Inc.; Arev Fonts Copyright (c) 2006 Tavmjong Bah; DejaVu changes are public domain. `LeanSvg/Fonts/LICENSE-DejaVu.txt`. |
 | **Arimo**, **Tinos**, **Cousine**, **STIX Two Math/Text**, **CMU Serif/Serif Italic/Sans Serif/Typewriter Text** — subsets in `LeanSvg/Fonts/*.lean` | SIL Open Font License 1.1. Copyright 2020-2026 The Arimo/Tinos/Cousine Project Authors; 2001-2021 The STIX Fonts Project Authors (Reserved Font Name "TM Math", not used; STIX Fonts is a trademark of the IEEE); 2003-2009 Andrey V. Panov and the authors of the original METAFONT fonts (Reserved Font Family Name "Computer Modern Unicode fonts", not used). `LeanSvg/Fonts/LICENSE-OFL-{Croscore,STIXTwo,CMU}.txt`. |
+| **Brotli static dictionary, transforms and context tables** (brotli 1.2.0), generated into `LeanSvg/BrotliData.lean` | MIT. Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors. `LeanSvg/LICENSE-brotli.txt`. |
 | **Original artwork and renders** — `tests/svg/*.svg`, `docs/readme/*.svg`, and the PNG images in this README | Apache-2.0. Authored for this project. |
+
+Fonts embedded in an input SVG (`@font-face` with a `data:` URL) are decoded
+only to render that one file. They are never stored, cached, written out or
+used for any other file, and lean-svg does not redistribute them; their
+licences are the concern of whoever made the SVG.
 
 ### Not redistributed
 
@@ -129,6 +135,7 @@ release artifact.
 | component | licence |
 |---|---|
 | **tiny-skia** — [linebender/tiny-skia](https://github.com/linebender/tiny-skia) | BSD-3-Clause. Copyright (c) 2011 Google Inc.; Copyright (c) 2020 Yevhenii Reizner. tiny-skia is a port of Skia, and its licence carries both notices. |
+| **Brotli** decoder — RFC 7932, checked against [google/brotli](https://github.com/google/brotli) 1.2.0 | MIT. `LeanSvg/Brotli.lean` is written from the RFC; no C source is included. |
 
 The anti-aliased scan converter, hairline stroking, cubic and quadratic
 subdivision counts, dash-splitting rules, `lowp` blend arithmetic, `f32`
