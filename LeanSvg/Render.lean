@@ -280,7 +280,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
   -- `use`'s content box and CTM (usvg's `process_context_paint`).
   let paintSpace := fun (ctx : Option Nat) => match ctx.bind (doc.ctxUses[·]?) with
     | some u => ((u.bbox.map Svg.Box.cmds).getD #[], toLayer (rootMat.mul u.ctm))
-    | none => (s.cmds, gctm)
+    | none => ((s.paintBox.map Svg.Box.cmds).getD s.cmds, gctm)
   let paintMask := fun (cv : Canvas) (p : Svg.Paint) (ctx : Option Nat) (m0 : Raster.Mask) (op : Nat) =>
     let m := shiftMask tgt m0
     let (pcmds, pctm) := paintSpace ctx

@@ -316,6 +316,10 @@ structure Shape where
   /-- T84: an `<image>` of an SVG document, an index into `Doc.svgImages`.
   `cmds` is then its viewport and the style paints nothing itself. -/
   svgImage : Option Nat := none
+  /-- T111: the box an `objectBoundingBox` paint server resolves against, in
+  place of `cmds`' own bounds. Text runs carry their `<text>` element's
+  font-metric box (usvg's `text.bounding_box`, `paint_server.rs`). -/
+  paintBox : Option Box := none
 deriving Inhabited
 
 /-! ## `clipPath` (T20), and the shape of a defs table
@@ -3451,7 +3455,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
       let st := if outK == 1 then st else
         { st with strokeWidth := st.strokeWidth * outK, dashes := st.dashes.map (· * outK),
                   dashOffset := st.dashOffset * outK }
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := textStyle.textCrisp }, false, none, none⟩
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := textStyle.textCrisp }, false, none, none, mbox⟩
       chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
@@ -3568,7 +3572,7 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
           match shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH st'.rootFontSize with
-          | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none, none⟩)
+          | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none, none, none⟩)
           | none => pure ()
           if layered then nodes := nodes.push .groupEnd
           skip := 1
@@ -4628,7 +4632,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
                   let st := if name == "path" && st.markerMidId.isSome then
                       { st with arcJoins := ((attr attrs "d").map fun d => (parsePathDataJ d).2).getD #[] }
                     else st
-                  if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none, none⟩
+                  if st.visible && cmds.size > 0 then shapeNode := some ⟨cmds, st, markerable, none, none, none⟩
                 | none => pure ()
               | .defs => pure ()
               | .clip k =>
@@ -4781,7 +4785,7 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               | some (cmds, p, _) =>
                 if st.visible then
                   shapeNode := some ⟨cmds, { st with fill := .solid ⟨0, 0, 0, 255⟩, stroke := .none },
-                    false, some p, none⟩
+                    false, some p, none, none⟩
               | none =>
                 match svgImg with
                 | some (k, cmds, _) =>
