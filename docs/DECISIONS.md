@@ -198,3 +198,12 @@ files (draw nothing, like Chromium), `rtl-with-vertical-writing-mode` and
 where live resvg 0.48.1 draws nothing but the suite PNG shows the text along
 the path with upright CJK, which is now what we draw (the suite's resvg=1
 rating predates 0.48.1's behaviour).
+
+## XML nesting depth (Rowan, 2026-09-24)
+
+`tikz/plot_pgf_3d_surface.svg` nests 1,164 `<g>` deep (pgfplots leaves each
+patch's group open), past our 64-level parser cap, so it is refused (resvg
+also refuses: "nodes limit reached"). Decision: allow nesting up to ~2,000–2,500
+levels if it stays fast and costs nothing when unused; deep processing must
+not recurse on the native stack (iterative or fuel-bounded), and the size and
+time theorems must keep holding.
