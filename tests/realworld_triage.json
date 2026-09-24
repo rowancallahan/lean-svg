@@ -2,17 +2,17 @@
  "tikz/plot_pgf_3d_surface.svg": {
   "category": "real-bug",
   "severity": 5,
-  "reason": "lean-svg refuses to render this file entirely (exit_code 1) while Chromium renders the full 3D surface plot correctly."
+  "reason": "[Fixed since triage by T104 \u2014 please re-check] lean-svg refuses to render this file entirely (exit_code 1) while Chromium renders the full 3D surface plot correctly."
  },
  "tikz-fonts/plot_pgf_3d_surface.svg": {
   "category": "real-bug",
   "severity": 5,
-  "reason": "lean-svg refuses to render this file entirely (exit_code 1) while Chromium renders the full 3D surface plot correctly."
+  "reason": "[Fixed since triage by T104 \u2014 please re-check] lean-svg refuses to render this file entirely (exit_code 1) while Chromium renders the full 3D surface plot correctly."
  },
  "web-tikz/materials-informatics.svg": {
   "category": "real-bug",
   "severity": 4,
-  "reason": "the Coulomb-matrix heatmap panel: only 4 diagonal cell numbers show against a solid black grid, all the orange/tan cell fill colors and the rest of the numeric labels are missing."
+  "reason": "[Fixed since triage by T104 \u2014 please re-check] the Coulomb-matrix heatmap panel: only 4 diagonal cell numbers show against a solid black grid, all the orange/tan cell fill colors and the rest of the numeric labels are missing."
  },
  "matplotlib/mcmc_trace__bmh.svg": {
   "category": "aa-only",
@@ -152,7 +152,7 @@
  "mermaid/er_schema.svg": {
   "category": "real-bug",
   "severity": 5,
-  "reason": "All text is missing in our render: entity titles STUDY/SUBJECT/MEASUREMENT, every attribute row (string/id, date/start, int/id, etc.) and the relationship labels 'enrolls'/'has' are blank, while boxes and connector lines are drawn."
+  "reason": "[Fixed since triage by T104 \u2014 please re-check] All text is missing in our render: entity titles STUDY/SUBJECT/MEASUREMENT, every attribute row (string/id, date/start, int/id, etc.) and the relationship labels 'enrolls'/'has' are blank, while boxes and connector lines are drawn."
  },
  "tikz-fonts/timeline_calendar.svg": {
   "category": "font-only",
@@ -207,7 +207,7 @@
  "mermaid/state_chain.svg": {
   "category": "real-bug",
   "severity": 5,
-  "reason": "All state-diagram text is missing in our render: state names (Warmup, Sampling, Divergent) and transition labels (adapted, energy error, N draws) are blank while boxes/arrows are drawn correctly."
+  "reason": "[Fixed since triage by T104 \u2014 please re-check] All state-diagram text is missing in our render: state names (Warmup, Sampling, Divergent) and transition labels (adapted, energy error, N draws) are blank while boxes/arrows are drawn correctly."
  },
  "mpl-tests/test_lines/scaled_lines.svg": {
   "category": "aa-only",
