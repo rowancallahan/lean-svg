@@ -9,8 +9,8 @@ filters/feDiffuseLighting/complex-transform.svg,pass,
 filters/feDisplacementMap/simple-case.svg,pass,ok we can draw nothing for this but add it to todo list for me to think about
 filters/fePointLight/complex-transform.svg,pass,
 filters/fePointLight/primitiveUnits=objectBoundingBox.svg,pass,seems like the circle should be lighter here and more like suite somehow | Round 2: pass; matches the suite PNG at its native 500 px (Rowan ok with that).
-filters/feSpotLight/complex-transform.svg,pass,needs to be softer /blurred on the edges like chromium and suite | Round 2: Rowan saw the suite cone softer at 200 px; at the suite's native 500 px ours is 99.1% within 8 (cone softness matches; residual: 1 px edge line and a small patch at the cone tip). Recorded as pass under the same 500 px rule as fePointLight; Rowan may flip.
-filters/feSpotLight/limitingConeAngle-anti-aliasing.svg,pass,no anti aliasing here | Round 2: Rowan saw the suite cone softer at 200 px; at the suite's native 500 px ours is identical (max difference 2/255). Recorded as pass under the same 500 px rule as fePointLight; Rowan may flip.
+filters/feSpotLight/complex-transform.svg,pass,needs to be softer /blurred on the edges like chromium and suite | Round 2: Rowan saw the suite cone softer at 200 px; at the suite's native 500 px ours is 99.1% within 8 (cone softness matches; residual: 1 px edge line and a small patch at the cone tip). Pass confirmed by Rowan.
+filters/feSpotLight/limitingConeAngle-anti-aliasing.svg,pass,no anti aliasing here | Round 2: Rowan saw the suite cone softer at 200 px; at the suite's native 500 px ours is identical (max difference 2/255). Pass confirmed by Rowan.
 filters/feSpotLight/primitiveUnits=objectBoundingBox.svg,pass,
 filters/feTile/complex-transform.svg,pass,
 filters/feTurbulence/stitchTiles=stitch.svg,pass,
