@@ -1,0 +1,8 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-qtree}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\Tree [.{$x_1 < 0.5$?} [.{$x_2 < 0.3$?} {class A} {class B} ] [.{$x_3 < 1.2$?} {class B} [.{$x_1 < 0.9$?} {class C} {class A} ] ] ]
+\end{document}

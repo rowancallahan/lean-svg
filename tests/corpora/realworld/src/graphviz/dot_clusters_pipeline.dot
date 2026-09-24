@@ -1,0 +1,7 @@
+digraph pipeline {
+  compound=true; node [shape=box, style=filled, fillcolor=white];
+  subgraph cluster_ingest { label="ingest"; style=filled; fillcolor="#eef6ff"; a1 [label="fetch"]; a2 [label="parse"]; a1 -> a2; }
+  subgraph cluster_model { label="model"; style=filled; fillcolor="#f3ffee"; b1 [label="prior"]; b2 [label="likelihood"]; b3 [label="sampler"]; b1 -> b3; b2 -> b3; }
+  subgraph cluster_out { label="output"; style="filled,dashed"; fillcolor="#fff6ee"; c1 [label="plots"]; c2 [label="tables"]; }
+  a2 -> b2 [lhead=cluster_model]; b3 -> c1; b3 -> c2;
+}

@@ -1,0 +1,13 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzpicture}
+\shade[left color=blue, right color=red] (0,0) rectangle (3,2);
+\shade[inner color=yellow, outer color=orange!50!black] (5,1) circle (1);
+\shade[ball color=blue!60] (8,1) circle (1);
+\shade[top color=white, bottom color=green!50!black, shading angle=30] (10,0) rectangle (12,2);
+\end{tikzpicture}
+\end{document}

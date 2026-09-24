@@ -1,0 +1,15 @@
+@startuml
+start
+:load data;
+if (missing values?) then (yes)
+  :impute;
+else (no)
+endif
+fork
+  :fit model A;
+fork again
+  :fit model B;
+end fork
+:compare with LOO;
+stop
+@enduml

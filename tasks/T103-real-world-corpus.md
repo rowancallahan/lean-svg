@@ -129,3 +129,145 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+### What was built
+
+`tests/corpora/realworld/` — **848 SVGs, 23 MB, committed** (`.gitignore` now
+ignores `tests/corpora/*` except `realworld/`). Groups (top-level dirs):
+
+| group | files | how made | regenerate |
+|---|---|---|---|
+| `tikz` | 64 | own `.tex` in `src/tikz/` → latex → `dvisvgm --no-fonts` | `src/gen_tikz.sh` |
+| `tikz-fonts` | 64 | same DVI → `dvisvgm --font-format=woff2` (embedded @font-face + `<text>`) | same |
+| `matplotlib` | 66 | `src/gen_matplotlib.py`, glyphs as paths, 56 plots + 10 style variants | `python3 src/gen_matplotlib.py` |
+| `matplotlib-text` | 19 | same, `svg.fonttype='none'` | same |
+| `graphviz` | 23 | own `.dot` (dot, neato, fdp, circo, twopi) | `src/gen_graphviz.sh` |
+| `mermaid` | 8 | own `.mmd`, mermaid-cli (container Chromium) | `src/gen_uml.sh` (needs `MMDC=`) |
+| `plantuml` | 8 | own `.puml`, Ubuntu plantuml 1.2020.2 | same |
+| `mpl-tests` | 515 | **all** of matplotlib's test-baseline SVGs at a pinned commit | `src/fetch_matplotlib_tests.sh` |
+| `web-tikz` | 50 | TikZ figures from janosh/diagrams (MIT) | copied; URLs in SOURCES.csv |
+| `web-vega` | 31 | Vega-Lite compiled statistical examples (BSD-3) | copied; URLs in SOURCES.csv |
+
+TikZ covers commutative diagrams (tikz-cd), graphs, Bayesian nets/plates/HMM,
+Feynman diagrams (tikz-feynman), geometry/3D, pgfplots (functions, shaded
+normal, posterior, bars, 3D surface, log-log error bars, histogram, polar),
+trees (forest, qtree), automata, neural nets, circuits, Venn, shadings,
+patterns, arrow tips, flowchart, mindmap, knots. Sources use the `dvisvgm`
+class option so pgf emits real SVG gradients/clips/opacity/patterns (the
+default dvips driver's PostScript specials are dropped by dvisvgm without
+Ghostscript). matplotlib covers posteriors/priors, credible intervals, MCMC
+trace/autocorrelation/rank plots, corner and pair plots, forest plot, GP,
+hist/KDE, contour/contourf, heatmaps, hexbin, ROC/PR, error bars, log axes,
+box/violin, Q-Q, 3D, quiver/stream, mathtext; all seeded; `svg.hashsalt` and
+`Date=None` make output byte-stable (verified by regenerating). `tikz-fonts`
+is not byte-reproducible (dvisvgm stamps the time into the WOFF2 fonts).
+
+matplotlib's Agg PNG baselines for 480 of the 515 `mpl-tests` files are
+fetched by the same script into the gitignored
+`tests/corpora/matplotlib-baseline-png/` (3.7 MB) for a third comparison.
+
+**Web sources.** Wikimedia Commons (`commons.wikimedia.org`,
+`upload.wikimedia.org`) is refused by this environment's egress policy (403),
+so no Commons files. Instead: janosh/diagrams (MIT), vega/vega-lite (BSD-3),
+matplotlib (PSF-based Matplotlib License), cloned sparse from GitHub at pinned
+commits. Every downloaded file has a row in `SOURCES.csv` (file, raw URL at
+the commit, author, licence, licence URL): 596 rows.
+
+### Harness
+
+- `tests/run_corpora.py`: corpus `realworld` (200 px, `--fast` 100 px); not
+  included in `--corpus all`, so existing runs are unchanged; `--ref` now
+  defaults per corpus (resvg, except chrome for realworld). Under `--ref
+  chrome` a 1-row height difference is compared on the common rows with a
+  note — Chromium lays the `<img>` out at a fractional height and rounds it
+  differently. Checked: resvg fast pass before/after = 1679 unchanged, 0 moved.
+- `tests/make_realworld_review.py`: static page, per file ours | Chromium |
+  matplotlib PNG (mpl-tests), grouped, worst first; also `results.csv` and
+  `summary.md`. Default out `tests/out/realworld_review/` (~3 min for all 848).
+- No renderer code changed, so the Lean build/theorem/corpus verification
+  steps have nothing to check beyond the harness delta above.
+
+### Results (width 200, tol 8, reference Chromium; our timings sequential)
+
+| group | files | lean-svg errors | median within-8 | mean | files ≥ 99% | median ms | max ms |
+|---|---|---|---|---|---|---|---|
+| graphviz | 23 | 0 | 91.7% | 90.4% | 0 | 22 | 40 |
+| matplotlib | 66 | 0 | 92.9% | 92.0% | 0 | 34 | 708 |
+| matplotlib-text | 19 | 0 | 92.5% | 90.7% | 0 | 33 | 599 |
+| mermaid | 8 | 0 | 14.6% | 16.3% | 0 | 27 | 39 |
+| mpl-tests | 515 | 0 | 95.4% | 94.7% | 30 | 16 | 528 |
+| plantuml | 8 | 0 | 90.3% | 89.5% | 0 | 117 | 947 |
+| tikz | 64 | 1 | 95.0% | 93.6% | 2 | 19 | 88 |
+| tikz-fonts | 64 | 1 | 94.5% | 92.8% | 1 | 19 | 78 |
+| web-tikz | 50 | 0 | 92.1% | 91.2% | 0 | 24 | 87 |
+| web-vega | 31 | 0 | 94.8% | 93.7% | 0 | 26 | 47 |
+| **all** | 848 | 2 | 95.0% | 93.0% | 33 | 19 | 947 |
+
+mpl-tests vs matplotlib's own PNG (479 comparable): median within-8 95.0%
+(vs Chromium 95.5% on the same files). The PNG is Agg's render of the figure,
+not of the SVG, so text hinting and AA differ by design.
+
+Low within-8 is mostly antialiasing and text: Chromium uses system fonts
+(Times/DejaVu/Liberation) where lean-svg has its one bundled face, and
+Chromium's AA differs from resvg's. Only 1.1% of files reach 99% even where
+the pictures look identical by eye; against resvg the same corpus passes 57.
+
+**Failures (lean-svg errors/refusals):** `tikz/plot_pgf_3d_surface.svg` and
+its `tikz-fonts` twin, exit 1 **with no message** on stderr. resvg also
+refuses it ("nodes limit reached"); Chromium renders it.
+
+**Chromium failures:** none. Not comparable (size off by 2 px, see below):
+`graphviz/dot_ortho_splines.svg`, `web-tikz/torus-fundamental-domain.svg`.
+
+**Slowest (ours, sequential, 200 px):** plantuml/state_sampler 947 ms,
+plantuml/component_arch 904, matplotlib/pair_scatter 708 (5025 `<use>`
+markers), matplotlib-text/pair_scatter 599,
+mpl-tests/test_backends_rendering/blend_groups_svg 528,
+…_rasterized 475, matplotlib/dirichlet_simplex 464 (3000 markers),
+mpl-tests/test_usetex/rotation 396, image_colormap 383, heatmap_annot 383.
+PlantUML's cost is a drop-shadow filter (feGaussianBlur, 300% region) over a
+~200×1100 px canvas.
+
+### Things that look wrong (renderer not changed; for follow-up tasks)
+
+1. **Output height 1 px shorter than resvg in 226/848 files** (`--ref resvg`
+   run: every size mismatch is ours = resvg − 1 in height, width equal; e.g.
+   graphviz `dot_bayes_net_asia` 134 vs 135, `dot_ortho_splines` 387 vs 388,
+   `tikz/patterns_fill` 129 vs 130). All have fractional `pt`/px sizes; likely
+   the `--width` height computation floors where resvg rounds. Invisible on the
+   resvg suite (mostly integer, square sizes). Highest-value fix here.
+2. **`<pattern xlink:href>` attribute inheritance missing**: pgf emits
+   `<pattern id=pgfupat1 xlink:href=#pgfpat3>` (children here) inheriting
+   `width/height/patternUnits` from an empty template; ours draws nothing,
+   resvg and Chromium draw the hatching (`tikz/patterns_fill`, 46% within-8).
+3. **Root `background-color` style not painted**: Mermaid's
+   `<svg style="background-color: white">` is painted by resvg and Chromium,
+   ours stays transparent — every pixel differs in alpha, hence Mermaid's
+   ~15% (`pie_budget` looks identical otherwise, 0.4% vs resvg).
+4. **Mermaid labels are HTML in `<foreignObject>`**: not rendered (resvg does
+   not either); flowcharts/state diagrams lose all their text.
+5. **Refusal without a message** on `plot_pgf_3d_surface.svg` (see above): a
+   refusal should say why.
+6. **Embedded WOFF2 `@font-face` fonts ignored** (`tikz-fonts`): falls back to
+   the bundled sans face; some math symbols (e.g. `\lrcorner`) become tofu.
+   Expected under current policy, listed for completeness.
+7. `mpl-tests/test_backends_rendering/blend_modes_svg` (67%): several
+   `mix-blend-mode` cells differ from Chromium; `test_legend/hatching`,
+   `matplotlib/hatch_bars`: hatch tiles offset/cropped differently from
+   Chromium (look plausible). `web-tikz/materials-informatics`: Coulomb-matrix
+   cells black in ours **and resvg**, coloured in Chromium — not ours alone.
+
+### Not done / notes
+
+- No Wikimedia Commons files (policy block above); ~80 web files from
+  permissive GitHub repos instead, plus the full matplotlib baseline set that
+  Rowan asked for mid-task.
+- Mermaid/PlantUML output depends on tool versions (mermaid-cli latest from
+  npm at generation time, PlantUML 1.2020.2); they are committed, so the
+  corpus is fixed regardless.
+- Byte-locking and benchmarking are left for the follow-up tasks; the
+  `results.csv` timings are single sequential runs, not benchmarks.

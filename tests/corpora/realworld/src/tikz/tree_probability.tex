@@ -1,0 +1,12 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzpicture}[grow=right, level 1/.style={sibling distance=3cm, level distance=3cm}, level 2/.style={sibling distance=1.5cm, level distance=3.5cm}, edge from parent/.style={draw, -latex}, every node/.style={font=\small}]
+\node[circle, fill, inner sep=1.5pt] {}
+  child { node {$\bar{D}$} child { node {$-$: $0.95$} edge from parent node[below] {$0.95$} } child { node {$+$: $0.05$} edge from parent node[above] {$0.05$} } edge from parent node[below left] {$0.99$} }
+  child { node {$D$} child { node {$-$: $0.01$} edge from parent node[below] {$0.01$} } child { node {$+$: $0.99$} edge from parent node[above] {$0.99$} } edge from parent node[above left] {$0.01$} };
+\end{tikzpicture}
+\end{document}

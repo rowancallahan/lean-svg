@@ -1,0 +1,11 @@
+classDiagram
+    class Distribution {
+      +mean() float
+      +logpdf(x) float
+    }
+    Distribution <|-- Normal
+    Distribution <|-- Beta
+    Distribution <|-- Gamma
+    Gamma <|-- Exponential
+    Normal : +mu float
+    Normal : +sigma float

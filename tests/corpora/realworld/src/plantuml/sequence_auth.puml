@@ -1,0 +1,11 @@
+@startuml
+actor User
+participant "lean-svg" as L
+database "PNG" as P
+User -> L : render(svg)
+activate L
+L -> L : parse, layout
+L -> P : write
+deactivate L
+P --> User : image
+@enduml

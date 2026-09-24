@@ -1,0 +1,11 @@
+\documentclass[dvisvgm,tikz,border=4pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,automata,shapes,shapes.misc,calc,decorations.pathmorphing,decorations.markings,angles,quotes,patterns,mindmap,matrix,knots,hobby,trees}
+\tikzset{->-/.style={decoration={markings, mark=at position 0.5 with {\arrow{Stealth}}}, postaction={decorate}}}
+\begin{document}
+\begin{tikzcd}
+0 \arrow[r] & A \arrow[r, hook, "\iota"] \arrow[d, "\alpha"] & B \arrow[r, two heads, "\pi"] \arrow[d, "\beta"] & C \arrow[r] \arrow[d, "\gamma"] & 0 \\
+0 \arrow[r] & A' \arrow[r, hook] & B' \arrow[r, two heads] & C' \arrow[r] & 0
+\end{tikzcd}
+\end{document}
