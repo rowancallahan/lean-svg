@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260">
+  <!-- T116: faces the embedded families lack are synthesised as Chromium
+       does: bold as a fake-bold outset, italic as a -1/4 skew -->
+  <g font-size="30">
+    <text x="10" y="40" font-family="DejaVu Serif">Serif Hg</text>
+    <text x="200" y="40" font-family="DejaVu Serif" font-weight="bold">Bold Hg</text>
+    <text x="10" y="90" font-family="DejaVu Serif" font-style="italic">Italic Hg</text>
+    <text x="200" y="90" font-family="DejaVu Serif" font-weight="bold" font-style="italic">BI Hg</text>
+    <text x="10" y="140" font-family="Arial" font-style="italic">Arimo It</text>
+    <text x="200" y="140" font-family="Arial" font-weight="bold" font-style="italic">Arimo BI</text>
+    <text x="10" y="190" font-family="DejaVu Sans" font-weight="bold" font-style="italic" fill="#1f77b4">Sans BI</text>
+    <text x="200" y="190" font-family="monospace" font-weight="bold">Mono B</text>
+    <text x="10" y="240" font-family="Times New Roman" font-weight="bold" font-style="italic" fill="none" stroke="#d62728">Tinos BI</text>
+  </g>
+</svg>

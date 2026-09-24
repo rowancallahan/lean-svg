@@ -4,6 +4,7 @@ import LeanSvg.Font
 import LeanSvg.Baseline
 import LeanSvg.FontSet
 import LeanSvg.FamilyMatch
+import LeanSvg.Synth
 import LeanSvg.ShapeText
 import LeanSvg.VertOrient
 
@@ -188,6 +189,10 @@ cascade by `Svg.lean`.  `size`, `letterSpacing` and `wordSpacing` are `Fx`
 (1/256 px) user-space lengths. -/
 structure SpanProps where
   face : Face := .regular
+  /-- T116: the requested weight and slant, for the T106 families' face pick
+  and `Synth`. -/
+  weight : Nat := 400
+  italic : Bool := false
   /-- T97: `font-variant: small-caps`, shaped with the font's `smcp`. -/
   smallCaps : Bool := false
   /-- The base font's family, as a `FontSet` index (T91). -/
@@ -285,6 +290,9 @@ element's user space.  `Svg.lean` turns each into a `Shape`. -/
 structure Placed where
   styleIdx : Nat
   cmds : Array PathCmd
+  /-- T116: non-zero for a synthetic-bold copy of glyph outlines (drawn under
+  the run as a stroke in the fill's paint): their font size (`Fx`). -/
+  boldSize : Fx := 0
 deriving Inhabited
 
 /-! ## UTF-8 -/
@@ -691,7 +699,11 @@ glyphs, each moved by its offset through the same linear part (usvg's
 `glyph_ts` inside the cluster transform). -/
 def clusterCmds (fonts : Array (Option Font)) (f : Font) (c : Cluster) (la lb lc ld ox oy : Int) :
     Array PathCmd := Id.run do
-  if c.glyphs.isEmpty then return glyphCmdsLin f (Font.glyphId f c.cp) c.props.size la lb lc ld ox oy
+  -- T116: a synthetic oblique skews the outline, not the glyph offsets
+  let sk := fun (k : Nat) => if Synth.oblique k c.props.italic then Synth.skew la lb lc ld else (la, lb, lc, ld)
+  if c.glyphs.isEmpty then
+    let (sa, sb, sc, sd) := sk c.font
+    return glyphCmdsLin f (Font.glyphId f c.cp) c.props.size sa sb sc sd ox oy
   let mut out : Array PathCmd := #[]
   for (fi, gid, xfu, yfu) in c.glyphs do
     match fonts.getD fi none with
@@ -699,7 +711,8 @@ def clusterCmds (fonts : Array (Option Font)) (f : Font) (c : Cluster) (la lb lc
       let upem := if g.unitsPerEm == 0 then 1000 else g.unitsPerEm
       let lx := roundDivI (xfu * (c.props.size * 256)) upem
       let ly := -(roundDivI (yfu * (c.props.size * 256)) upem)
-      out := out ++ glyphCmdsLin g gid c.props.size la lb lc ld
+      let (sa, sb, sc, sd) := sk fi
+      out := out ++ glyphCmdsLin g gid c.props.size sa sb sc sd
         (ox + Int.ediv (la * lx + lc * ly) 65536) (oy + Int.ediv (lb * lx + ld * ly) 65536)
     | none => pure ()
   return out
@@ -941,7 +954,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     let cps : Array Nat := (List.range (b - a)).toArray.map (fun q => chars.getD (rend.getD (a + q) 0) 0)
     let bases : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       let pr := cProps.getD (rend.getD (a + q) 0) default
-      baseFont pr.family pr.face)
+      -- T116: a T106 family picks its italic face by the requested weight
+      if pr.italic && Synth.realWorld pr.family then FamilyMatch.pick pr.family pr.weight true matchWeight
+      else baseFont pr.family pr.face)
     -- (T101: and each language tag, keyed `base · 4 + lang`)
     let langs : Array Nat := (List.range (b - a)).toArray.map (fun q =>
       (cProps.getD (rend.getD (a + q) 0) default).lang)
@@ -1200,6 +1215,8 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     -- (`underline-with-{dy,rotate}-list-2/4.svg`, both gradient-filled).
     let mut curStyle : Option Nat := none
     let mut curCmds : Array PathCmd := #[]
+    let mut boldCmds : Array PathCmd := #[]
+    let mut boldSize : Fx := 0
     let mut olIdx : Option Nat := none
     let mut ulIdx : Option Nat := none
     let mut thIdx : Option Nat := none
@@ -1213,8 +1230,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       match r with | some r => cmds ++ decorRectCmds r | none => cmds
     let flushBuf := fun (placed : Array Placed) (idx? : Option Nat) (cmds : Array PathCmd) =>
       match idx? with
-      | some idx => if cmds.size > 0 then placed.push ⟨idx, cmds⟩ else placed
+      | some idx => if cmds.size > 0 then placed.push ⟨idx, cmds, 0⟩ else placed
       | none => placed
+    -- T116: a run's synthetic-bold outlines go under its own
+    let flushRun := fun (placed : Array Placed) (s : Nat) (cmds bold : Array PathCmd) (bsz : Fx) =>
+      let placed := if bold.size > 0 then placed.push ⟨s, bold, bsz⟩ else placed
+      if cmds.size > 0 then placed.push ⟨s, cmds, 0⟩ else placed
     for q in [0:cl.size] do
       let c := cl.getD q default
       -- usvg indexes `dx`/`dy`/`rotate` by the character's position among the
@@ -1401,11 +1422,12 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
         placed := flushBuf placed olIdx olCmds
         placed := flushBuf placed ulIdx ulCmds
         placed := match curStyle with
-          | some s => if curCmds.size > 0 then placed.push ⟨s, curCmds⟩ else placed
+          | some s => flushRun placed s curCmds boldCmds boldSize
           | none => placed
         placed := flushBuf placed thIdx thCmds
         curStyle := some c.styleIdx
         curCmds := #[]
+        boldCmds := #[]
         olIdx := c.props.overlineIdx; ulIdx := c.props.underlineIdx; thIdx := c.props.throughIdx
         olCmds := #[]; ulCmds := #[]; thCmds := #[]
       else if shiftBreak then
@@ -1438,6 +1460,9 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
       ulRun := ulRun.map (fun r => { r with width := r.width + c.adv * outK })
       thRun := thRun.map (fun r => { r with width := r.width + c.adv * outK })
       curCmds := curCmds ++ cmds
+      if Synth.bold c.font c.props.weight then
+        boldCmds := boldCmds ++ cmds
+        boldSize := c.props.size
       olCmds := olCmds ++ dec.1
       ulCmds := ulCmds ++ dec.2.1
       thCmds := thCmds ++ dec.2.2
@@ -1447,7 +1472,7 @@ def layout (evs : Array Ev) (rootPreserve : Bool) (budget : Nat) (vertical : Boo
     placed := flushBuf placed olIdx olCmds
     placed := flushBuf placed ulIdx ulCmds
     placed := match curStyle with
-      | some s => if curCmds.size > 0 then placed.push ⟨s, curCmds⟩ else placed
+      | some s => flushRun placed s curCmds boldCmds boldSize
       | none => placed
     placed := flushBuf placed thIdx thCmds
     if flow.isSome then
