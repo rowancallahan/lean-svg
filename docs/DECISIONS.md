@@ -189,3 +189,12 @@ output across platforms). Possible later uses: bit-exact emulation of
 resvg's f32 arithmetic on specific paths (AA coverage, curve flattening) to
 close "edge smoothing only" differences; real-number error-bound theorems.
 Both would add Mathlib as a dependency.
+
+## T102 merged (2026-09-24)
+
+Six files stop matching resvg, all intended: the three invalid-transform
+files (draw nothing, like Chromium), `rtl-with-vertical-writing-mode` and
+`textPath/complex` (Chromium's placement), and `textPath/writing-mode=tb`,
+where live resvg 0.48.1 draws nothing but the suite PNG shows the text along
+the path with upright CJK, which is now what we draw (the suite's resvg=1
+rating predates 0.48.1's behaviour).
