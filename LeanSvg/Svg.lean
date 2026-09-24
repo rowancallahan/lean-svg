@@ -1861,10 +1861,9 @@ def resolveFontFamily (bs : ByteArray) : Option Nat := Id.run do
       for w in Bytes.splitTrim name 32 do
         let c := Bytes.at' w 0
         if 48 ≤ c && c ≤ 57 then return none
-      -- T98b: the unquoted generic `sans-serif` (and `system-ui`) is a real
-      -- match for Noto Sans, not a fallback, so it raises no warning.
-      if eqAscii name "sans-serif" || eqAscii name "system-ui" then return some 0
-    match FontSet.familyIndex name with
+    -- T106: exact family, alias, then generic (`FamilyMatch.lookup`); the
+    -- unquoted `sans-serif`/`system-ui` stay Noto Sans with no warning (T98b)
+    match FamilyMatch.lookup name (name.size != tok.size) with
     | some k => return some k
     | none => if suiteOnlyFamilies.any (eqAscii name ·) then return none
   return none
