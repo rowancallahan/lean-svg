@@ -1,0 +1,17 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- T108: recursive pattern references are cut (usvg fix_recursive_patterns),
+       hairline strokes in pattern content, objectBoundingBox content at 16.16 -->
+  <pattern id="p1" patternUnits="userSpaceOnUse" width="40" height="25">
+    <rect width="40" height="25" fill="url(#p2)" stroke="green"/>
+  </pattern>
+  <pattern id="p2" patternUnits="userSpaceOnUse" width="40" height="25">
+    <rect width="40" height="25" fill="url(#p1)" stroke="green"/>
+  </pattern>
+  <pattern id="p3" patternContentUnits="objectBoundingBox" width="0.2" height="0.2">
+    <rect width="0.1" height="0.1" fill="grey"/>
+    <rect x="0.1" y="0.1" width="0.1" height="0.1" fill="green"/>
+  </pattern>
+  <rect x="10" y="10" width="180" height="50" fill="url(#p1)"/>
+  <rect x="10" y="70" width="180" height="50" fill="url(#p2)"/>
+  <rect x="10" y="130" width="160" height="60" fill="url(#p3)"/>
+</svg>

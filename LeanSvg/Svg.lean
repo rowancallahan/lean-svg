@@ -3487,7 +3487,7 @@ for a nested `<pattern>` is correct regardless — it is not a drawable child,
 and it still gets its own top-level slot and content array from the loop
 that calls this function once per raw index). -/
 def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
-    (events : Array Xml.Event) (idx : Nat) (rootStyle : Style) (budget : Nat) :
+    (events : Array Xml.Event) (idx : Nat) (rootStyle : Style) (budget : Nat) (fine : Bool := false) :
     Array Node × Nat := Id.run do
   let mut nodes : Array Node := #[]
   let mut stStack : Array Style := #[rootStyle]
@@ -3576,7 +3576,19 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
-          match shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH st'.rootFontSize with
+          -- T108: under `patternContentUnits="objectBoundingBox"` (`fine`) a
+          -- fill-only shape whose paint does not live in user units is lexed
+          -- on the 16.16 grid, as `objectBoundingBox` mask content is (T49):
+          -- `0.1` at `Fx`'s 1/256 is a quarter pixel off on a 160-unit box.
+          let fine := fine && st'.stroke matches .none &&
+            (match st'.fill with
+             | .solid _ => true
+             | .gradient i _ => (st'.defs.defs.getD i default).oBB
+             | _ => false) && (shapeCmds16 nm attrs).isSome
+          let (cmdsO, st') := if fine then
+              (shapeCmds16 nm attrs, { st' with ctm := st'.ctm.mul (Mat.mk' 256 0 0 256 0 0) })
+            else (shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH st'.rootFontSize, st')
+          match cmdsO with
           | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none, none⟩)
           | none => pure ()
           if layered then nodes := nodes.push .groupEnd
@@ -3584,6 +3596,41 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
         else
           skip := 1
   return (nodes, budget)
+
+/-- T108: usvg's `fix_recursive_patterns` (`svgtree/parse.rs`), on the
+collected content instead of the attributes.  For each pattern `p` in
+document order, a content shape whose fill names `p` itself becomes `none`;
+one naming another pattern `l` instead cuts every shape in `l`'s *own*
+content that names `p` back.  Cut paint is `none`, never the `url()`
+fallback, and fill and stroke are done in two separate passes, as there.  So
+the first pattern of a mutual pair keeps its reference (`recursive-on-child`)
+and a self-reference paints nothing (`self-recursive`); `patternFuel` still
+bounds longer cycles.  usvg compares ids, not elements, hence `pt.ids`. -/
+def fixRecursivePatterns (pt : Pat.Defs) (pc : Array (Array Node)) : Array (Array Node) :=
+  let ids := pt.ids
+  let refId := fun (p : Paint) => match p with
+    | .pattern j => some (ids.getD j "")
+    | _ => none
+  let pass := fun (pc : Array (Array Node)) (get : Shape → Paint) (cut : Shape → Shape) => Id.run do
+    let mut pc := pc
+    for p in [0:pc.size] do
+      let pid := ids.getD p ""
+      if pid.isEmpty then continue
+      for k in [0:(pc.getD p #[]).size] do
+        let .shape s := (pc.getD p #[]).getD k .groupEnd | continue
+        let some lid := refId (get s) | continue
+        if lid == pid then
+          pc := pc.modify p (·.setIfInBounds k (.shape (cut s)))
+        else
+          -- `element_by_id`: the first pattern with that id.
+          let some l := pt.lookup lid | continue
+          for k2 in [0:(pc.getD l #[]).size] do
+            let .shape s2 := (pc.getD l #[]).getD k2 .groupEnd | continue
+            if refId (get s2) == some pid then
+              pc := pc.modify l (·.setIfInBounds k2 (.shape (cut s2)))
+    return pc
+  let pc := pass pc (·.style.fill) fun s => { s with style := { s.style with fill := .none } }
+  pass pc (·.style.stroke) fun s => { s with style := { s.style with stroke := .none } }
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
 `defs`), or children of the `clipPath` with this table index. -/
@@ -4959,9 +5006,13 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     { (default : Style) with defs := gradTable, patterns := patTable, pctRefSet := true, pctRefW := prW, pctRefH := prH }
   let mut patternContent : Array (Array Node) := #[]
   for raw in scan.patterns do
-    let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget
+    let i := patternContent.size
+    let fine := patTable.defs.any fun d =>
+      d.valid && d.contentSlot == i && d.contentOBB && d.viewBox.isNone
+    let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget fine
     textBudget := used
     patternContent := patternContent.push shs
+  patternContent := fixRecursivePatterns patTable patternContent
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,

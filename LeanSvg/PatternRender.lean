@@ -205,6 +205,17 @@ def opacityQ (o : Nat) : Nat :=
   if o ≥ Svg.opacityOne then Canvas.opGrid
   else (o * Canvas.opGrid * 2 / Svg.opacityOne + 1) / 2
 
+/-- `Render.hairCoverage` (`treat_as_hairline`), copied for the same reason
+as `opacityQ`. -/
+def hairCoverage (ctm : Mat) (w : Fx) : Option Int :=
+  let fastLen := fun (x y : Int) =>
+    let a := Fx.abs x
+    let b := Fx.abs y
+    if a < b then b + Int.ediv a 2 else a + Int.ediv b 2
+  let len0 := fastLen (Int.ediv (ctm.a * w) 256) (Int.ediv (ctm.b * w) 256)
+  let len1 := fastLen (Int.ediv (ctm.c * w) 256) (Int.ediv (ctm.d * w) 256)
+  if len0 ≤ 65536 && len1 ≤ 65536 then some (Int.ediv (len0 + len1) 2) else none
+
 /-- `Render.opacityF32`, copied for the same reason. -/
 def opacityF32 (o : Nat) : F32 :=
   if o ≥ Svg.opacityOne then F32.one else F32.ofRat o Svg.opacityOne
@@ -268,7 +279,11 @@ def build (doc : Svg.Doc) (fuel : Nat) (idx : Nat) (cmds : Array PathCmd) (ctm0 
   if pxW == 0 || pxH == 0 || pxW > maxTileDim || pxH > maxTileDim || pxW * pxH > maxTilePixels then
     .skip
   else
-  let bicubic := !(m.b == 0 && m.c == 0 && m.a > 0 && m.d > 0)
+  -- T108: a skew coefficient within 4/65536 of zero counts as zero.  A rotation undone by
+  -- the opposite one (`transform-and-patternTransform`: `rotate(-30)` on
+  -- the shape, `rotate(30)` as `patternTransform`) cancels exactly in
+  -- resvg's `f32` but leaves a unit or two in 16.16's rounded products.
+  let bicubic := !(m.b.natAbs ≤ 4 && m.c.natAbs ≤ 4 && m.a > 0 && m.d > 0)
   let contentMat : Mat := match res.viewBox with
     | some (vx, vy, vw, vh) => viewBoxMat vx vy vw vh res.alignX res.alignY res.slice res.alignNone
         wAbs hAbs
@@ -321,6 +336,20 @@ def build (doc : Svg.Doc) (fuel : Nat) (idx : Nat) (cmds : Array PathCmd) (ctm0 
       | _ =>
         if st.strokeWidth ≤ 0 then cv
         else
+          -- T108: a stroke at most one tile pixel wide is a hairline, as in
+          -- `Render.drawShape` (`treat_as_hairline`); outlining it instead
+          -- lost the coverage tiny-skia folds in at the tile's left edge.
+          match hairCoverage sctm st.strokeWidth with
+          | some cov16 =>
+            let a8 := match st.stroke with
+              | .solid c => Svg.opacityToU8 c.a st.strokeOpacity st.opacity
+              | _ => 255
+            let covScale := (Int.ediv (255 * Int.ediv cov16 256) 256).toNat
+            let dev := polys.map fun p => ({ p with pts := p.pts.map sctm.apply } : Poly)
+            match Raster.hairline pxW pxH dev st.cap a8 covScale 0 0 with
+            | some msk => paintWith cv st.stroke msk st.strokeOpacity
+            | none => cv
+          | none =>
           let ss : StrokeStyle := ⟨st.strokeWidth, st.cap, st.join, st.miterLimit⟩
           let outline := polys.foldl (fun out p => strokePoly ss p out) #[]
           let dev := outline.map fun p => p.map sctm.apply
