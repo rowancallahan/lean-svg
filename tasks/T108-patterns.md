@@ -135,3 +135,98 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Report
+
+### Implemented
+
+1. **Recursive pattern references** (`Svg.fixRecursivePatterns`): usvg's
+   `svgtree/parse.rs::fix_recursive_patterns`, applied to the collected pattern
+   content. For each pattern `p` in document order, a content shape whose fill
+   names `p` becomes `none`. A shape that names another pattern `l` instead
+   cuts every shape in `l`'s own content that names `p` back. The cut paint is
+   `none`, not the `url()` fallback. Fill and stroke run as separate passes,
+   ids are compared as in usvg, and the first pattern of a mutual pair keeps
+   its reference. `patternFuel` still bounds longer cycles.
+2. **Hairline strokes in pattern content** (`PatternRender.build`): a
+   content stroke at most one tile pixel wide now takes `Raster.hairline`, as
+   `Render.drawShape` does (`treat_as_hairline`). Before, it was outlined and
+   filled, which lost the coverage tiny-skia folds into column 0 at the tile's
+   left edge (191 vs 128). `hairCoverage` is copied from `Render.lean`, which
+   imports this module.
+3. **`patternContentUnits="objectBoundingBox"` precision**: if a resolved
+   pattern with oBB content units and no `viewBox` uses a raw pattern's
+   content, then that content's fill-only shapes (solid or oBB-gradient fill)
+   are lexed on the 16.16 grid (`shapeCmds16`) with a 1/256 ctm factor. This
+   is the same thing T49 does for mask content. Before, `0.1` at Fx's 1/256
+   was 0.1016, a quarter pixel off on a 160-unit box.
+4. **Sampling filter**: skew coefficients within 4/65536 of zero now count as
+   zero when choosing nearest vs bicubic. `rotate(-30)` on the shape and
+   `rotate(30)` as `patternTransform` cancel exactly in resvg's f32. In 16.16
+   they left a unit or two, so we blurred with bicubic where resvg samples
+   nearest.
+
+`patternTransform` still inherits along the href chain (T104), unchanged.
+
+### Numbers (resvg suite, direct route)
+
+| run | before | after |
+|---|---|---|
+| 200 px pass | 1567 | 1574 (+7, 0 pass→fail) |
+| 100 px (`--fast`) pass | 1543 | 1551 (+8, 0 pass→fail) |
+| wall time 200 px / 100 px | 17.15 s / 11.7 s | 17.39 s / 11.0 s |
+
+Target files, within-8 at 200 px:
+
+| file | before | after |
+|---|---|---|
+| pattern/nested-objectBoundingBox | 95.75 | 99.62 pass |
+| pattern/out-of-order-referencing | 98.91 | 100.00 pass |
+| pattern/recursive-on-child | 92.72 | 100.00 pass |
+| pattern/self-recursive-on-child | 91.22 | 99.60 pass |
+| pattern/self-recursive | 91.22 | 99.60 pass |
+| pattern/tiny-pattern-upscaled | 97.87 | 99.53 pass |
+| pattern/transform-and-patternTransform | 90.64 | 99.73 pass |
+| context/with-pattern-and-transform-in-use | 98.86 | 98.86 fail |
+| context/with-pattern-objectBoundingBox-in-use | 93.45 | 98.56 fail |
+
+Also moved: `patternContentUnits=objectBoundingBox` went from 99.13 to 100
+(already passing at 200 px), and at 100 px `text-child` went from fail to
+pass.
+
+Other checks: `lake build` gives no warnings. `check-theorems.sh` prints
+`theorems ok`. `run_tests.py` is 64/81; no score changed, and the new
+`108_pattern_recursive` passes (100%). `run_adversarial.py` is 171/171
+clean. `run_tiles.py` is 81/81 byte-identical.
+
+### Not fixed (cause, proposed fix, size)
+
+- **Both `painting/context/*-in-use` files: pattern-painted hairline
+  strokes under a transform that cancels.** `<use transform="rotate(45)">`
+  holds a `<g transform="rotate(-45)">`. Reduced case: a rect with
+  `stroke="url(#p)"` (an opaque pattern) inside `rotate(45)` · `rotate(-45)`.
+  resvg paints the hairline at about half alpha (67 and 60 on the two rows it
+  touches), but at the full 127 and 128 when there is no transform, or when
+  the paint is a solid colour or a gradient. We paint 127 and 128. So it is
+  something in tiny-skia's hairline path together with the pattern shader,
+  and probably with the bicubic choice, since the f32 matrix is not exactly
+  axis-aligned. I have not found where. Next step: trace `anti_hair_line` →
+  `blit_anti_h2` with a `RasterPipelineBlitter` for a pattern (`Repeat` +
+  bicubic) shader. Size unknown, probably small once found; it is in
+  `Render.drawShape`'s hairline branch, not in pattern code. The fill part of
+  `with-pattern-objectBoundingBox-in-use` is fixed by item 3 (93.4 → 98.6).
+- **General:** hairline strokes on rounded-rect corners differ in about 130
+  px against resvg with no pattern involved (`rect rx=20 stroke=darkblue`).
+  This is outside this task.
+- **Pattern content lexed at Fx under large upscales.**
+  `tiny-pattern-upscaled` now passes, but there is still a residual
+  one-subsample error at circle edges. The 16.16 lexing from item 3 would
+  remove it, but it is only exact when the tile matrix coefficients are
+  multiples of 1/256, because `Mat` is 16.16 and the 1/256 factor eats 8 bits.
+  So I did not turn it on for all pattern content. Fix: carry a per-shape
+  "fine" flag and apply the 1/256 after the full matrix when mapping points.
+  That touches `Svg.Shape` (shared), about 40 lines.
+
+No reference in `criteria.csv` looks wrong for these files.
