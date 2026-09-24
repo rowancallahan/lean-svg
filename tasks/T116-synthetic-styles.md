@@ -129,3 +129,87 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+`LeanSvg/Synth.lean` (new) plus small hooks in `Text.lean` / `Svg.lean`.
+
+- **When:** only for the T106 fonts (`FontSet` indices `FamilyMatch.first ..
+  count`), the glyph's own font index decides. Bold when the requested weight
+  ≥ 600 and that face's weight < 600; oblique when italic/oblique is requested
+  and the face is upright (Blink `FontPlatformData`: `setEmbolden`,
+  `setSkewX(-1/4)`). The suite's fonts (Noto Sans etc.) and `@font-face`
+  fonts never synthesise.
+- **Face pick:** italic text in a T106 family now picks its face by the
+  requested weight (`SpanProps.weight`/`italic`, new), so `Arial` bold italic
+  is Arimo Bold + skew (was Arimo Regular). Upright picks are unchanged.
+- **Oblique:** `x' = x − y/4` (y down) in the glyph's linear part, about the
+  glyph origin; shaped-glyph offsets are not skewed. Measured in this
+  container's Chromium (IPAGothic, DejaVu Serif at 200 px): slope 7.5 px / 30
+  px = 0.25, anchored at the baseline origin.
+- **Bold:** glyph outlines of a synthetic-bold cluster are also emitted as a
+  `Placed` with `boldSize`, drawn *under* the run as a stroke in the fill's
+  paint (miter 4, butt, no dash), width Skia's `kStdFakeBoldInterp`:
+  size/24 at ≤ 9 device px, size/32 at ≥ 36, linear between (device size from
+  the text's CTM scale). Measured in Chromium: symmetric outset, ≈ size/32
+  per full width at 100–200 px; advances unchanged.
+
+## Skipped / known limits
+
+- A stroked-only glyph is stroked along the original outline, not the
+  emboldened one (Chromium strokes the emboldened outline); the bold stroke
+  uses the fill paint, so with `fill="none"` there is no emboldening.
+- Semi-transparent fills darken where the bold stroke overlaps the fill (two
+  paints, not one path). A proper outline offset is the fix (~150 lines).
+- Fallback glyphs in a T106 run synthesise from their own face (e.g. DejaVu
+  Sans regular for bold); Chromium would pick the fallback family's real bold.
+
+## Report
+
+Verification (all run on this branch, after the change):
+
+- `lake build`: no errors, no new warnings. `check-theorems.sh`: `theorems ok`
+  (and `invariants ok`).
+- resvg suite, direct, fast (100 px) and default (200 px): 0 newly passing,
+  0 newly failing, and **every CSV row identical** (exact/within/mean/max) at
+  both widths: 1543/1679 pass at 100 px, unchanged. The suite path does not
+  change.
+- Timing: fast 10.5 s → 10.5 s, 200 px 16.9 s → 16.5 s, realworld 307 s →
+  302 s.
+- `run_adversarial.py`: 171/171 clean. `run_tiles.py`: 81/81 byte-identical.
+- Real-world vs Chromium (`--ref chrome`, direct): 260/848 pass before and
+  after. Only one file's numbers change: `plantuml/class_model.svg` (sans-serif
+  italic → Arimo + skew) within-8 87.25 → 87.19, still failing; Chromium here
+  draws it with the installed real Liberation Sans Italic, which we don't
+  embed. No matplotlib/Graphviz/Vega file in the corpus asks for a face we
+  lack: matplotlib's italic is DejaVu Sans Oblique (embedded), Graphviz's
+  `Times,serif` italic is Tinos Italic (embedded), bold faces exist for DejaVu
+  Sans/Arimo/Tinos.
+- `tests/run_tests.py` (resvg reference): 63 pass before and after; new
+  `116_synthetic_styles` fails vs resvg (90.08; resvg never synthesises and
+  lacks these fonts). **One score drops:** `106_font_families` 90.81 → 90.50.
+  Its own comment says resvg's reference has none of these families; the
+  change is the "Times bold italic" line (Tinos Italic, now + fake bold).
+  Against Chromium the two local files score (within-8, composited on white):
+
+  | file | before | after |
+  |---|---|---|
+  | 106_font_families | 92.14 | 92.02 |
+  | 116_synthetic_styles | 89.08 | 89.50 |
+
+  The 106 drop happens because Chromium in this container has a real
+  Liberation Serif **Bold Italic**, with wider advances than Tinos Italic;
+  synthetic bold keeps the italic advances, so the extra ink lands off the
+  reference glyphs. That is the rule working as specified: Chromium would
+  synthesise the same way on a system without the Bold Italic face. The fix
+  is to embed Tinos Bold Italic (Apache-2.0, ~400 KB), which T106 skipped
+  for size. Not done here: it's a font decision, not synthesis.
+- References: I don't think any `criteria.csv` reference is wrong. Chromium
+  references for real-world files are rendered with this container's fonts,
+  which include real faces we synthesise (DejaVu Serif Bold, DejaVu Sans Mono
+  Bold, Liberation Mono Bold, Liberation Sans/Serif all styles) and lack faces
+  we embed (DejaVu Sans Oblique: Chromium synthesises it here). Scores for
+  styled text against those references measure face availability, not
+  synthesis.

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="160" viewBox="0 0 300 160">
+  <!-- T112: a kerning pair still kerns across default-ignorables between
+       its characters (U+200B, U+2060, U+00AD), as HarfBuzz does -->
+  <rect width="300" height="160" fill="white"/>
+  <g font-family="Noto Sans" font-size="40">
+    <text x="10" y="45">A&#x200B;V T&#x2060;o</text>
+    <text x="10" y="95">W&#xAD;a Y&#x200B;&#x200B;o</text>
+    <text x="10" y="145">AV To Wa Yo</text>
+  </g>
+</svg>

@@ -84,6 +84,17 @@ Font subsets in tests/svg/105_font_face.svg (T105) — WOFF 2.0/WOFF/TrueType
   subsets of the resvg test suite's Noto Serif, Noto Sans and Noto Sans Bold,
   SIL OFL 1.1 as above.
 
+Real-world test corpus — tests/corpora/realworld/ (test inputs only, not in
+  the binary; per-file source and licence in SOURCES.csv, licence texts in
+  tests/corpora/realworld/LICENSES/):
+  matplotlib test-suite baseline SVGs (mpl-tests/) — Matplotlib License.
+    Copyright (c) 2012- Matplotlib Development Team; 2002-2011 John D. Hunter.
+  janosh/diagrams (web-tikz/) — MIT. Copyright (c) 2021 Janosh Riebesell.
+  Vega-Lite examples (web-vega/) — BSD-3-Clause. Copyright (c) 2015,
+    University of Washington Interactive Data Lab.
+  TikZ SVGs embed glyphs of the AMS Type 1 Computer Modern / AMS fonts
+    (SIL OFL 1.1, fonts embedded in documents).
+
 Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
   README.md. Apache-2.0, authored for this project.
 

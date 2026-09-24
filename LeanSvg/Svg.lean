@@ -114,6 +114,10 @@ structure Style where
   `treat_as_hairline` also refuses when `!paint.anti_alias`). Inherited;
   `auto`/`geometricPrecision` (the default) turn antialiasing back on. -/
   crisp : Bool := false
+  /-- `text-rendering: optimizeSpeed`: glyphs and decorations of a `<text>`
+  are drawn crisp (usvg's `text/flatten.rs::resolve_rendering_mode`). Read
+  from the `<text>` element's style only; inherited. -/
+  textCrisp : Bool := false
   /-- The CSS `color` property: inherited, defaults to black, and is what
   `fill`/`stroke: currentColor` resolve to (`interpret`'s `applyEffective`
   applies `color` before any other property so the resolution sees the
@@ -2308,6 +2312,12 @@ def applyProp (st : Style) (name : String) (v : ByteArray) : Style :=
     let t := trim v
     if eqAscii t "hidden" || eqAscii t "collapse" then { st with visible := false }
     else if eqAscii t "visible" then { st with visible := true } else st
+  | "text-rendering" =>
+    let t := trim v
+    if eqAscii t "optimizeSpeed" then { st with textCrisp := true }
+    else if eqAscii t "auto" || eqAscii t "optimizeLegibility" || eqAscii t "geometricPrecision" then
+      { st with textCrisp := false }
+    else st
   | "shape-rendering" =>
     let t := trim v
     if eqAscii t "crispEdges" || eqAscii t "optimizeSpeed" then { st with crisp := true }
@@ -2994,6 +3004,8 @@ def baselineShiftDelta (attrs : Array Xml.Attr) (fontSize : Fx) : Fx × Bool × 
 def spanPropsOf (st : Style) (bpx : Fx) (bsub bsup : Nat) : Text.SpanProps :=
   { face := Text.pickFace st.fontWeight st.fontItalic,
     stretch := st.fontStretch,
+    weight := st.fontWeight,
+    italic := st.fontItalic,
     smallCaps := st.fontSmallCaps,
     -- T105: a document family picks its face by weight and style
     family := if st.fontFamily < FontSet.count then st.fontFamily
@@ -3338,13 +3350,14 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
           layStack := layStack.push (lc.push owners.size)
           owners := owners.push st
         else layStack := layStack.push lc
-        -- usvg's `is_visible_element`: `display:none` drops a span's glyphs
-        -- while its characters keep their slots in the position lists.
+        -- usvg's `is_visible_element`: `display:none` or failed conditional
+        -- processing (`systemLanguage`, ...) drops a span's glyphs while its
+        -- characters keep their slots in the position lists.
         let (dpx, dsub, dsup) := baselineShiftDelta attrs st.fontSize
         let (bpx, bsub, bsup) := bsStack.back?.getD (0, 0, 0)
         bsStack := bsStack.push
           (bpx + dpx, bsub + (if dsub then 1 else 0), bsup + (if dsup then 1 else 0))
-        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs
+        let rend := (rendStack.back?.getD true) && !isDisplayNone attrs && passesConditions attrs
         if nm == "textPath" then
           -- usvg reads no `x`/`y`/`dx`/`dy` from a `textPath`, only `rotate`
           let ep := elemPosOf st attrs
@@ -3398,7 +3411,7 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
             (Text.Ev.text targetText st.spacePreserve selfIdx
               (decorSizes styles
                 { sp with underlineIdx, overlineIdx, throughIdx })
-              ((rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0))
+              ((rendStack.back?.getD true) && !isDisplayNone attrs && passesConditions attrs && st.fontSize > 0))
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize > 0 && !st.fontAvailable then
             warns := Warn.add warns (Warn.missingFont st.fontFamilyRaw)
           if (rendStack.back?.getD true) && !isDisplayNone attrs && st.fontSize < 0 then
@@ -3457,14 +3470,19 @@ def textShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → S
   for p in placed do
     let st := styles.getD p.styleIdx textStyle
     if st.visible then
-      -- `text-rendering`, not `shape-rendering`, decides glyph antialiasing
-      -- (usvg's `text/flatten.rs::resolve_rendering_mode`); we do not support
-      -- that property, so glyphs stay antialiased regardless of an ambient
-      -- `shape-rendering` (`painting/shape-rendering/optimizeSpeed-on-text.svg`).
+      -- `text-rendering` of the `<text>` element, not `shape-rendering`, decides
+      -- glyph antialiasing (usvg's `text/flatten.rs::resolve_rendering_mode`;
+      -- `painting/shape-rendering/optimizeSpeed-on-text.svg`).
       let st := if outK == 1 then st else
         { st with strokeWidth := st.strokeWidth * outK, dashes := st.dashes.map (· * outK),
                   dashOffset := st.dashOffset * outK }
-      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := false }, false, none, none⟩
+      -- T116: a synthetic-bold outline is stroked in the fill's paint (Skia's
+      -- fake bold), under the run's own fill and stroke
+      let st := if p.boldSize == 0 then st else
+        { st with stroke := st.fill, strokeOpacity := st.fillOpacity, strokeCtx := st.fillCtx,
+                  strokeWidth := Synth.boldWidth p.boldSize sc * outK, fill := .none, fillCtx := none,
+                  cap := .butt, join := .miter, miterLimit := 1024, dashes := #[], dashOffset := 0 }
+      out := out.push ⟨p.cmds, { st with evenOdd := false, ctm := outCtm, crisp := textStyle.textCrisp }, false, none, none⟩
       chains := chains.push (chainOf.getD p.styleIdx #[])
   -- T81: `mbox` is usvg's font-metric bounding box (`Text.layout`'s doc
   -- comment), not the glyph outlines' -- what a `filter`/`mask`/
@@ -3491,7 +3509,7 @@ for a nested `<pattern>` is correct regardless — it is not a drawable child,
 and it still gets its own top-level slot and content array from the loop
 that calls this function once per raw index). -/
 def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.ElemInfo → Style)
-    (events : Array Xml.Event) (idx : Nat) (rootStyle : Style) (budget : Nat) :
+    (events : Array Xml.Event) (idx : Nat) (rootStyle : Style) (budget : Nat) (fine : Bool := false) :
     Array Node × Nat := Id.run do
   let mut nodes : Array Node := #[]
   let mut stStack : Array Style := #[rootStyle]
@@ -3580,7 +3598,19 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
           if layered then
             nodes := nodes.push (.groupBegin { opacity := st'.ownOpacity, blend := st'.blend, isolate := st'.isolate })
             layerDepth := layerDepth + 1
-          match shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH st'.rootFontSize with
+          -- T108: under `patternContentUnits="objectBoundingBox"` (`fine`) a
+          -- fill-only shape whose paint does not live in user units is lexed
+          -- on the 16.16 grid, as `objectBoundingBox` mask content is (T49):
+          -- `0.1` at `Fx`'s 1/256 is a quarter pixel off on a 160-unit box.
+          let fine := fine && st'.stroke matches .none &&
+            (match st'.fill with
+             | .solid _ => true
+             | .gradient i _ => (st'.defs.defs.getD i default).oBB
+             | _ => false) && (shapeCmds16 nm attrs).isSome
+          let (cmdsO, st') := if fine then
+              (shapeCmds16 nm attrs, { st' with ctm := st'.ctm.mul (Mat.mk' 256 0 0 256 0 0) })
+            else (shapeCmds nm attrs st'.fontSize st'.pctRefW st'.pctRefH st'.rootFontSize, st')
+          match cmdsO with
           | some cmds => if st'.visible && cmds.size > 0 then nodes := nodes.push (.shape ⟨cmds, st', false, none, none⟩)
           | none => pure ()
           if layered then nodes := nodes.push .groupEnd
@@ -3588,6 +3618,41 @@ def patternContentShapes (applyEff : Style → Array Xml.Attr → Array Css.Elem
         else
           skip := 1
   return (nodes, budget)
+
+/-- T108: usvg's `fix_recursive_patterns` (`svgtree/parse.rs`), on the
+collected content instead of the attributes.  For each pattern `p` in
+document order, a content shape whose fill names `p` itself becomes `none`;
+one naming another pattern `l` instead cuts every shape in `l`'s *own*
+content that names `p` back.  Cut paint is `none`, never the `url()`
+fallback, and fill and stroke are done in two separate passes, as there.  So
+the first pattern of a mutual pair keeps its reference (`recursive-on-child`)
+and a self-reference paints nothing (`self-recursive`); `patternFuel` still
+bounds longer cycles.  usvg compares ids, not elements, hence `pt.ids`. -/
+def fixRecursivePatterns (pt : Pat.Defs) (pc : Array (Array Node)) : Array (Array Node) :=
+  let ids := pt.ids
+  let refId := fun (p : Paint) => match p with
+    | .pattern j => some (ids.getD j "")
+    | _ => none
+  let pass := fun (pc : Array (Array Node)) (get : Shape → Paint) (cut : Shape → Shape) => Id.run do
+    let mut pc := pc
+    for p in [0:pc.size] do
+      let pid := ids.getD p ""
+      if pid.isEmpty then continue
+      for k in [0:(pc.getD p #[]).size] do
+        let .shape s := (pc.getD p #[]).getD k .groupEnd | continue
+        let some lid := refId (get s) | continue
+        if lid == pid then
+          pc := pc.modify p (·.setIfInBounds k (.shape (cut s)))
+        else
+          -- `element_by_id`: the first pattern with that id.
+          let some l := pt.lookup lid | continue
+          for k2 in [0:(pc.getD l #[]).size] do
+            let .shape s2 := (pc.getD l #[]).getD k2 .groupEnd | continue
+            if refId (get s2) == some pid then
+              pc := pc.modify l (·.setIfInBounds k2 (.shape (cut s2)))
+    return pc
+  let pc := pass pc (·.style.fill) fun s => { s with style := { s.style with fill := .none } }
+  pass pc (·.style.stroke) fun s => { s with style := { s.style with stroke := .none } }
 
 /-- What the shapes under an element become (T20): rendered, nothing (under
 `defs`), or children of the `clipPath` with this table index. -/
@@ -4520,6 +4585,23 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
               | none => pure ()
               match pf.mode with
               | .render =>
+                -- T109: usvg resolves a text run's paint server against the
+                -- whole `<text>`'s font-metric box (`text_bbox` in
+                -- `paint_server.rs`), not the run's own glyph outlines; a
+                -- `ctxUses` slot carries that box and the text's `ctm` to
+                -- `Render`, as `Marker.expand` does for a shape's own box.
+                -- A paint already tied to a `use` (`context-*`) keeps its slot.
+                let server := fun (p : Paint) (ctx : Option Nat) => ctx.isNone && match p with
+                  | .gradient .. | .pattern _ => true
+                  | _ => false
+                let tslot := ctxUses.size
+                let needT := shs.any fun s =>
+                  server s.style.fill s.style.fillCtx || server s.style.stroke s.style.strokeCtx
+                if needT then ctxUses := ctxUses.push ⟨st.ctm, mbox⟩
+                let shs := if !needT then shs else shs.map fun s =>
+                  { s with style := { s.style with
+                      fillCtx := if server s.style.fill s.style.fillCtx then some tslot else s.style.fillCtx,
+                      strokeCtx := if server s.style.stroke s.style.strokeCtx then some tslot else s.style.strokeCtx } }
                 -- T90: each run inside its spans' layers (`SpanLayers`).
                 let mut opened : Array (Nat × Bool) := #[]
                 let base := layerDepth + (if layered then 1 else 0)
@@ -4946,9 +5028,13 @@ def interpretWith (cfg : SubCfg) (events : Array Xml.Event) : Except String Doc 
     { (default : Style) with defs := gradTable, patterns := patTable, pctRefSet := true, pctRefW := prW, pctRefH := prH }
   let mut patternContent : Array (Array Node) := #[]
   for raw in scan.patterns do
-    let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget
+    let i := patternContent.size
+    let fine := patTable.defs.any fun d =>
+      d.valid && d.contentSlot == i && d.contentOBB && d.viewBox.isNone
+    let (shs, used) := patternContentShapes applyEffective events raw.eventIdx patRootStyle textBudget fine
     textBudget := used
     patternContent := patternContent.push shs
+  patternContent := fixRecursivePatterns patTable patternContent
   match root with
   | none => throw "no <svg> root element"
   | some r => return ⟨r, nodes, clipsResolved, usesResolved, masksFixed, maskUsesFixed, markerTable,

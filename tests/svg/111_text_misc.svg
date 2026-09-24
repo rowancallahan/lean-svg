@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" font-family="Noto Sans" font-size="48">
+  <!-- T111: text-rendering=optimizeSpeed (crisp glyphs and decoration) and
+       objectBoundingBox paint on text resolved against the font-metric box -->
+  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="red"/>
+    <stop offset="0.3" stop-color="green"/>
+  </linearGradient>
+  <radialGradient id="r">
+    <stop offset="0" stop-color="#1d3557"/>
+    <stop offset="1" stop-color="#e63946"/>
+  </radialGradient>
+  <g text-rendering="optimizeSpeed">
+    <text x="20" y="60" transform="rotate(3)" text-decoration="underline">Crisp text</text>
+  </g>
+  <text x="20" y="140" fill="url(#v)">Text <tspan font-size="30">small</tspan></text>
+  <text x="20" y="220" fill="url(#r)" stroke="url(#v)" stroke-width="2" text-rendering="geometricPrecision">Radial</text>
+</svg>

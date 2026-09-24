@@ -2,6 +2,7 @@ import LeanSvg.Effect
 import LeanSvg.Bytes
 import LeanSvg.Fixed
 import LeanSvg.Geom
+import LeanSvg.DashSeg
 import LeanSvg.Font
 import LeanSvg.Baseline
 import LeanSvg.Raster
@@ -11,6 +12,7 @@ import LeanSvg.Xml
 import LeanSvg.Css
 import LeanSvg.TextPath
 import LeanSvg.VertOrient
+import LeanSvg.Synth
 import LeanSvg.Text
 import LeanSvg.Viewport
 import LeanSvg.Use

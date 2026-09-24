@@ -1,4 +1,5 @@
 import LeanSvg.Mask
+import LeanSvg.DashSeg
 import LeanSvg.Clip
 import LeanSvg.FilterApply
 import LeanSvg.FilterFrame
@@ -325,7 +326,7 @@ def drawShape (rootMat : Mat) (tgt : Target) (doc : Svg.Doc) (cv : Canvas) (cach
         -- `stroke-dasharray` cuts the flattened subpaths into the runs that are
         -- actually inked, before stroking, so every dash end gets a cap.  The
         -- fill above uses the undashed polylines; dashes are a stroke property.
-        let polys := if st.dashes.isEmpty then polys else dashPolys st.dashes st.dashOffset polys
+        let polys := if st.dashes.isEmpty then polys else dashPath st.dashes st.dashOffset ctm s.cmds
         -- `treat_as_hairline` refuses whenever `!paint.anti_alias`, so a crisp
         -- stroke never takes the hairline shortcut, however thin.
         match (if st.crisp then none else hairCoverage ctm st.strokeWidth) with

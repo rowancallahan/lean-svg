@@ -32,7 +32,7 @@ SC"/"Noto Sans KR" and do not use "Source".
 | NotoSansThin | Noto Sans Thin | 2.000 | Latin, Greek, Cyrillic | 2793 | 273,578 | 366,626 | LICENSE-OFL.txt |
 | NotoSansLight | Noto Sans Light | 2.000 | Latin, Greek, Cyrillic | 2793 | 269,894 | 361,714 | LICENSE-OFL.txt |
 | NotoSansBlack | Noto Sans Black | 2.000 | Latin, Greek, Cyrillic | 2793 | 274,404 | 367,730 | LICENSE-OFL.txt |
-| DejaVuSans | DejaVu Sans Book | 2.37 | Latin, Greek, Cyrillic, symbols, maths | 3074 | 284,426 | 381,352 | LICENSE-DejaVu.txt |
+| DejaVuSans | DejaVu Sans Book | 2.37 | Latin, Greek, Cyrillic, symbols, maths, emoticons | 3138 | 303,681 | 407,068 | LICENSE-DejaVu.txt |
 | DejaVuSansBold | DejaVu Sans Bold | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 178,435 | 239,610 | LICENSE-DejaVu.txt |
 | DejaVuSansOblique | DejaVu Sans Oblique | 2.37 | Latin, Greek, Cyrillic, symbols | 2424 | 181,794 | 244,099 | LICENSE-DejaVu.txt |
 | DejaVuSansMono | DejaVu Sans Mono Book | 2.37 | Latin, Greek, Cyrillic, symbols | 2032 | 131,338 | 177,385 | LICENSE-DejaVu.txt |
@@ -51,7 +51,7 @@ SC"/"Noto Sans KR" and do not use "Source".
 | CMUSansSerif | CMU Sans Serif Medium | 0.7.0 | Latin, Greek, Cyrillic | 889 | 80,664 | 109,603 | LICENSE-OFL-CMU.txt |
 | CMUTypewriter | CMU Typewriter Text Regular | 0.7.0 | Latin, Greek, Cyrillic | 877 | 106,030 | 143,461 | LICENSE-OFL-CMU.txt |
 | NotoSansExtraCondensed | Noto Sans ExtraCondensed | 2.000 | Latin, Greek, Cyrillic | 2793 | 266,481 | 356,958 | LICENSE-OFL.txt |
-| **Total** | | | | | **24,004,170** | **32,147,849** | |
+| **Total** | | | | | **24,023,425** | **32,173,565** | |
 
 Sources (all `glyf` TrueType outlines):
 
@@ -131,7 +131,8 @@ Chromium on Linux does):
   https://github.com/dejavu-fonts/dejavu-fonts, release
   `dejavu-fonts-ttf-2.37.tar.bz2`.  DejaVu Sans keeps symbols, arrows, maths
   operators and mathematical alphanumerics, being the first fallback of every
-  T106 family; the other faces keep text ranges only.
+  T106 family, and (T114) the Emoticons block U+1F600-1F64F, which matplotlib
+  draws from it; the other faces keep text ranges only.
 - **Arimo, Tinos, Cousine** in place of Liberation Sans/Serif/Mono: the
   Liberation 2.x downloads (GitHub release assets, pagure) were refused by
   this session's network policy, and Liberation 2.x is built from these
