@@ -136,3 +136,91 @@ commits and push to your assigned branch. **Do not open a pull request, do not
 merge, do not push to any other branch.** If you run out of time, push what
 is verified-clean and document what remains. Aim to finish within a few
 hours; partial but regression-free beats complete but risky.
+
+---
+
+## Spec implemented
+
+- **`font-stretch`** (`Svg.parseFontStretch`, `Style.fontStretch`, width
+  class 1–9): exactly usvg 0.48.1's `conv_font_stretch` — the nine keywords;
+  `narrower` = `condensed` and `wider` = `expanded` (absolute, as usvg does,
+  not relative to the parent); `inherit` keeps the parent's value (usvg's
+  svgtree `resolve_inherit`); anything else, **percentages included**, is
+  `normal` (usvg's `_ => Normal`; Chromium would map `62.5%` to
+  extra-condensed, usvg does not). The CSS `font` shorthand resets stretch to
+  normal and then takes a stretch keyword it names.
+- **Matching**: `FontSet.styles` is now `(weight, italic, stretch)`;
+  `FamilyMatch.matchStretch` is fontdb's `find_best_match` step 4a (exact,
+  else for ≤ normal nearest narrower then nearest wider, above normal the
+  reverse); `FamilyMatch.pick` filters by stretch before style and weight.
+  `Text.baseFont` takes the span's stretch (`SpanProps.stretch`) and routes
+  Noto Sans through `pick` only when stretch ≠ normal, so every normal-stretch
+  path is unchanged. Generic families untouched.
+- **Font**: Noto Sans ExtraCondensed 2.000 (the suite's
+  `NotoSans-ExtraCondensed.ttf`; typographic family "Noto Sans", width class
+  2, OFL 1.1, same Google copyright as the other Noto Sans faces, licence
+  `LeanSvg/Fonts/LICENSE-OFL.txt`), appended last to `FontSet` (index 34) so
+  every existing fallback order is unchanged. Module 356,958 bytes of Lean
+  source, 266,481 bytes of font. Binary 47.1 MB (< 75 MB).
+- `tests/svg/118_font_stretch.svg`: keywords, nearest-stretch, inherit,
+  stretch over bold italic, expanded → normal, shorthand, percentage.
+
+## Skipped, and why
+
+- **Source Sans Pro not embedded; `suiteOnlyFamilies` unchanged (items 1a
+  and 3).** Its licence (`fonts/SourceSansPro-LICENSE-OFL.md`): "Copyright
+  2010-2018 Adobe … with Reserved Font Name 'Source'". OFL 1.1 defines a
+  Modified Version as "any derivative made by adding to, deleting, or
+  substituting … any of the components of the Original Version, by changing
+  formats or by porting". Subsetting deletes glyphs/hinting and the Lean
+  module changes the format (and reorders tables), so what we would embed is a
+  Modified Version, and §3 says it "may [not] use the Reserved Font Name(s)
+  unless explicit written permission is granted". "Source Sans Pro" contains
+  the RFN, so embedding it under that name needs Adobe's permission. The task
+  says to report before embedding under another name: **Rowan to decide**.
+  Options: (a) embed under a non-RFN name (e.g. "Adobe Sans Subset") and keep
+  an alias `"source sans pro"` → that module in `FamilyMatch.aliases` (the
+  alias is a lookup key, not the font's primary name — whether that still
+  counts as "using" the RFN is the question for Rowan); (b) Source Sans 3
+  carries the same RFN, so it does not help; (c) leave as is. Size if
+  embedded: ~290 KB Lean source (T110). Fix size once decided: ~20 lines +
+  generated module, ~30 min.
+- `LeanSvg/Fonts/README.md` table **Total** row not updated (time); add
+  266,481 / 356,958 to it.
+- `tests/check_shape.py`'s `NOTO_SANS` list not extended to the new face.
+- Real-world corpus vs Chromium not run (time). No real-world file should
+  move: only a non-normal `font-stretch` changes any path.
+
+## Report
+
+Baseline b570a42 (branch start), after `467ceaf` + docs.
+
+- `lake build`: clean, no new warnings. `check-theorems.sh`: `invariants ok`,
+  `theorems ok`. `run_adversarial.py`: 171/171 clean.
+- resvg suite, fast (100 px): pass 1548 → **1551**; 3 fail → pass, **0 pass →
+  fail**, no other file moved > 0.1 points.
+- resvg suite, 200 px: pass 1572 → **1575**; 3 fail → pass, **0 pass → fail**.
+
+| target | 200 px within-8 before | after |
+|---|---|---|
+| text/font-stretch/extra-condensed | 97.395 | 99.985 (pass) |
+| text/font-stretch/inherit | 97.395 | 99.985 (pass) |
+| text/font-stretch/narrower | 97.395 | 99.985 (pass) |
+| text/font-family/source-sans-pro | fail | unchanged (not embedded, see above) |
+| text/font-family/font-list | fail | unchanged (not embedded, see above) |
+
+- Timing: fast pass 11.4 s → 11.7 s wall. The 200 px after-run (25.8 s vs
+  18.4 s) ran concurrently with the theorem and adversarial checks, so it is
+  not a valid comparison; re-time it alone. Nothing on a hot path changed
+  (one extra `Nat` compare per span in `baseFont`).
+- `run_tests.py`: every existing file's score identical to baseline (63/80
+  pass before, 63/81 after). **The new `118_font_stretch.svg` fails: 97.19%
+  within-8 vs resvg.** Not investigated (session ended). Likely suspects, in
+  order: the `font: condensed 28px Noto Sans` shorthand line (our
+  `fontShorthand` may not skip a leading stretch keyword before the size, or
+  usvg's `FontShorthand` parse differs), then the `ultra-condensed` /
+  `semi-condensed` lines. Next step: render each line alone against resvg
+  (`resvg --skip-system-fonts --use-fonts-dir tests/corpora/resvg-test-suite/fonts`),
+  fix ours or drop the line that is outside usvg's behaviour; ~30 min.
+- **Not run:** `run_tiles.py`, real-world corpus vs Chromium. The integrator
+  should run both.
