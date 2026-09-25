@@ -42,22 +42,23 @@ All three SVGs are this project's own artwork, Apache-2.0.
 ### Real-world charts
 
 Three charts from the real-world test corpus, rendered by lean-svg at 1000 px
-on a white background (`lean-svg in.svg out.png --width 1000 --background white`;
-the PNGs were then recompressed losslessly).
+on a white background (`lean-svg in.svg out.png --width 1000 --background white`)
+and shown 500 px wide, about one image pixel per screen pixel on a 2x display.
+The PNGs were recompressed losslessly.
 
 **Latent Dirichlet allocation plate diagram** (TikZ with embedded Computer Modern fonts,
 `tikz-fonts/bayesnet_plate.svg`)
 
-![LDA plate diagram rendered by lean-svg](docs/readme/bayesnet_plate.png)
+<img src="docs/readme/bayesnet_plate.png" width="500" alt="LDA plate diagram rendered by lean-svg">
 
 **Burrows–Wheeler transform** (TikZ, `web-tikz/burrows-wheeler-transform.svg`,
 from [janosh/diagrams](https://github.com/janosh/diagrams), MIT)
 
-![Burrows-Wheeler transform rendered by lean-svg](docs/readme/burrows-wheeler-transform.png)
+<img src="docs/readme/burrows-wheeler-transform.png" width="500" alt="Burrows-Wheeler transform rendered by lean-svg">
 
-**Posterior corner plot** (matplotlib with mathtext labels, `matplotlib/corner_plot.svg`)
+**3D wireframe surface** (matplotlib mplot3d, `matplotlib/wireframe_3d.svg`)
 
-![corner plot rendered by lean-svg](docs/readme/corner_plot.png)
+<img src="docs/readme/wireframe_3d.png" width="500" alt="3D wireframe surface rendered by lean-svg">
 
 ## Generated Readme
 
