@@ -2,8 +2,8 @@
 
 Date: 2026-09-24. Scope: everything third-party that this repository **commits**
 or **compiles into the binary**. lean-svg itself is Apache-2.0 (`LICENSE`); the
-credits that travel with any redistribution are in `NOTICE` and in README
-"Licensing and credits".
+credits that travel with any redistribution are in `NOTICE` and in
+`LICENSING.md`.
 
 How this was checked:
 - each licence file here is a byte-for-byte copy of a pinned upstream file,
