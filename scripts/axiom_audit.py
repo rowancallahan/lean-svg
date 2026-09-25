@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """Axiom audit for the proof boundary (T43/T43b).
 
-Discovers every `theorem` under `proofs/*.lean` and
-`LeanSvg/Effect.lean` by scanning the source -- not from a hand-maintained
-list, so a new theorem cannot silently dodge the audit -- then elaborates a
-`#print axioms` for each and checks the result:
-
-* Theorems in `LeanSvg/Effect.lean` (the six effect-confinement theorems)
-  must depend on exactly `[propext]`.
-* Theorems in `proofs/*.lean` may depend on any subset of the standard three
-  axioms (`propext`, `Classical.choice`, `Quot.sound`) and nothing else.
-
-Either way, `sorryAx` or any other axiom fails the audit, as does a theorem
-that fails to elaborate at all.
+Discovers every `theorem` in `LeanSvg/Cli.lean` (the command-line
+theorems) and under `proofs/*.lean` by scanning the source -- not from a
+hand-maintained list, so a new theorem cannot silently dodge the audit --
+then elaborates a `#print axioms` for each and checks that it depends on a
+subset of the standard three axioms (`propext`, `Classical.choice`,
+`Quot.sound`) and nothing else.  `sorryAx` or any other axiom fails the
+audit, as does a theorem that fails to elaborate at all.
 """
 import re
 import subprocess
@@ -73,11 +68,12 @@ def run_lean(source: str) -> tuple[int, str, str]:
         tmp.unlink()
 
 
-def audit(names: list[str], allowed: set[str], prelude: str, label: str,
-          exact: bool) -> None:
+STANDARD = {"propext", "Classical.choice", "Quot.sound"}
+
+
+def audit(names: list[str], prelude: str, label: str) -> None:
     """Elaborate `prelude` followed by a `#print axioms` for each name, then
-    check every reported axiom set is within (`exact=False`) or equal to
-    (`exact=True`) `allowed`."""
+    check every reported axiom set is within `STANDARD`."""
     assert names, f"{label}: no theorems found -- audit would check nothing"
     source = prelude + "\n" + "\n".join(f"#print axioms {n}" for n in names) + "\n"
     code, out, err = run_lean(source)
@@ -98,21 +94,17 @@ def audit(names: list[str], allowed: set[str], prelude: str, label: str,
     assert not missing, f"FAIL [{label}]: no #print axioms output for {sorted(missing)}"
     for name in names:
         axioms = seen[name]
-        ok = axioms == allowed if exact else axioms <= allowed
-        if not ok:
+        if not axioms <= STANDARD:
             sys.exit(
                 f"FAIL [{label}]: '{name}' depends on axioms {sorted(axioms)}, "
-                f"{'expected exactly' if exact else 'allowed only a subset of'} "
-                f"{sorted(allowed)}"
+                f"allowed only a subset of {sorted(STANDARD)}"
             )
     print(f"-- {label}: {len(names)} theorem(s) ok")
 
 
 def main() -> None:
-    effect_file = REPO / "LeanSvg" / "Effect.lean"
-    effect_names = theorems_in(effect_file)
-    audit(effect_names, {"propext"}, "import LeanSvg", str(effect_file.relative_to(REPO)),
-          exact=True)
+    cli_file = REPO / "LeanSvg" / "Cli.lean"
+    audit(theorems_in(cli_file), "import LeanSvg", str(cli_file.relative_to(REPO)))
 
     proofs_dir = REPO / "proofs"
     found_proof_theorem = False
@@ -121,13 +113,7 @@ def main() -> None:
         if not names:
             continue
         found_proof_theorem = True
-        audit(
-            names,
-            {"propext", "Classical.choice", "Quot.sound"},
-            path.read_text(),
-            str(path.relative_to(REPO)),
-            exact=False,
-        )
+        audit(names, path.read_text(), str(path.relative_to(REPO)))
     assert found_proof_theorem, "no theorem found under proofs/ -- check the glob"
 
     print("axioms ok")

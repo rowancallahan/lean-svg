@@ -1022,8 +1022,8 @@ The document window `clipMask` restricts to is shifted by the same `y0`, so a
 band of a tile that hangs off the document clips like that part of the tile.
 
 `Task.spawn`/`Task.get` are pure (`Task.get (Task.spawn f) = f ()` holds by
-`rfl`), so this is a pure function and nothing about `render`'s type, its
-totality or `Effect.lean` changes.  Bands are collected in order and the first
+`rfl`), so this is a pure function and nothing about `render`'s type or its
+totality changes.  Bands are collected in order and the first
 error wins, so the message does not depend on which task finished first. -/
 def renderBands (opts : Options) (doc : Svg.Doc) (w h k : Nat) :
     Except String ByteArray := do

@@ -1,4 +1,4 @@
-import LeanSvg.Effect
+import LeanSvg.Cli
 import LeanSvg.Bytes
 import LeanSvg.Fixed
 import LeanSvg.Geom
