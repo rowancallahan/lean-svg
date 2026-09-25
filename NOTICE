@@ -117,8 +117,12 @@ Real-world test corpus — tests/corpora/realworld/ (test inputs only, not in
     licenses/corpora/vega-lite-LICENSE.txt, from
     https://raw.githubusercontent.com/vega/vega-lite/
     831e308cf9feba791db0c279dea5f7983ca98445/LICENSE.
-  TikZ SVGs embed glyphs of the AMS Type 1 Computer Modern / AMS fonts
-    (SIL OFL 1.1, fonts embedded in documents).
+  TikZ SVGs (tikz-fonts/) embed subsets of the AMSFonts Type 1 fonts
+    (cmr, cmmi, cmsy, cmex, msam, msbm) — SIL OFL 1.1, fonts embedded in
+    documents. licenses/corpora/amsfonts-OFL.txt, from Ubuntu's texlive-base
+    2023.20240207-1 package (https://archive.ubuntu.com/ubuntu/pool/
+    universe/t/texlive-base/texlive-base_2023.20240207-1_all.deb, member
+    usr/share/doc/texlive-doc/fonts/amsfonts/OFL.txt.gz, decompressed).
 
 Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
   README.md. Apache-2.0, authored for this project.
