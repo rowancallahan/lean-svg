@@ -318,6 +318,36 @@ The trusted base for file-system behaviour is Lean's `IO` primitives plus
 `Main.lean`, read by eye, plus the `Cli` theorems for where the paths come
 from.
 
+## Next: theorems about `main` itself (Rowan, 2026-09-25; planned, not started)
+
+`IO` is opaque, so nothing can be proved about `main : IO UInt32` directly.
+Plan (Rowan will write it, as Lean practice):
+
+1. A three-operation interface, and `main`'s body written once against it,
+   keeping the same readable `do` block:
+   ```lean
+   class FileOps (m : Type → Type) where
+     pathExists : System.FilePath → m Bool
+     readFile   : System.FilePath → m ByteArray
+     writeNew   : System.FilePath → ByteArray → m Unit
+   ```
+2. The real binary uses an instance that only names Lean's primitives
+   (`System.FilePath.pathExists`, `IO.FS.readBinFile`, `withFile … .writeNew`).
+   That instance is the whole trusted part; it has no logic of its own.
+3. A model instance (a map from paths to bytes, in `spec/`) to prove, about
+   the same `main` that runs:
+   - output path exists → exit 1, file system unchanged;
+   - with `--warnings`, warnings path exists → exit 1, unchanged;
+   - render error → exit 1, unchanged;
+   - success → `config.output` holds exactly the rendered PNG; exit 0 or 2;
+   - only `config.input`, `config.output`, `warnPath config.output` are ever
+     read or written.
+4. Keep `tests/check_invariants.py` pinning the primitives to that instance.
+   Byte lock must stay identical.
+
+Also open: the input is read in full before the 64 MiB limit applies (a pipe
+or `/dev/zero` input can hang). A bounded read in the instance would close it.
+
 ## Code invariants (Rowan; moved from `tasks/README.md`, 2026-09-25)
 
 For every `LeanSvg/*.lean` (items 1–2 are checked by `tests/check_invariants.py`):
