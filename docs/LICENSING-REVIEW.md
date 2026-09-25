@@ -146,7 +146,14 @@ source URL (at a pinned commit), author and licence of every downloaded file.
 The `tikz-fonts/` SVGs embed WOFF2 subsets of the AMS Type 1 Computer Modern
 and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm). These are OFL 1.1,
 and the OFL allows fonts embedded in documents to be distributed with the
-documents. The `tikz/` SVGs contain the same glyphs as plain outlines.
+documents (OFL FAQ 1.1: an embedded subset needs no licence file, and a
+rendered image is not subject to the OFL). The `tikz/` SVGs contain the same
+glyphs as plain outlines. The AMSFonts licence is shipped anyway, verbatim:
+`licenses/corpora/amsfonts-OFL.txt`, taken from Ubuntu's texlive-base 2023.20240207-1
+package (CTAN was not reachable from the build environment); the checker
+extracts it from the pinned `.deb` and compares SHA-256. Its Reserved Font
+Names include "cmr10", "cmmi10" and the other font names; dvisvgm keeps those
+names on the embedded subsets, which FAQ 1.1 permits for embedding in documents.
 
 Not committed: the resvg test suite, simple-icons and Feather icons are
 cloned by the test scripts, excluded by `.gitignore`, and absent from

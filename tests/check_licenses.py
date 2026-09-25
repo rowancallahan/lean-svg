@@ -14,10 +14,12 @@ file's, so the copyright notice inside the binary is upstream's own text.
     python3 tests/check_licenses.py           # offline: hashes and file sets
     python3 tests/check_licenses.py --online  # also re-download every URL and compare
 
-A URL ending in `#member` names a file inside a .tar.xz archive.
+A URL ending in `#member` names a file inside a .tar.xz/.tar.bz2 archive or a
+.deb package (a `.gz` member is decompressed: Debian gzips documentation).
 """
 import base64
 import csv
+import gzip
 import hashlib
 import io
 import re
@@ -96,10 +98,29 @@ def fetch(url: str) -> bytes:
         data = r.read()
     if not member:
         return data
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:xz" if ".xz" in base else "r:bz2") as tar:
+    if base.endswith(".deb"):
+        data = deb_data_tar(data)
+        mode = "r:xz"
+    else:
+        mode = "r:xz" if ".xz" in base else "r:bz2"
+    with tarfile.open(fileobj=io.BytesIO(data), mode=mode) as tar:
         f = tar.extractfile(member)
         assert f, f"{member} not in {base}"
-        return f.read()
+        out = f.read()
+    # Debian gzips documentation; the licence text is the decompressed file.
+    return gzip.decompress(out) if member.endswith(".gz") else out
+
+
+def deb_data_tar(deb: bytes) -> bytes:
+    """The data.tar.xz member of a .deb (an `ar` archive)."""
+    assert deb[:8] == b"!<arch>\n", "not a .deb"
+    i = 8
+    while i < len(deb):
+        name, size = deb[i:i + 16].decode().strip(), int(deb[i + 48:i + 58].decode())
+        if name.rstrip("/") == "data.tar.xz":
+            return deb[i + 60:i + 60 + size]
+        i += 60 + size + (size & 1)
+    raise AssertionError("no data.tar.xz in .deb")
 
 
 def main() -> None:

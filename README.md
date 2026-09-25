@@ -41,23 +41,35 @@ All three SVGs are this project's own artwork, Apache-2.0.
 
 ### Real-world charts
 
-Three charts from the real-world test corpus, rendered by lean-svg at 1000 px
-on a white background (`lean-svg in.svg out.png --width 1000 --background white`;
-the PNGs were then recompressed losslessly).
+Four charts from the real-world test corpus, rendered by lean-svg at 1000 px
+on a white background (`lean-svg in.svg out.png --width 1000 --background white`)
+and shown 500 px wide, about one image pixel per screen pixel on a 2x display.
+The PNGs were recompressed losslessly. Licences are given under each chart; all licence
+texts are in [`licenses/`](licenses/).
 
-**Latent Dirichlet allocation plate diagram** (TikZ with embedded Computer Modern fonts,
-`tikz-fonts/bayesnet_plate.svg`)
+**Latent Dirichlet allocation plate diagram** (TikZ, `tikz-fonts/bayesnet_plate.svg`).
+SVG: Apache-2.0, generated for this project. Glyphs: AMSFonts, SIL OFL 1.1,
+[`licenses/corpora/amsfonts-OFL.txt`](licenses/corpora/amsfonts-OFL.txt).
 
-![LDA plate diagram rendered by lean-svg](docs/readme/bayesnet_plate.png)
+<img src="docs/readme/bayesnet_plate.png" width="500" alt="LDA plate diagram rendered by lean-svg">
 
-**Burrows–Wheeler transform** (TikZ, `web-tikz/burrows-wheeler-transform.svg`,
-from [janosh/diagrams](https://github.com/janosh/diagrams), MIT)
+**Burrows–Wheeler transform** (TikZ, `web-tikz/burrows-wheeler-transform.svg`).
+SVG: from [janosh/diagrams](https://github.com/janosh/diagrams), MIT,
+[`licenses/corpora/janosh-diagrams-license.txt`](licenses/corpora/janosh-diagrams-license.txt).
 
-![Burrows-Wheeler transform rendered by lean-svg](docs/readme/burrows-wheeler-transform.png)
+<img src="docs/readme/burrows-wheeler-transform.png" width="500" alt="Burrows-Wheeler transform rendered by lean-svg">
 
-**Posterior corner plot** (matplotlib with mathtext labels, `matplotlib/corner_plot.svg`)
+**3D wireframe surface** (matplotlib mplot3d, `matplotlib/wireframe_3d.svg`).
+SVG: Apache-2.0, generated for this project. Text is drawn with lean-svg's embedded DejaVu Sans,
+[`licenses/fonts/DejaVu-LICENSE.txt`](licenses/fonts/DejaVu-LICENSE.txt).
 
-![corner plot rendered by lean-svg](docs/readme/corner_plot.png)
+<img src="docs/readme/wireframe_3d.png" width="500" alt="3D wireframe surface rendered by lean-svg">
+
+**Snake lemma** (TikZ commutative diagram, `tikz-fonts/cd_snake_lemma.svg`).
+SVG: Apache-2.0, generated for this project. Glyphs: AMSFonts, SIL OFL 1.1,
+[`licenses/corpora/amsfonts-OFL.txt`](licenses/corpora/amsfonts-OFL.txt).
+
+<img src="docs/readme/cd_snake_lemma.png" width="500" alt="snake lemma diagram rendered by lean-svg">
 
 ## Generated Readme
 
@@ -179,7 +191,7 @@ licence of every downloaded file; the licence texts are in
 | **matplotlib test-suite baseline SVGs** (`mpl-tests/`, 515 files) | Matplotlib License (PSF-based, BSD-compatible). `matplotlib-LICENSE.txt`. |
 | **janosh/diagrams** (`web-tikz/`, 50 files) | MIT. `janosh-diagrams-license.txt`. |
 | **Vega-Lite examples** (`web-vega/`, 31 files) | BSD-3-Clause. `vega-lite-LICENSE.txt`. |
-| **Generated charts** (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib/`, `matplotlib-text/`) and their sources in `src/` | Apache-2.0, authored for this project. The TikZ SVGs contain glyphs of the AMS Type 1 Computer Modern and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm), embedded by dvisvgm as the SIL Open Font License 1.1 permits for fonts embedded in documents. |
+| **Generated charts** (`tikz/`, `tikz-fonts/`, `graphviz/`, `mermaid/`, `plantuml/`, `matplotlib/`, `matplotlib-text/`) and their sources in `src/` | Apache-2.0, authored for this project. The TikZ SVGs contain glyphs of the AMS Type 1 Computer Modern and AMS symbol fonts (cmr, cmmi, cmsy, cmex, msam, msbm), embedded by dvisvgm as the SIL Open Font License 1.1 permits for fonts embedded in documents. `licenses/corpora/amsfonts-OFL.txt`. |
 
 ### Not redistributed
 
