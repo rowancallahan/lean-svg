@@ -1,8 +1,9 @@
 /-
 # Output byte-array size bounds
 
-These theorems concern the values returned by `Png.encode` and `render`.
-The filesystem, operating system and IO interpreter are outside their scope.
+These theorems concern the values returned by `Png.encode`, `render` and
+`renderWithWarnings` (what `Main.lean` calls).  The file system and the
+operating system are outside their scope.
 
 The bound counts copied row bytes once, plus at most five header bytes per
 fragment iteration. It needs no assumption about the input RGBA array length:
@@ -12,7 +13,8 @@ Public bounds:
 * `Png.encode`: at most `5 * max(w, h)^2 + 132` bytes, without hypotheses.
 * `render`: rejects any input over `maxInput` (64 MiB) before parsing
   (`render_rejects_large`); on success, at most `67452996` bytes under its
-  current limits.
+  current limits.  `renderWithWarnings_rejects_large` and
+  `renderWithWarnings_size_le` state the same for `renderWithWarnings`.
 
 Check with `lake env lean proofs/SizeBound.lean`.
 -/
@@ -343,6 +345,28 @@ theorem render_size_le_const (opts : Options) (input png : ByteArray)
   rw [he] at hm
   omega
 
+/-! ## The same two results, for `renderWithWarnings`
+
+`Main.lean` calls `renderWithWarnings` (the PNG and the warning list);
+`render` is that function without the warnings.  So the bounds above hold for
+exactly the bytes `main` writes. -/
+
+/-- The PNG bytes `main` writes are at most 67,452,996 bytes long. -/
+theorem renderWithWarnings_size_le (options : Options) (inputBytes pngBytes : ByteArray)
+    (warnings : Array String)
+    (h : renderWithWarnings options inputBytes = .ok (pngBytes, warnings)) :
+    pngBytes.size ≤ 67452996 :=
+  render_size_le_const options inputBytes pngBytes (by simp [render, h, Functor.map, Except.map])
+
+/-- An input over `maxInput` (64 MiB) is an error, so `main` writes nothing. -/
+theorem renderWithWarnings_rejects_large (options : Options) (inputBytes : ByteArray)
+    (h : inputBytes.size > maxInput) :
+    ∃ message, renderWithWarnings options inputBytes = .error message := by
+  obtain ⟨message, hr⟩ := render_rejects_large options inputBytes h
+  refine ⟨message, ?_⟩
+  cases hw : renderWithWarnings options inputBytes <;>
+    simp_all [render, Functor.map, Except.map]
+
 end LeanSvg
 
 -- Public theorem audit: only standard Lean axioms, never `sorryAx`.
@@ -350,3 +374,5 @@ end LeanSvg
 #print axioms LeanSvg.render_rejects_large
 #print axioms LeanSvg.render_output_size_bound
 #print axioms LeanSvg.render_size_le_const
+#print axioms LeanSvg.renderWithWarnings_size_le
+#print axioms LeanSvg.renderWithWarnings_rejects_large

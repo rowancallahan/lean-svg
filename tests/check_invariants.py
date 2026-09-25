@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""T43 checks 2-5: the structural invariants review currently keeps by hand.
+"""T43 checks: the structural invariants review would otherwise keep by hand.
 
-2. `Op` (LeanSvg/Effect.lean) has exactly the constructors `readInput`,
-   `outputExists`, `warningsExists`, `writeOutput` and `writeWarnings` (T98
-   added the warnings pair deliberately: `<output>.warnings.txt`): checked by elaborating an exhaustive match on `Op` with no
-   wildcard arm, so an added or renamed constructor fails to compile.
-3. No `IO.` outside the effect layer: `LeanSvg/*.lean` other than
-   `Effect.lean` must not mention `IO.` (comments and string literals don't
-   count).
-4. Mechanical invariants from tasks/README.md across `LeanSvg/`: no
+1. No IO in the library: `LeanSvg.lean` and `LeanSvg/**/*.lean` never
+   mention `IO` (as `IO`, `IO.x`, `EIO`, `BaseIO`, `unsafeIO`, ...) or
+   `System.` (comments and string literals don't count).
+2. `Main.lean`'s file-system calls are exactly an allowlist, counted: one
+   `IO.FS.readBinFile`, two `System.FilePath.pathExists`, one
+   `IO.FS.withFile` with `.writeNew` and `IO.FS.Handle.write` (in
+   `writeNewFile`).  Any other `IO.`/`System.` name, `open IO`/`open System`,
+   or a known file-system function name used any other way fails.
+3. Mechanical invariants from docs/DECISIONS.md across `LeanSvg/`: no
    `partial`, `unsafe`, `@[extern]`, `panic!`, `Float`, or `!`-indexing
    (`]!`, `get!`, `set!`); comments and string literals are stripped first
    so prose ("never needs `partial`") and string contents can't trigger it.
-5. No stdout/stderr on the `lean-svg` main path (T98b): `Main.lean`,
+4. No stdout/stderr on the `lean-svg` main path (T98b): `Main.lean`,
    `LeanSvg.lean` and `LeanSvg/*.lean` (everything the `lean-svg` binary
    links) must not mention a print, a standard stream, a debug trace, a
-   panic or a subprocess; the only outputs are the effect layer's files and
-   the exit code.  The dev tools (`FontDump.lean`, `ShapeDump.lean`, ...)
-   are separate executables and exempt.
+   panic or a subprocess; the only outputs are the files `main` writes and
+   the exit code.
+
+The dev tools (`FontDump.lean`, `ShapeDump.lean`, ...) are separate
+executables that `lean-svg` does not link, and `docs/learn/*.lean` is a
+teaching file outside the build; none of them is scanned.
 """
 import re
 import subprocess
@@ -73,50 +77,58 @@ def lean_files(exclude: set[str] = frozenset()) -> list[Path]:
     return sorted(p for p in LEANSVG.rglob("*.lean") if p.name not in exclude)
 
 
-def check_five_effects() -> None:
-    snippet = """import LeanSvg
-open LeanSvg
-/-- Fails to elaborate (non-exhaustive match) if `Op` gains, loses, or
-renames a constructor. Catches a rename too: `.readInput`/`.outputExists`/
-`.warningsExists`/`.writeOutput`/`.writeWarnings` would no longer resolve. Misses: a constructor added *and* immediately
-handled by a matching new arm here, but nothing writes this file but us. -/
-example (op : Op) : Unit :=
-  match op with
-  | .readInput => ()
-  | .outputExists => ()
-  | .warningsExists => ()
-  | .writeOutput _ => ()
-  | .writeWarnings _ => ()
-"""
-    with tempfile.NamedTemporaryFile("w", suffix=".lean", dir=REPO, delete=False) as f:
-        f.write(snippet)
-        tmp = Path(f.name)
-    try:
-        r = subprocess.run(
-            ["lake", "env", "lean", str(tmp)], cwd=REPO, capture_output=True, text=True
-        )
-    finally:
-        tmp.unlink()
-    assert r.returncode == 0 and "error" not in r.stderr.lower(), (
-        "FAIL [five-effects]: Op is not exactly {readInput, outputExists, warningsExists, "
-        f"writeOutput, writeWarnings}}:\n{r.stderr}"
-    )
-    print("-- five-effects: Op has exactly {readInput, outputExists, warningsExists, "
-          "writeOutput, writeWarnings}")
+IO_RE = re.compile(r"IO(?![a-z])|System\.")
 
 
-IO_RE = re.compile(r"(?<![A-Za-z0-9_])IO\.")
-
-
-def check_no_io_outside_effect() -> None:
+def check_no_io_in_library() -> None:
     offenders = []
-    for path in lean_files(exclude={"Effect.lean"}):
+    for path in [REPO / "LeanSvg.lean"] + lean_files():
         stripped = strip_comments_and_strings(path.read_text())
         for lineno, line in enumerate(stripped.splitlines(), start=1):
             if IO_RE.search(line):
                 offenders.append(f"{path.relative_to(REPO)}:{lineno}: {line.strip()}")
-    assert not offenders, "FAIL [no-io]: IO. found outside Effect.lean:\n" + "\n".join(offenders)
-    print("-- no-io: no IO. outside LeanSvg/Effect.lean")
+    assert not offenders, "FAIL [no-io]: IO in the library:\n" + "\n".join(offenders)
+    print("-- no-io: no IO or System. under LeanSvg/")
+
+
+# Every `IO.`/`System.` name Main.lean may use, with its exact count.
+MAIN_QUALIFIED = {
+    "IO.FS.readBinFile": 1,
+    "System.FilePath.pathExists": 2,
+    "IO.FS.withFile": 1,
+    "IO.FS.Handle.write": 1,
+    "System.FilePath": 1,  # the type of `writeNewFile`'s path
+}
+# File-system names by themselves (catches dot notation such as
+# `path.pathExists`), with the exact count each may appear.
+MAIN_BARE = {"readBinFile": 1, "pathExists": 2, "withFile": 1, "writeNew": 1, "write": 1}
+# Other file-system and process names that must not appear in Main.lean at all.
+MAIN_FORBIDDEN = [
+    "readFile", "writeFile", "writeBinFile", "removeFile", "rename", "createDir",
+    "createDirAll", "removeDirAll", "createTempFile", "readDir", "metadata", "isDir",
+    "realPath", "lines", "putStr", "putStrLn", "getLine", "readToEnd", "append",
+    "readWrite", "truncate", "flush", "Handle", "Process", "dbg_trace", "dbgTrace",
+]
+
+
+def check_main_fs_calls() -> None:
+    text = strip_comments_and_strings((REPO / "Main.lean").read_text())
+    assert not re.search(r"^\s*open\s+(IO|System)\b", text, re.M), (
+        "FAIL [main-fs]: Main.lean opens IO or System")
+    qualified = re.findall(r"(?<![A-Za-z0-9_.])((?:IO|System)(?:\.[A-Za-z_][A-Za-z0-9_]*)+)", text)
+    counts = {n: qualified.count(n) for n in set(qualified)}
+    assert counts == MAIN_QUALIFIED, (
+        f"FAIL [main-fs]: Main.lean's IO./System. names are {counts}, expected {MAIN_QUALIFIED}")
+    for name, n in MAIN_BARE.items():
+        found = len(re.findall(rf"(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])", text))
+        assert found == n, f"FAIL [main-fs]: Main.lean mentions {name} {found} times, expected {n}"
+    for name in MAIN_FORBIDDEN:
+        # `Handle` is allowed only inside `IO.FS.Handle.write`.
+        rest = text.replace("IO.FS.Handle.write", "")
+        assert not re.search(rf"(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])", rest), (
+            f"FAIL [main-fs]: Main.lean mentions {name}")
+    print("-- main-fs: Main.lean's file-system calls are exactly "
+          "readBinFile x1, pathExists x2, withFile .writeNew + Handle.write x1")
 
 
 MECHANICAL_PATTERNS = {
@@ -175,8 +187,8 @@ def check_no_output_on_main_path() -> None:
 
 
 def main() -> None:
-    check_five_effects()
-    check_no_io_outside_effect()
+    check_no_io_in_library()
+    check_main_fs_calls()
     check_no_output_on_main_path()
     check_mechanical_invariants()
     print("invariants ok")

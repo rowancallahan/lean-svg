@@ -531,7 +531,6 @@ def fmin (a b : F32) : F32 := if lt a b then a else b
 def fmax (a b : F32) : F32 := if lt b a then a else b
 
 def one : F32 := ofNat 1
-def two : F32 := ofNat 2
 def seven : F32 := ofNat 7
 def c255 : F32 := ofNat 255
 /-- `1.0 / 255.0` as tiny-skia's `load_8888` computes it. -/

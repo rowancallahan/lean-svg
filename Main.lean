@@ -1,16 +1,23 @@
 import LeanSvg
 
 /-!
-# Command-line entry point (trusted shell)
-
-This file is the only code that runs in `IO` besides `Prog.execIO`.  It parses
-arguments, builds the `Prog` program from the pure `render`, hands it to the
-interpreter, and maps the outcome to an exit code.  It writes nothing to
-stdout or stderr, ever (T98b): the only outputs are the files the effect
-layer writes and the exit code.
+# Command-line entry point
 
     lean-svg <input.svg> <output.png> [--width N] [--zoom Z] [--background COLOR]
              [--viewport X Y W H] [--threads N] [--warnings]
+
+`main` below holds every file-system call `lean-svg` makes: one
+`readBinFile` of the input, one `pathExists` per output path, and one
+exclusive create (`withFile … .writeNew`, O_EXCL) per file written.  The rest
+is pure: `Cli.parse` and `renderWithWarnings`.  Nothing is written to stdout
+or stderr.
+
+Proved about the pure parts: `LeanSvg/Cli.lean` (the paths are literally
+command-line arguments, `--warnings` mode, the warnings path differs from the
+output path) and `proofs/SizeBound.lean` (`renderWithWarnings_size_le`,
+`renderWithWarnings_rejects_large`).  Trusted: this file, read by eye, and the
+Lean runtime's `IO` primitives it calls.  `docs/learn/MainExplained.lean` is a
+commented toy with the same shape.
 
 Exit codes: `0` success, no warnings; `2` success with warnings (by default
 they are dropped; with `--warnings` they are in `<output>.warnings.txt`);
@@ -20,62 +27,44 @@ that already exists, or a render error).  See README.md for the flags.
 
 open LeanSvg
 
-/-- A decimal integer argument; a leading `-` is allowed. -/
-def parseIntArg (s : String) : Option Int :=
-  let neg := s.startsWith "-"
-  let body := if neg then s.drop 1 else s
-  if body.isEmpty || !body.all Char.isDigit then none
-  else match body.toNat? with
-    | some n => some (if neg then -(n : Int) else (n : Int))
-    | none => none
+/-- Create the file at `path` and write `bytes` to it.  `.writeNew` opens the
+file exclusively (O_EXCL): if anything already exists at `path`, this fails
+instead of overwriting it. -/
+def writeNewFile (path : System.FilePath) (bytes : ByteArray) : IO Unit :=
+  IO.FS.withFile path .writeNew (fun handle => IO.FS.Handle.write handle bytes)
 
-def parseArgs : List String → Option (String × String × Options) → Option (String × String × Options)
-  | [], acc => acc
-  | "--width" :: n :: rest, some (i, o, opts) =>
-    match n.toNat? with
-    | some w => parseArgs rest (some (i, o, { opts with width := some w }))
-    | none => none
-  | "--zoom" :: z :: rest, some (i, o, opts) =>
-    match parseNumberAll z.toUTF8 with
-    | some v => if v > 0 then parseArgs rest (some (i, o, { opts with zoom := some v })) else none
-    | none => none
-  | "--viewport" :: x :: y :: w :: h :: rest, some (i, o, opts) =>
-    match parseIntArg x, parseIntArg y, w.toNat?, h.toNat? with
-    | some vx, some vy, some vw, some vh =>
-      if vw ≥ 1 && vh ≥ 1 then
-        parseArgs rest (some (i, o, { opts with viewport := some (vx, vy, vw, vh) }))
-      else none
-    | _, _, _, _ => none
-  | "--threads" :: n :: rest, some (i, o, opts) =>
-    match n.toNat? with
-    | some t => parseArgs rest (some (i, o, { opts with threads := t }))
-    | none => none
-  | "--background" :: c :: rest, some (i, o, opts) =>
-    match Svg.parsePaint c.toUTF8 with
-    | some (.solid col) => parseArgs rest (some (i, o, { opts with background := some col }))
-    | _ => none
-  | a :: rest, acc =>
-    if a.startsWith "--" then none
-    else match acc with
-      | none => parseArgs rest (some (a, "", {}))
-      | some (i, "", opts) => parseArgs rest (some (i, a, opts))
-      | some _ => none
-
+/-- Exit codes: `0` PNG written, no warnings; `2` PNG written, with warnings;
+`1` failure, nothing written. -/
 def main (args : List String) : IO UInt32 := do
-  let warnings := args.contains "--warnings"
-  match parseArgs (args.filter (· != "--warnings")) none with
-  | some (inp, out, opts) =>
-    if out == "" then return 1
-    let pure_ := fun b => match renderWithWarnings opts b with
-      | .ok (png, ws) => .ok (png, Warn.text ws)
-      | .error _ => .error ()
-    let prog := if warnings then Prog.renderProgramWarn () pure_ else Prog.renderProgram () pure_
-    -- An `IO` error (unreadable input, an output that appeared after the
-    -- existence check) is exit code 1 like any other failure; uncaught, the
-    -- runtime would print it to stderr.
-    let result ← try prog.execIO ⟨inp⟩ ⟨out⟩ catch _ => return 1
-    match result with
-    | .ok false => return 0
-    | .ok true => return 2
-    | .error () => return 1
-  | none => return 1
+  -- `Cli.parse` is pure.  If it returns `none` (bad arguments), exit 1.
+  let some config := Cli.parse args | return 1
+  -- `config.input` is dot notation for `Cli.Config.input config`, the `input`
+  -- field of `config`; likewise `config.output`, `config.warnings`, ...
+  --
+  -- `try … catch _ => return 1`: if any call below raises an `IO` error
+  -- (unreadable input, an output file that appeared after the existence
+  -- check), stop and exit 1.  Uncaught, the runtime would print it.
+  try
+    let inputBytes ← IO.FS.readBinFile config.input
+    -- No clobber: the output path must not exist, and with `--warnings`
+    -- neither may the warnings path.
+    let outputExists ← System.FilePath.pathExists config.output
+    if outputExists then return 1
+    if config.warnings then
+      let warningsFileExists ← System.FilePath.pathExists (Cli.warnPath config.output)
+      if warningsFileExists then return 1
+    -- `renderWithWarnings` is pure and returns an `Except`: `.ok` carries the
+    -- PNG bytes and the warning list, `.error` carries a message, which is
+    -- dropped.
+    match renderWithWarnings config.options inputBytes with
+    | .error _ => return 1
+    | .ok (pngBytes, warnings) =>
+      writeNewFile config.output pngBytes
+      let warningsText := Warn.text warnings
+      if warningsText.size == 0 then return 0
+      -- Warnings are written to a file only with `--warnings`; either way
+      -- the exit code is 2.
+      if config.warnings then
+        writeNewFile (Cli.warnPath config.output) warningsText
+      return 2
+  catch _ => return 1

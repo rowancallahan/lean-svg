@@ -5,7 +5,7 @@ import LeanSvg.Svg
 
 Turns a `Svg.ClipEntry` into a chain of device-space clip masks, and multiplies
 a shape's coverage mask by such a chain.  Everything is integer, bounded and
-pure; `Effect.lean` and `render`'s type are untouched.
+pure; `render`'s type is untouched.
 
 ## What resvg does (`crates/resvg/src/clip.rs`, tiny-skia `Mask`)
 

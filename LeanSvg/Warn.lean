@@ -6,8 +6,7 @@ import LeanSvg.Bytes
 A render can succeed and still have drawn something differently from what
 the document asked for.  Each such case adds one short message here; the
 pure `renderWithWarnings` returns the list next to the PNG, and `Main`
-writes it to `<output>.warnings.txt` through the effect layer
-(`Prog.writeWarnings`).  The list is deduplicated and bounded, so a document
+writes it to `<output>.warnings.txt` under `--warnings`.  The list is deduplicated and bounded, so a document
 cannot grow it without limit.
 
 Reported today: a `font-family` that does not resolve to an embedded font

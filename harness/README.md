@@ -3,8 +3,8 @@
 Idea: a single, never-changing program shell reads one file, calls a pure
 core, and writes one file. Cores are written in safe Rust, translated to Lean
 by Aeneas (via Charon), and proven to satisfy a pre-specified contract. The
-shell's file-system behaviour is proven once, generically, in
-`LeanSvg/Effect.lean`; every core inherits it.
+shell's file-system behaviour is a handful of lines read by eye, like `main`
+in `Main.lean`; every core inherits it.
 
 ```
 argv ─▶ [ main.rs: read(in) ─▶ core::run(bytes, opts) ─▶ write(out) | exit 1 ]
@@ -36,25 +36,25 @@ C6. Output bound: `∀ input opts png, run input opts = .ok (.Ok png) →
 C1–C3 are checked mechanically by the harness build. C4–C6 are Lean theorems
 per core, and they are the "extra work" that buys halting and no-panic.
 
-## The harness theorems (proven once)
+## The shell (read by eye, not proved)
 
-From `LeanSvg/Effect.lean`, for any `render : ByteArray → Except ε ByteArray`:
-
-- `runFS_frame`: no path other than `out` changes.
-- `runFS_input_only`: the result depends only on `fs inp`.
-- `renderProgram_spec`: error ⇒ file system untouched; ok ⇒ `out ↦ render (fs inp)`.
+`main.rs` does what `main` in `Main.lean` does: read the input, refuse if the
+output path exists, call the core, create the output exclusively and write
+it. The earlier plan proved this against a model file system
+(`LeanSvg/Effect.lean`); that layer was removed on 2026-09-25 because its
+interpreter had to be trusted anyway (`docs/DECISIONS.md`).
 
 A translated core `run` is plugged in through a five-line adapter
 `asRender opts : ByteArray → Except String ByteArray` that maps Aeneas's
-`Result` and the tool's `Error` onto `Except`. The theorems then apply to
-`renderProgram (asRender opts)` verbatim.
+`Result` and the tool's `Error` onto `Except`, so the per-core theorems are
+stated against the same kind of function `Main.lean` calls.
 
 ## Trusted computing base
 
 rustc and the Rust standard library used by `main.rs`; Charon (MIR
 extraction); Aeneas (translation, argued sound on paper, not machine-checked);
 the Aeneas Lean library's model of core/alloc; Lean; the OS; the fixed
-`main.rs` and `Prog.execIO` (each a handful of lines). The claim is about the
+`main.rs` (a handful of lines). The claim is about the
 Lean model of the Rust; the link to the produced binary rests on rustc and
 the translation being faithful. That is the expansion of trust accepted here.
 
@@ -69,9 +69,6 @@ harness/
     cores/<tool>/      one library crate per core (C1–C2)
   lean/
     lakefile.toml      depends on the Aeneas Lean library
-    Harness/Effect.lean  copy of LeanSvg/Effect.lean (generic theorems)
     Harness/Adapter.lean asRender + per-core contract statements
     Generated/<tool>/  Aeneas output (do not edit)
 ```
-
-Status: see `tasks/T9-aeneas-spike.md`.

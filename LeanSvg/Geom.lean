@@ -1040,18 +1040,4 @@ def dashSegs (pat : Array Fx) (off : Fx) (poly : Poly) (sg : Array DSeg) (out : 
       out := out.push ⟨finishDash first firstT0 firstT1, false⟩
     return out
 
-/-- `dashSegs` on a bare polyline: every segment is its own tangent. -/
-def dashPoly (pat : Array Fx) (off : Fx) (poly : Poly) (out : Array Poly) : Array Poly :=
-  let pts := dedupe poly
-  let n := pts.size
-  let segs := if n < 2 then 0 else if poly.closed then n else n - 1
-  let sg := (Array.range segs).map fun i =>
-    ({ p := pts.getD i default, q := pts.getD ((i + 1) % n) default,
-       tp := ⟨0, 0⟩, tq := ⟨0, 0⟩ } : DSeg)
-  dashSegs pat off poly sg out
-
-/-- Dash every subpath of a flattened path. -/
-def dashPolys (pat : Array Fx) (off : Fx) (polys : Array Poly) : Array Poly :=
-  polys.foldl (fun out p => dashPoly pat off p out) (Array.emptyWithCapacity polys.size)
-
 end LeanSvg

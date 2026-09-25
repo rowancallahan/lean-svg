@@ -9,6 +9,12 @@ empirically against resvg; it is not a theorem.
 Model for the project: [kim-em/lean-zip](https://github.com/kim-em/lean-zip)
 (verified DEFLATE in Lean). This is the same idea for a rasterizer.
 
+> 2026-09-25: `LeanSvg/Effect.lean` (`Prog`, `Op`, `execIO` and the model
+> file-system theorems) was removed; every file-system call is now in
+> `main` in `Main.lean` (see `docs/DECISIONS.md`). Mentions of it below are
+> historical; the one-file-read argument they make still holds, because
+> the renderer is pure and `main` reads exactly one file.
+
 Legend: **[done]**, **[Opus]** = straightforward coding, spec below is complete,
 **[design]** = needs conceptual work first (do not delegate blind).
 

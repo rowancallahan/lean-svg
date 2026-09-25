@@ -309,6 +309,10 @@ difficulty, since that is what was missing:
 the theorem is one line. It is the cheapest complete theorem available and a
 good way back in.
 
+**(3) was proved against a model file system, then dropped with it**
+(2026-09-25, `docs/DECISIONS.md`): no-clobber is now `main`'s `pathExists`
+check plus an exclusive create, read by eye. The original plan:
+
 **(3) is the centrepiece.** It requires changing the model from
 `FS := String → ByteArray` to `String → Option ByteArray` and adding
 `Op.outputExists`, because today every path has contents and "this file

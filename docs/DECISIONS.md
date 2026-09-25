@@ -43,8 +43,8 @@ per feature rather than "match resvg". This becomes part of `spec/`.
 Readers will not read the Lean code or the proofs, only the theorem
 statements and their explanations. So:
 
-- Move every theorem into a `spec/` folder: the effect-layer theorems
-  (`LeanSvg/Effect.lean`), `proofs/*` (size bound, locality, decoder
+- Move every theorem into a `spec/` folder: the command-line theorems
+  (`LeanSvg/Cli.lean`), `proofs/*` (size bound, locality, decoder
   contracts, gzip cap, image locality) and the axiom/invariant audit.
   Proofs may live beside them, but `spec/` is what people read.
 - `spec/` gets its own small static website (HTML) to read through.
@@ -280,3 +280,54 @@ Totals: lean-svg 304 s, resvg 45 s, Chromium 10 s. Medians: 58, 18 and
 7 ms. The 34 files with embedded `<image>` take 140 s of our 304 s; process
 start-up is 16 ms (resvg 3 ms). Rowan: do not go deep on speed in Lean; the
 plan is the Rust rewrite proved equal with Aeneas (phase 6).
+
+## Before finalizing, and before the Rust + Aeneas conversion (Rowan, 2026-09-25)
+
+Every time:
+
+1. Prune dead files and dead code again (nothing references it, not a current doc).
+2. `scripts/full-check.sh` (`make full-check`): every test over the entire
+   corpus; must end with the byte lock identical.
+3. `python3 tests/check_licenses.py --online`.
+4. Re-review the chart verdicts (`tests/realworld_verdicts.csv`).
+
+## Effect layer removed (Rowan, 2026-09-25)
+
+`LeanSvg/Effect.lean` (`Prog`, `Op`, `runFS`, `execIO`, `renderProgram`,
+`renderProgramWarn` and their theorems) is deleted. Its theorems were about a
+model file system, and the link from the model to real files was `execIO`,
+an interpreter that itself had to be trusted: an indirection that added code
+to read without removing any trust. Now:
+
+- `main` in `Main.lean` holds every file-system call as plain Lean `IO`
+  (`readBinFile`, `pathExists`, `withFile … .writeNew`), about 30 lines,
+  read by eye. Behaviour is unchanged (same flags, exit codes, order of
+  checks and writes; byte freeze identical).
+- `LeanSvg/Cli.lean` is the pure argument parser, with theorems that the
+  paths are command-line arguments verbatim, non-empty, that `--warnings`
+  mode is on iff the flag is given, and that the warnings path is not the
+  output path.
+- `tests/check_invariants.py` keeps `IO` out of `LeanSvg/` and pins
+  `Main.lean`'s file-system calls to an allowlist with exact counts.
+
+The trusted base for file-system behaviour is Lean's `IO` primitives plus
+`Main.lean`, read by eye, plus the `Cli` theorems for where the paths come
+from.
+
+## Code invariants (Rowan; moved from `tasks/README.md`, 2026-09-25)
+
+For every `LeanSvg/*.lean` (items 1–2 are checked by `tests/check_invariants.py`):
+
+1. No `partial`, `unsafe`, `@[extern]`, `panic!` or `!`-indexing
+   (`arr[i]!`, `get!`, `set!`). Use `getD` / `setIfInBounds` or carry proofs.
+2. No `Float`. Fixed point only (`Fx = Int`, 1/256 px; matrices 16.16).
+3. Every loop is a `for` over a range bounded by the input size or a
+   constant; recursion uses structurally decreasing fuel.
+4. Hot loops in `Nat` (Lean's unboxed `Int` is 31-bit; `Nat` is 63-bit).
+5. `lake build` finishes with no errors and no new warnings.
+6. `Main.lean` changes only when the work is about it. Nothing under
+   `LeanSvg/` does `IO` (checked by `tests/check_invariants.py`).
+
+`tasks/` (per-task notes and reports) was deleted on 2026-09-25. Comments
+that cite `tasks/<name>.md` refer to git history:
+`git show $(git log -1 --format=%h --diff-filter=D -- tasks)^:tasks/<name>.md`.

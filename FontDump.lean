@@ -17,9 +17,8 @@ the kerning to the next character (`Font.kern`, `null` for the last one).
 `superscriptOffset`), for `tests/check_font.py`'s oracle to check against
 fontTools' own decompiled `OS/2`/`hhea` tables.
 
-This is the **only** file in the project that performs `IO` besides
-`LeanSvg.Prog.execIO` and `Main.lean`: it reads the font path given on the
-command line (or uses one of the fonts embedded in `LeanSvg.Fonts.*`).
+Like the other dev tools, it performs `IO`: it reads the font path given on
+the command line (or uses one of the fonts embedded in `LeanSvg.Fonts.*`).
 Everything downstream of that read — `Font.parse` and every accessor — is
 the pure, total parser in `LeanSvg/Font.lean`. `fontdump` is its own
 executable (see `lakefile.toml`); `lean-svg` does not link it or the

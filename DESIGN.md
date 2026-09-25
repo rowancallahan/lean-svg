@@ -2,27 +2,20 @@
 
 ## 1. What is claimed, and what is not
 
-**Claimed and machine-checked** (see `LeanSvg/Effect.lean`):
+**File-system behaviour, read by eye** (`main` in `Main.lean`, about 30
+lines): read the input with `IO.FS.readBinFile`; exit 1 if the output path
+exists (with `--warnings`, also if `<out>.warnings.txt` exists); run the pure
+`renderWithWarnings`; create the output with `IO.FS.withFile … .writeNew`
+(O_EXCL) and write the PNG; with `--warnings` and a non-empty warnings text,
+create and write `<out>.warnings.txt` the same way. Any `IO` error is exit 1.
+`tests/check_invariants.py` pins this list of calls and keeps `IO` out of
+`LeanSvg/`. SPEC.md section 1 has the details.
 
-- The top-level program is a value of `Prog (Except String Unit)`. `Prog` is a
-  free monad with exactly three operations, `readInput`, `outputExists` and
-  `writeOutput`. There is no constructor for any other effect, so the type
-  checker rejects a program that tries to do anything else.
-- Against a model file system `FS := String → Option ByteArray` (`none` means
-  the path is absent):
-  - `runFS_frame`: running any `Prog` leaves every path except the output
-    path unchanged.
-  - `runFS_input_only`: the result depends only on the input path's contents
-    and on whether the output path is present.
-  - `renderProgram_spec`: the default (strict, T98b) renderer program's run equals
-    `if (fs out).isSome then (error clobberError, fs) else match render input with | ok (png, warn) => (ok (warn ≠ ∅), fs[out ↦ png]) | error e => (error e, fs)`.
-    `renderProgramWarn_*` state the same for `--warnings` (T98), which also
-    writes `<out>.warnings.txt` and refuses if either path exists.
-  - `renderProgram_no_clobber`: if the output path already holds something,
-    running the program changes the file system not at all.
-  - Corollaries (each additionally given `fs out = none`): on error nothing is
-    written; on success the output path holds exactly `some (render input)`.
-- `#print axioms` on all of these: `propext` only. No `sorry`, no `Classical`.
+**Claimed and machine-checked:** `LeanSvg/Cli.lean` (the paths are
+command-line arguments verbatim, non-empty; `--warnings` mode iff the flag is
+given; the warnings path is not the output path) and `proofs/*.lean` (output
+size bound, input size limit, decoder and locality results). Axioms: at most
+the standard three, no `sorry` (`scripts/axiom_audit.py`).
 
 **Claimed by construction** (enforced by the language, checked by grep):
 
@@ -40,11 +33,9 @@
 **Not claimed:** pixel-level correctness. SVG has no formal rendering
 semantics. Fidelity is measured against resvg (`tests/run_tests.py`).
 
-**Trusted:** the Lean compiler and runtime (C), the C compiler, the OS,
-`Prog.execIO` (eleven lines mapping the three ops to
-`System.FilePath.pathExists` / `IO.FS.readBinFile` / `writeBinFile`), and
-`Main.lean` (argument parsing, exit code; it writes nothing to stdout or
-stderr, T98b).
+**Trusted:** the Lean compiler and runtime (C), the C compiler, the OS, and
+`main` in `Main.lean` (the file-system calls above and the exit code; it
+writes nothing to stdout or stderr, T98b).
 
 ## 2. Threat model
 
@@ -53,15 +44,15 @@ An attacker controls the input file completely. Goals we defend against:
 | Attack | Where it lives in other renderers | Our defence |
 |---|---|---|
 | Entity expansion (billion laughs) | XML DTD | DOCTYPE with `[` rejected; only 5 predefined entities decoded |
-| External entities / local file read (XXE, librsvg CVE-2023-38633, Inkscape CVE-2026-4980) | DTD, `href`, XInclude | No code path resolves any reference; `Prog` cannot open a second file |
+| External entities / local file read (XXE, librsvg CVE-2023-38633, Inkscape CVE-2026-4980) | DTD, `href`, XInclude | No code path resolves any reference; the renderer is pure and `main` reads one file |
 | SSRF via remote resources (Batik) | `href`, `url()` | same |
 | Script execution | `<script>`, event attrs | skipped as unknown elements |
 | Stack exhaustion via nesting (librsvg CVE-2019-20446) | recursive parser/renderer | parser is iterative with a stack array; depth cap 2048 (T104) |
 | Memory exhaustion via dimensions | canvas alloc | dimension and pixel caps checked before allocation |
 | CPU exhaustion via numbers (`1e999999999`, megabytes of digits) | number parsing, big-int math | 18 significant digits kept, exponent saturates at 10^5 and clamps at ±60, result clamped |
 | Malformed input crashes | parser | every read past the end returns 0; every array op is bounds-checked |
-| Writing somewhere unexpected | I/O layer | `runFS_frame` |
-| Overwriting an existing file at the output path | I/O layer | `Op.outputExists` checked before any write; `renderProgram_no_clobber` |
+| Writing somewhere unexpected | I/O layer | `main` writes only the output path and `Cli.warnPath` of it; `parse_paths_mem` |
+| Overwriting an existing file at the output path | I/O layer | `pathExists` checked before any write, and the create is exclusive (`.writeNew`, O_EXCL) |
 | Memory exhaustion via input file size | file read | input capped at 64 MiB, checked before parsing; `render_rejects_large` |
 
 Remaining cost bound, not a vulnerability: rendering is O(shapes × visible
@@ -490,7 +481,8 @@ Render time per 200×200 file: 28–43 ms including process start.
 
 | file | role |
 |---|---|
-| `LeanSvg/Effect.lean` | `Op`, `Prog`, model FS, theorems, `execIO` (trusted) |
+| `Main.lean` | `main`: every file-system call (trusted, read by eye) |
+| `LeanSvg/Cli.lean` | argument parsing, `warnPath`, theorems about where paths come from |
 | `LeanSvg/Bytes.lean` | byte scanning helpers, all bounded |
 | `LeanSvg/Fixed.lean` | `Fx`, number and length parsing with cost bounds |
 | `LeanSvg/Geom.lean` | `Pt`, `Mat`, trig, `PathCmd`, `flatten`, stroker |
@@ -509,7 +501,6 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/Units.lean` | CSS Values 4 units (T92): viewport and Noto Sans font metrics |
 | `LeanSvg/BasicShape.lean` | CSS basic shapes for `clip-path` (T92) |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
-| `Main.lean` | CLI (trusted shell) |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |
 
 ## 6. Per-file pass criteria (T100)

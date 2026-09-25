@@ -32,11 +32,9 @@ in a fixed width (`Mat.apply`) check this before they assume a bound. -/
 @[inline] def inRange (a : Fx) : Bool := -maxVal ≤ a && a ≤ maxVal
 
 def ofNat (n : Nat) : Fx := clamp ((n : Int) * 256)
-def ofInt (n : Int) : Fx := clamp (n * 256)
 
 /-- Floor division, so results are consistent for negative values. -/
 def mul (a b : Fx) : Fx := clamp (Int.ediv (a * b) 256)
-def div (a b : Fx) : Fx := if b = 0 then 0 else clamp (Int.ediv (a * 256) b)
 def floor (a : Fx) : Int := Int.ediv a 256
 def ceil (a : Fx) : Int := -(Int.ediv (-a) 256)
 def round (a : Fx) : Int := Int.ediv (a + 128) 256
@@ -196,47 +194,6 @@ def parseLengthAll (bs : ByteArray) : Option Fx :=
   match parseLength t 0 with
   | some (v, j) => if j == t.size then some v else none
   | none => none
-
-open Bytes in
-/-- Parse a length that must be **absolute**.  `parseLength` already rejects
-percentages; this also rejects the font-relative `em`/`ex`, which it resolves
-against a fixed 16 px font that is not the document's.  A dash pattern is
-geometry — getting its unit wrong is worse than not dashing at all — so
-`stroke-dasharray` and `stroke-dashoffset` use this and fall back to no dashing.
-
-The number is lexed twice (once to find where its unit starts, once by
-`parseLength`); both passes are over the same handful of bytes. -/
-def parseAbsLength (bs : ByteArray) (i : Nat) : Option (Fx × Nat) :=
-  match parseNumber bs i with
-  | none => none
-  | some (_, j) =>
-    if startsWith bs j "em" || startsWith bs j "ex" then none else parseLength bs i
-
-/-- Parse a whole attribute value as a single absolute length. -/
-def parseAbsLengthAll (bs : ByteArray) : Option Fx :=
-  let t := Bytes.trim bs
-  match parseAbsLength t 0 with
-  | some (v, j) => if j == t.size then some v else none
-  | none => none
-
-/-- Parse a whole attribute value as a whitespace/comma separated list of
-absolute lengths.  Unlike `parseNumberList`, which stops at the first thing it
-cannot read, this is all-or-nothing: one malformed or relative item makes the
-whole list `none`, which is what `stroke-dasharray` needs in order to fall back
-to an undashed stroke the way usvg's `conv_dasharray` does. -/
-def parseAbsLengthList (bs : ByteArray) : Option (Array Fx) := Id.run do
-  let t := Bytes.trim bs
-  let mut out : Array Fx := #[]
-  let mut i := 0
-  for _ in [0:t.size + 1] do
-    i := Bytes.skipWsComma t i
-    if i ≥ t.size then break
-    match parseAbsLength t i with
-    | some (v, j) =>
-      out := out.push v
-      i := j
-    | none => return none
-  return some out
 
 /-- Parse a whitespace/comma separated list of numbers. -/
 def parseNumberList (bs : ByteArray) : Array Fx := Id.run do

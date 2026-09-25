@@ -46,6 +46,6 @@ markers and CSS beyond simple selectors (usvg route), DTD internal subsets
 - **Wave 3:** T18 gradients (needs the defs table; `Canvas.fillMask` gets a
   paint callback), T20 clipPath (`Raster` mask multiply), T21 mask.
 
-Every task keeps `tasks/README.md` invariants, leaves `Effect.lean`
+Every task keeps `tasks/README.md` invariants, leaves `Main.lean`
 untouched, and reports `run_tests.py` (no file may regress) plus the
 relevant corpora slice at small sizes (`--fast`).
