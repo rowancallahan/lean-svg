@@ -58,7 +58,7 @@ resvg.
 
 **Class: (c), not fixing.** The renderer's whole approach to gradients (and
 everything else) is matching resvg 0.48.1's actual pixels (`DESIGN.md` §3,
-`SPEC.md` §4). This is a real, tiny (documented-as-acceptable-elsewhere,
+`spec/SPEC.md` §4). This is a real, tiny (documented-as-acceptable-elsewhere,
 §3.9's "within 1 of 255") quirk in resvg's own dependency, engaged only by
 the `fr≠0` code path. Reproducing whatever exact-precision stop
 interpolation Chrome/Firefox/Safari/Inkscape/librsvg use instead would mean

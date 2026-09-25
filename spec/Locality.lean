@@ -9,7 +9,7 @@ through `Array.setIfInBounds` at an index built as `(y0 + row) * stride +
 (x0 + col)` with `row`/`col` bounded by the loop's own range, so the shape of
 the argument below (`inRect`) always holds of a written index.
 
-Check with `lake env lean proofs/Locality.lean`.
+Check with `lake env lean spec/Locality.lean`.
 -/
 import LeanSvg.Canvas
 import LeanSvg.Shader

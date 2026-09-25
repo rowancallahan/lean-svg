@@ -83,6 +83,8 @@ make tiles                # --viewport tiles stitch back to the full render
 make full-check           # every test, whole corpus, byte lock (before finalizing)
 ```
 
+What is proved: [spec/README.md](spec/README.md) (check with `scripts/check-theorems.sh`).
+
 ## Licensing and credits
 
 lean-svg is Apache-2.0. Third-party fonts, data, algorithms and test files, with

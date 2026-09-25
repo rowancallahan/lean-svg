@@ -258,13 +258,13 @@ tikz-fonts/geom_conic_sections.svg,pass,,5f63a957d4445362,2026-09-24T07:24:33.17
 tikz-fonts/geom_fractal_sierpinski.svg,pass,,dce32f820bf8b878,2026-09-24T05:22:50.547Z,current
 tikz-fonts/geom_inscribed_angle.svg,pass,,3bedd373dbfae980,2026-09-24T07:29:39.877Z,current
 tikz-fonts/geom_polyhedron.svg,pass,,00c567a3a8f9c585,2026-09-24T05:21:13.597Z,current
-tikz-fonts/geom_pythagoras.svg,fail,,3e771414dc603c5d,2026-09-24T05:23:17.176Z,current
+tikz-fonts/geom_pythagoras.svg,pass,,3e771414dc603c5d,2026-09-25T02:06:52.016Z,current
 tikz-fonts/geom_unit_circle.svg,pass,,6d7b2ee76f4a7fbb,2026-09-24T07:23:55.565Z,current
 tikz-fonts/graph_grid_torus.svg,pass,,6a4156b344b57e78,2026-09-24T05:20:47.334Z,current
 tikz-fonts/graph_k5_k33.svg,pass,,0d769f2b74a61b66,2026-09-24T07:28:06.387Z,current
 tikz-fonts/graph_petersen.svg,pass,,54b2747cb3a3af10,2026-09-24T05:21:11.773Z,current
 tikz-fonts/graph_weighted_dijkstra.svg,pass,,6062478eeaabe560,2026-09-24T07:28:39.566Z,current
-tikz-fonts/knot_trefoil.svg,fail,this looks like neither are rendering tbh its just showing a circle and should be a trefoil i think,21f651fee1341803,2026-09-24T05:23:38.506Z,current
+tikz-fonts/knot_trefoil.svg,pass,this looks like neither are rendering tbh its just showing a circle and should be a trefoil i think,21f651fee1341803,2026-09-25T02:07:03.516Z,current
 tikz-fonts/lattice_subgroups.svg,pass,,093d8eaa69b7a340,2026-09-24T07:29:51.642Z,current
 tikz-fonts/matrix_block.svg,pass,,05afc9fead733111,2026-09-24T07:28:56.321Z,current
 tikz-fonts/mindmap_stats.svg,pass,,6fa5ef0b18db686b,2026-09-24T07:26:08.183Z,current
@@ -325,7 +325,7 @@ tikz/graph_grid_torus.svg,pass,,6a4156b344b57e78,2026-09-24T05:35:42.031Z,curren
 tikz/graph_k5_k33.svg,pass,[judged at 300 px],f8a333e283e8c52b,2026-09-24T04:06:33.119Z,current
 tikz/graph_petersen.svg,pass,,54b2747cb3a3af10,2026-09-24T05:35:55.848Z,current
 tikz/graph_weighted_dijkstra.svg,pass,,cb7f7d3a8f00ad75,2026-09-24T05:36:03.179Z,current
-tikz/knot_trefoil.svg,fail,are we sure that there doesn't need to be a trefoil here? its just a circle,21f651fee1341803,2026-09-24T05:38:54.387Z,current
+tikz/knot_trefoil.svg,pass,are we sure that there doesn't need to be a trefoil here? its just a circle,21f651fee1341803,2026-09-25T02:07:01.685Z,current
 tikz/lattice_subgroups.svg,pass,,c13c103f92821a17,2026-09-24T05:38:37.943Z,current
 tikz/matrix_block.svg,pass,[judged at 300 px],df9d599aa858bf56,2026-09-24T04:06:54.523Z,current
 tikz/mindmap_stats.svg,pass,,404b5b9be69dc796,2026-09-24T05:39:09.446Z,current

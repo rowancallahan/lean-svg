@@ -51,7 +51,7 @@ jobs:
           export PATH="$HOME/.elan/bin:$PATH"
           lake build
 
-      - name: Invariants (axioms, IO only in Main.lean, mechanical checks)
+      - name: Invariants (spec/ axioms and README, IO only in Main.lean, mechanical checks)
         run: bash scripts/check-theorems.sh
 
       # Offline only: licence-file hashes and file lists in licenses/.

@@ -12,9 +12,9 @@ exclusive create (`withFile … .writeNew`, O_EXCL) per file written.  The rest
 is pure: `Cli.parse` and `renderWithWarnings`.  Nothing is written to stdout
 or stderr.
 
-Proved about the pure parts: `LeanSvg/Cli.lean` (the paths are literally
-command-line arguments, `--warnings` mode, the warnings path differs from the
-output path) and `proofs/SizeBound.lean` (`renderWithWarnings_size_le`,
+Proved about the pure parts (listed in `spec/README.md`): `spec/Cli.lean`
+(the paths are literally command-line arguments, `--warnings` mode, the
+warnings path differs from the output path) and `spec/SizeBound.lean` (`renderWithWarnings_size_le`,
 `renderWithWarnings_rejects_large`).  Trusted: this file, read by eye, and the
 Lean runtime's `IO` primitives it calls.  `docs/learn/MainExplained.lean` is a
 commented toy with the same shape.

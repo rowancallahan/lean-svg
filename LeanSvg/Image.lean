@@ -33,7 +33,7 @@ Pipeline, mirroring usvg's `parser/image.rs` and resvg's `image.rs`:
   shifted like any fill) and the pattern is a per-pixel sampler over the
   *absolute* device position, like `Canvas.fillMaskShader`, so bands and tiles
   stay byte-identical and locality holds by the same argument
-  (`proofs/ImageLocality.lean`).
+  (`spec/ImageLocality.lean`).
 -/
 
 namespace LeanSvg
@@ -473,7 +473,7 @@ namespace Canvas
 never opaque to tiny-skia (`Shader::is_opaque`), so this is always the
 `SourceOver` path on a coverage-scaled source, and a fully transparent sample
 leaves the pixel alone (it would blend to itself).  The shape of the loop is
-exactly `fillMaskShader`'s, which is what `proofs/ImageLocality.lean` uses. -/
+exactly `fillMaskShader`'s, which is what `spec/ImageLocality.lean` uses. -/
 def fillMaskImage (cv : Canvas) (m : Raster.Mask) (sh : Image.Rt) : Canvas := Id.run do
   let w := cv.w
   let h := cv.h

@@ -81,7 +81,7 @@ care about, at the cost of making every theorem harder to state.
 
 ## 3. Proofs: what could be added
 
-Six theorems hold today, all depending on `propext` alone. See `SPEC.md`
+Six theorems hold today, all depending on `propext` alone. See `spec/SPEC.md`
 sections 1 and 4 for what is and is not established.
 
 Two new candidates, both of which came from Rowan, are assessed below.
@@ -302,7 +302,7 @@ difficulty, since that is what was missing:
 | 1 | max input size | M3b.4 | ~half a day | a real theorem for almost no proof burden |
 | 2 | input ≠ output | M3b.0 | free | subsumed by no-clobber |
 | 3 | no clobbering | M3b.1 | 1–2 days | needs the model change |
-| 4 | output size upper bound | M3b.2 | done | `proofs/SizeBound.lean`; pure returned bytes only |
+| 4 | output size upper bound | M3b.2 | done | `spec/SizeBound.lean`; pure returned bytes only |
 | 5 | bounded work | M3b.3 | dropped | halting is enough |
 
 **Start with (1).** `render` rejects an oversized input before parsing, and
@@ -322,10 +322,10 @@ trusted `execIO` grows from six lines to about eight, gaining one
 `pathExists` call. This is also the exercise sitting in
 `learn/hello-effects/Step3NoClobber.lean`.
 
-**(4) is now proved** in `proofs/SizeBound.lean`: the encoder returns at
+**(4) is now proved** in `spec/SizeBound.lean`: the encoder returns at
 most `5 * max(w, h)^2 + 132` bytes, and the pure renderer's current limits
 imply a cap of 67,452,996 bytes on successful output. The filesystem is
-outside these statements. Check with `lake env lean proofs/SizeBound.lean`.
+outside these statements. Check with `lake env lean spec/SizeBound.lean`.
 The following records the original approach; the checked implementation
 uses recursive helpers and conservative per-row accounting.
 
@@ -383,7 +383,7 @@ So lean-zip never has to ship in the binary:
 - **Core package.** Unchanged. Zero dependencies, zero FFI, stored blocks.
   This is what `lake build` produces and what users run.
 - **Proof package.** A separate Lake package, since `require` is
-  package-level, living in something like `proofs/png/` with its own
+  package-level, living in something like `spec/png/` with its own
   lakefile. It depends on both lean-svg and lean-zip, and proves that
   lean-zip's *verified* inflate reads our output back correctly:
 
@@ -411,7 +411,7 @@ back. Not before.
 1. T43, CI proofs. Small, protects the six theorems that already hold.
 2. M3b.4, max input size. Half a day, and a complete theorem.
 3. M3b.1, no-clobber, with the model change. The centrepiece.
-4. M3b.2, output size upper bound — completed; see `proofs/SizeBound.lean`.
+4. M3b.2, output size upper bound — completed; see `spec/SizeBound.lean`.
 5. The PNG round trip, as a separate proof-time package per section 4.
 6. The locality theorem, cheap half. Shares the loop idiom with (4).
 

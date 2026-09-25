@@ -12,17 +12,14 @@ theorems), runnable with `lake env lean --run`. Read that first.
 Audit any claim yourself:
 
 ```bash
-lake env lean /dev/stdin <<'EOF'
-import LeanSvg.Cli
-#print axioms LeanSvg.Cli.parse_paths_mem
-EOF
+{ cat spec/Cli.lean; echo '#print axioms LeanSvg.Cli.parse_paths_mem'; } | lake env lean /dev/stdin
 ```
 
 Lean has three standard axioms — `propext`, `Quot.sound` and
 `Classical.choice` — and any of the three is ordinary; Mathlib rests on all
 of them. `sorryAx` is the one that matters: it means a hole, and a theorem
 reporting it proves nothing. `scripts/axiom_audit.py` finds every theorem in
-`LeanSvg/Cli.lean` and `proofs/*.lean` from the source and fails if any
+`spec/*.lean` from the source and fails if any
 depends on anything but those three.
 
 ## These proofs have not been independently reviewed
@@ -69,7 +66,7 @@ from exactly this list (one `readBinFile`, two `pathExists`, one
 `withFile … .writeNew` in the helper `writeNewFile`), or if the `lean-svg`
 main path mentions a print, stream, trace, panic or subprocess.
 
-### Where the paths come from (`LeanSvg/Cli.lean`)
+### Where the paths come from (`spec/Cli.lean`)
 
 ```lean
 theorem parse_paths_mem (h : parse args = some c) : c.input ∈ args ∧ c.output ∈ args
@@ -84,7 +81,7 @@ arguments, so the render options come from them and nothing else.
 
 ### Returned byte arrays have a bounded size
 
-`proofs/SizeBound.lean` proves, for every encoder input (even an RGBA array of
+`spec/SizeBound.lean` proves, for every encoder input (even an RGBA array of
 an unexpected length):
 
 ```lean
@@ -120,12 +117,12 @@ claim is implied. Check the proofs separately from the normal build:
 
 ```bash
 lake build
-lake env lean proofs/SizeBound.lean
+lake env lean spec/SizeBound.lean
 ```
 
 ### The input is rejected before parsing if it is too large
 
-`proofs/SizeBound.lean` also proves the cheapest of the resource theorems:
+`spec/SizeBound.lean` also proves the cheapest of the resource theorems:
 
 ```lean
 theorem render_rejects_large (opts : Options) (input : ByteArray) (h : input.size > maxInput) :

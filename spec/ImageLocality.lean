@@ -8,10 +8,10 @@ image sampler.  This file proves that the draw changes no pixel outside the
 mask's rectangle, and — the image-specific corollary — none outside any
 rectangle that contains the mask's, so an image never paints outside its
 destination box.  Same argument as `fillMaskShader_local` in
-`proofs/Locality.lean` (repeated here since proof files do not import each
+`spec/Locality.lean` (repeated here since proof files do not import each
 other): the sampler only decides *what* colour is written, never *where*.
 
-Check with `lake env lean proofs/ImageLocality.lean`.
+Check with `lake env lean spec/ImageLocality.lean`.
 -/
 import LeanSvg.Image
 

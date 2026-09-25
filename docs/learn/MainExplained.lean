@@ -75,7 +75,7 @@ def main (args : List String) : IO UInt32 := do
 
 Each theorem is a statement after the `:` and a proof after `:=`.  Lean
 checks the proof; if it is wrong, the file does not compile.  The real ones
-in `LeanSvg/Cli.lean` and `proofs/SizeBound.lean` have the same shape:
+in `spec/Cli.lean` and `spec/SizeBound.lean` have the same shape:
 "if the function returned `.ok x`, then something holds of `x`". -/
 
 /-- Empty input is an error.  `rfl` ("reflexivity"): both sides compute to the
@@ -104,7 +104,7 @@ theorem fakeRender_ok (text outputText : String)
   · simp [fakeRender_nonempty text hEmpty] at h
     exact h.symm
 
-/-- The companion path is never the output path, like `Cli.warnPath_ne`.
+/-- The companion path is never the output path, like `Cli.warnPath_ne` in `spec/Cli.lean`.
 `intro` assumes the equation; comparing the two sides' lengths (`out`'s
 length plus 10 against `out`'s length), `simp` finds the contradiction. -/
 theorem notesPath_ne (out : String) : notesPath out ≠ out := by

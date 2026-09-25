@@ -19,7 +19,7 @@ SVG image never nests.
 
 One deliberate difference from resvg: the drawing is always confined to the
 device box of the image's viewport (resvg only clips for `slice`), so an image
-never paints outside its box (`proofs/SvgImageLocality.lean`).
+never paints outside its box (`spec/SvgImageLocality.lean`).
 -/
 
 namespace LeanSvg
@@ -134,7 +134,7 @@ def composite (cv layer : Canvas) (ox oy : Nat) : Canvas :=
 /-- `composite` of a layer rendered for `box` (band pixels) onto a canvas
 sitting at `(ox, oy)`; a layer of another size, or a box left of or above the
 canvas, draws nothing, so what reaches `composite` is always inside `box`
-(`proofs/SvgImageLocality.lean`). -/
+(`spec/SvgImageLocality.lean`). -/
 def draw (cv layer : Canvas) (box : Nat × Nat × Nat × Nat) (ox oy : Nat) : Canvas :=
   let (x0, y0, x1, y1) := box
   if layer.w == x1 - x0 && layer.h == y1 - y0 && ox ≤ x0 && oy ≤ y0 then
