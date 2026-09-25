@@ -14,15 +14,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-FONTS_DIR = REPO / "tests" / "corpora" / "resvg-test-suite" / "fonts"
+from run_tests import RESVG_FONTS_DIR as FONTS_DIR, resvg_font_file_args
 
 src, dst = sys.argv[1], sys.argv[2]
 width = sys.argv[sys.argv.index("--width") + 1] if "--width" in sys.argv else None
 
 cmd = ["resvg"]
 if FONTS_DIR.is_dir():
-    cmd += ["--skip-system-fonts", "--use-fonts-dir", str(FONTS_DIR)]
+    # sorted --use-font-file, not --use-fonts-dir: see run_tests.resvg_font_file_args
+    cmd += ["--skip-system-fonts"] + resvg_font_file_args()
     # T110: generic families as resvg's integration tests set them
     # (keep in step with `run_tests.RESVG_GENERIC_ARGS`)
     cmd += ["--serif-family", "Noto Serif", "--sans-serif-family", "Noto Sans",

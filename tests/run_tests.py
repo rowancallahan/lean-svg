@@ -7,9 +7,14 @@ Outputs per test go to tests/out/:
     <name>_ours.png  our render (lean-svg)
     <name>_cmp.png   reference | ours | diff, side by side
 plus results.json and report.html for the whole run.
+
+Files listed in tests/expected_divergence.csv (file,floor,reason) are ones
+where resvg is knowingly not the reference: they pass as DIVERGE when their
+`within` is at or above their floor. Exit status is nonzero if any file FAILs.
 """
 
 import argparse
+import csv
 import json
 import shutil
 import subprocess
@@ -25,6 +30,7 @@ SVG_DIR = REPO / "tests" / "svg"
 OUT_DIR = REPO / "tests" / "out"
 DEFAULT_BIN = REPO / ".lake" / "build" / "bin" / "lean-svg"
 RESVG_FONTS_DIR = REPO / "tests" / "corpora" / "resvg-test-suite" / "fonts"
+DIVERGENCE_CSV = REPO / "tests" / "expected_divergence.csv"
 
 RENDER_TIMEOUT = 60  # seconds, per subprocess
 BAR_WIDTH = 4  # gray separator between composite panels
@@ -60,8 +66,28 @@ def resvg_font_args(no_font_pin=False, suite_generics=False):
             file=sys.stderr,
         )
         return []
-    pin = ["--skip-system-fonts", "--use-fonts-dir", str(RESVG_FONTS_DIR)]
-    return pin + (RESVG_GENERIC_ARGS if suite_generics else [])
+    return (
+        ["--skip-system-fonts"]
+        + resvg_font_file_args()
+        + (RESVG_GENERIC_ARGS if suite_generics else [])
+    )
+
+
+def resvg_font_file_args():
+    """`--use-font-file` for every suite font, in sorted order.
+
+    Not `--use-fonts-dir`: fontdb stores faces in `read_dir` order, and
+    usvg's face choice (font fallback in particular) depends on that order.
+    On ext4 `read_dir` order follows a per-filesystem hash seed, so the same
+    checkout enumerated differently on CI than locally and resvg drew
+    97_font_weight / 118_font_stretch with other faces (92.2% / 93.7% within
+    on CI vs 99.8% locally). Sorting pins one order on every machine."""
+    files = sorted(
+        p for p in RESVG_FONTS_DIR.iterdir()
+        if p.suffix.lower() in (".ttf", ".otf", ".ttc", ".otc")
+    )
+    assert files, "no font files in %s" % RESVG_FONTS_DIR
+    return [arg for f in files for arg in ("--use-font-file", str(f))]
 
 
 # `--<generic>-family` flags matching resvg's integration-test fontdb setup.
@@ -99,6 +125,58 @@ def load_rgba(path):
             return np.asarray(img.convert("RGBA"), dtype=np.int16)
     except Exception:
         return None
+
+
+# --------------------------------------------------------------------------
+# expected divergence
+# --------------------------------------------------------------------------
+
+
+def load_divergence(path=DIVERGENCE_CSV):
+    """{name: (floor, reason)} for files expected to differ from resvg.
+
+    Such a file passes (as DIVERGE) when `within >= floor` instead of the
+    global threshold; each row says why resvg is not the reference for it."""
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        assert reader.fieldnames == ["file", "floor", "reason"], (
+            "%s: header must be file,floor,reason, got %s" % (path, reader.fieldnames)
+        )
+        rows = list(reader)
+    table = {}
+    for row in rows:
+        name, reason = row["file"], row["reason"]
+        floor = float(row["floor"])
+        assert name not in table, "%s: duplicate row for %s" % (path, name)
+        assert (SVG_DIR / (name + ".svg")).is_file(), (
+            "%s: %s has no tests/svg/%s.svg" % (path, name, name)
+        )
+        assert 0.0 < floor < 1.0, "%s: %s floor %r not in (0, 1)" % (path, name, floor)
+        assert reason.strip(), "%s: %s has no reason" % (path, name)
+        table[name] = (floor, reason)
+    return table
+
+
+def classify(result, threshold, divergence):
+    """Set result["status"]: PASS (within the threshold of resvg), DIVERGE
+    (listed, below the threshold but at or above its floor) or FAIL. Only
+    FAIL fails the run. result["passed"] keeps meaning "matches resvg"
+    (`score_criteria.py --local-json` reads it that way)."""
+    listed = divergence.get(result["name"])
+    result["floor"] = listed[0] if listed else None
+    within = result["within"]
+    if result["error"] or within is None:
+        status = "FAIL"
+    elif within >= threshold:
+        status = "PASS"
+    elif listed and within >= listed[0]:
+        status = "DIVERGE"
+    else:
+        status = "FAIL"
+    result["status"] = status
+    assert result["passed"] == (status == "PASS")
+    # a listed file that now reaches the threshold: the list can shrink
+    result["unlist"] = bool(listed) and status == "PASS"
 
 
 # --------------------------------------------------------------------------
@@ -257,7 +335,7 @@ COLUMNS = [
     ("max_d", 6, ">"),
     ("ms ours", 9, ">"),
     ("ms resvg", 9, ">"),
-    ("result", 6, "<"),
+    ("result", 7, "<"),
 ]
 
 
@@ -293,10 +371,12 @@ def print_table(results):
                     "-" if r["max_d"] is None else r["max_d"],
                     num(r["ms_ours"], "%.1f"),
                     num(r["ms_resvg"], "%.1f"),
-                    "PASS" if r["passed"] else "FAIL",
+                    r["status"],
                 ]
             )
         )
+        if r["status"] == "FAIL" and r["floor"] is not None:
+            print("      ! below expected-divergence floor %.3f" % r["floor"])
         if r["error"]:
             print("      ! %s" % r["error"])
 
@@ -348,16 +428,24 @@ def write_report(path, results, config, summary):
             esc(summary["generated"]),
             config["tol"],
             config["threshold"],
-            esc("%d/%d passed" % (summary["passed"], summary["total"])),
+            esc(
+                "%d/%d passed, %d diverge"
+                % (summary["passed"], summary["total"], summary["diverged"])
+            ),
         )
     )
     for r in results:
-        cls = "test" if r["passed"] else "test fail"
+        cls = "test fail" if r["status"] == "FAIL" else "test"
         parts.append('<div class="%s">\n' % cls)
         parts.append(
             '<h2>%s <span class="badge">%s</span></h2>\n'
-            % (esc(r["name"]), "PASS" if r["passed"] else "FAIL")
+            % (esc(r["name"]), r["status"])
         )
+        if r["floor"] is not None:
+            parts.append(
+                '<div class="metrics">expected divergence (floor %.3f): %s</div>\n'
+                % (r["floor"], esc(r["reason"]))
+            )
         if r["error"]:
             parts.append('<div class="err">%s</div>\n' % esc(r["error"]))
         parts.append(
@@ -443,25 +531,40 @@ def main():
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    divergence = load_divergence()
     resvg_args = resvg_font_args(args.no_font_pin)
     results = [
         run_one(svg, binary, args.tol, args.threshold, resvg_args) for svg in svgs
     ]
+    for r in results:
+        classify(r, args.threshold, divergence)
+        r["reason"] = divergence[r["name"]][1] if r["floor"] is not None else None
     print_table(results)
 
-    passed = sum(1 for r in results if r["passed"])
+    passed = sum(1 for r in results if r["status"] == "PASS")
+    diverged = sum(1 for r in results if r["status"] == "DIVERGE")
+    failed = sum(1 for r in results if r["status"] == "FAIL")
     errors = sum(1 for r in results if r["error"])
     total = len(results)
+    assert passed + diverged + failed == total
+    unlist = [r["name"] for r in results if r["unlist"]]
     print()
+    if unlist:
+        print(
+            "now within threshold, remove from %s: %s"
+            % (DIVERGENCE_CSV.name, ", ".join(unlist))
+        )
     print(
-        "%d/%d passed, %d failed, %d render errors  (tol=%d, threshold=%.3f)"
-        % (passed, total, total - passed, errors, args.tol, args.threshold)
+        "%d/%d passed, %d expected divergence (DIVERGE), %d failed, "
+        "%d render errors  (tol=%d, threshold=%.3f)"
+        % (passed, total, diverged, failed, errors, args.tol, args.threshold)
     )
 
     summary = {
         "total": total,
         "passed": passed,
-        "failed": total - passed,
+        "diverged": diverged,
+        "failed": failed,
         "errors": errors,
         "generated": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -481,7 +584,7 @@ def main():
     write_report(OUT_DIR / "report.html", results, config, summary)
     print("wrote %s and %s" % (OUT_DIR / "results.json", OUT_DIR / "report.html"))
 
-    return 1 if (passed != total or errors) else 0
+    return 1 if (failed or errors) else 0
 
 
 if __name__ == "__main__":

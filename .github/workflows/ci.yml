@@ -54,6 +54,11 @@ jobs:
       - name: Invariants (axioms, three effects, no stray IO, mechanical checks)
         run: bash scripts/check-theorems.sh
 
+      # Offline only: licence-file hashes and file lists in licenses/.
+      # --online re-downloads licences and fonts from upstream; run it by hand.
+      - name: Licence texts
+        run: python3 tests/check_licenses.py
+
       - name: Save elan cache
         if: always() && steps.elan-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
