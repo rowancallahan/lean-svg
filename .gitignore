@@ -6,7 +6,7 @@
 .lake/
 .worktrees/
 __pycache__/
-learn/
+/learn/
 learn/hello-effects/.lake/
 tests/corpora/*
 !tests/corpora/realworld/

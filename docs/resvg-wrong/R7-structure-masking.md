@@ -1,5 +1,11 @@
 # R7 — resvg-wrong research: structure and masking
 
+> 2026-09-25: `LeanSvg/Effect.lean` (`Prog`, `Op`, `execIO` and the model
+> file-system theorems) was removed; every file-system call is now in
+> `main` in `Main.lean` (see `docs/DECISIONS.md`). Mentions of it below are
+> historical; the one-file-read argument they make still holds, because
+> the renderer is pure and `main` reads exactly one file.
+
 Evidence gathered 2026-09-23 against resvg/usvg **0.48.1** (built from
 `cargo install resvg --version 0.48.1 --locked`, same as the corpus gate),
 the resvg-test-suite's own `results.csv` and reference PNGs, and headless

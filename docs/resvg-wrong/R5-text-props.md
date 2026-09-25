@@ -1,5 +1,11 @@
 # R5 — resvg-wrong research: text properties
 
+> 2026-09-25: `LeanSvg/Effect.lean` (`Prog`, `Op`, `execIO` and the model
+> file-system theorems) was removed; every file-system call is now in
+> `main` in `Main.lean` (see `docs/DECISIONS.md`). Mentions of it below are
+> historical; the one-file-read argument they make still holds, because
+> the renderer is pure and `main` reads exactly one file.
+
 Per-file research on the 14 text-related files where resvg's own test suite
 (`tests/corpora/resvg-test-suite/results.csv`) marks resvg **wrong**
 (`resvg` column = 2). Comparison sheet: `R5-text-props.png` (one row per

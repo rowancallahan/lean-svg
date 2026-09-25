@@ -5,25 +5,25 @@ Every claim below is either **proved** (checked by Lean's kernel), **enforced**
 test in the code), or **not established**. The fourth category is the important
 one and it is listed in full.
 
-New to this? `learn/` is a 250-line standalone project that builds the same
-ideas from a hello world, with an exercise. Read that first.
+New to this? `docs/learn/MainExplained.lean` is a commented toy with the same
+shape as `Main.lean` (a fake renderer, the same file-system calls, small
+theorems), runnable with `lake env lean --run`. Read that first.
 
 Audit any claim yourself:
 
 ```bash
-lake env lean --run /dev/stdin <<'EOF'
-import LeanSvg.Effect
-#print axioms LeanSvg.Prog.renderProgram_spec
+lake env lean /dev/stdin <<'EOF'
+import LeanSvg.Cli
+#print axioms LeanSvg.Cli.parse_paths_mem
 EOF
 ```
 
-`[propext]` means propositional extensionality only, which is part of Lean's
-foundations. Lean has three standard axioms — `propext`, `Quot.sound` and
+Lean has three standard axioms — `propext`, `Quot.sound` and
 `Classical.choice` — and any of the three is ordinary; Mathlib rests on all
 of them. `sorryAx` is the one that matters: it means a hole, and a theorem
-reporting it proves nothing. The seven effect theorems report `[propext]`. The size bounds below report
-`[propext, Quot.sound]` for the encoder and
-`[propext, Classical.choice, Quot.sound]` for the renderer, with no `sorryAx`.
+reporting it proves nothing. `scripts/axiom_audit.py` finds every theorem in
+`LeanSvg/Cli.lean` and `proofs/*.lean` from the source and fails if any
+depends on anything but those three.
 
 ## These proofs have not been independently reviewed
 
@@ -32,105 +32,55 @@ Read this before relying on anything below.
 The axiom list tells you a proof has no holes. It does not tell you the
 theorem says what you want, and that is the harder question. A flawless proof
 of the wrong statement is worthless, and this specification has already
-contained one: `runFS_frame` is true and was for a time described as "only
-touches the two files you named", which it does not establish — see section 4
-on input and output paths.
+contained one: a frame theorem about a model file system (since removed, see
+`docs/DECISIONS.md`) was for a time described as "only touches the two files
+you named", which it did not establish.
 
 So the statements themselves need checking by a human, line by line, against
 what a reader would take them to mean. That review has not happened yet.
 Until it does, treat section 1 as *claims whose proofs check*, not as
-*guarantees*. The model in `LeanSvg/Effect.lean` and the eleven-line
-`Prog.execIO` deserve the most scrutiny, because the effect claims are stated
-relative to them. The byte-array size bounds below concern pure functions
-and do not depend on the filesystem model or interpreter.
+*guarantees*. The file-system behaviour is not proved at all: it is `main` in
+`Main.lean`, read by eye (section 1).
 
 ---
 
-## 1. Proved
+## 1. Proved, and what is read by eye
 
-The seven effect theorems live in `LeanSvg/Effect.lean` and are stated against a
-**model** of the filesystem, `FS := String → Option ByteArray`, a function
-from a path to its contents, or `none` if the path is absent. This is what
-makes "the output path already exists" expressible at all: the earlier model,
-`String → ByteArray`, gave every path contents unconditionally, so a missing
-file and an empty file were indistinguishable and no-clobber could not even be
-stated. The separate output-size theorems live in `proofs/SizeBound.lean`.
+### File-system behaviour: `main`, trusted, not proved
 
-### Nothing but the output file is touched
+Every file-system call `lean-svg` makes is in `main` in `Main.lean`, written
+as plain Lean `IO` calls, about 30 lines. In order:
 
-> Running any program leaves every path except the output path holding exactly
-> what it held before.
+1. `Cli.parse args`; on `none` (bad arguments), exit `1`.
+2. `IO.FS.readBinFile` the input path.
+3. `System.FilePath.pathExists` the output path; if it exists, exit `1`.
+   With `--warnings`, the same for `<output>.warnings.txt` (`Cli.warnPath`).
+4. `renderWithWarnings` (pure); on `.error`, exit `1`.
+5. Create the output file with `IO.FS.withFile … .writeNew` (O_EXCL: fails
+   rather than overwrite) and write the PNG.
+6. If the warnings text is empty, exit `0`. Otherwise, with `--warnings`,
+   create `<output>.warnings.txt` the same way and write it; exit `2` either
+   way (without `--warnings` the warnings are dropped).
 
-```lean
-theorem runFS_frame (inp out : String) (p : Prog α) (fs : FS) (q : String) (hq : q ≠ out) :
-    (runFS inp out p fs).2 q = fs q
-```
-
-### The result depends only on the input file and whether the output exists
-
-> If two filesystems agree on the input path, and agree on whether the output
-> path is present (not on what it holds — the program can query only that),
-> every program returns the same answer on both. So a program cannot secretly
-> read anything else, or the output path's contents.
-
-```lean
-theorem runFS_input_only (inp out : String) (p : Prog α) (fs fs' : FS)
-    (hin : fs inp = fs' inp) (hout : (fs out).isSome = (fs' out).isSome) :
-    (runFS inp out p fs).1 = (runFS inp out p fs').1
-```
-
-### The renderer refuses to clobber, and otherwise fails cleanly or writes exactly its output
-
-> Read the input. If the output path already exists, fail immediately and
-> touch nothing. Otherwise run the pure renderer: if it errors, the filesystem
-> is untouched; if it succeeds, the output path holds exactly the bytes it
-> produced. There is no fourth outcome.
-
-```lean
-theorem renderProgram_spec (clobberError : ε)
-    (render : ByteArray → Except ε (ByteArray × ByteArray)) (inp out : String) (fs : FS) :
-    runFS inp out (renderProgram clobberError render) fs =
-      if (fs out).isSome then
-        (.error clobberError, fs)
-      else
-        match render ((fs inp).getD ByteArray.empty) with
-        | .ok (png, warn) => (.ok (warn.size != 0), fs.write out png)
-        | .error e => (.error e, fs)
-```
-
-This is the default (strict) program (T98b). `render` also returns a
-warnings text; the strict program never writes it and returns only whether it
-was non-empty, which `Main` turns into exit code `2`. With `--warnings`,
-`Main` runs `renderProgramWarn` instead (T98): it refuses if either the output
-path or `<out>.warnings.txt` exists, and otherwise also writes the non-empty
-warnings text there (`renderProgramWarn_spec`, `renderProgramWarn_ok_frame`:
-nothing but those two paths changes; `renderProgramWarn_never_overwrites`:
-only paths that were absent change).
-
-### No-clobber
-
-> If the output path already holds something when the program starts, running
-> it changes the file system not at all.
-
-```lean
-theorem renderProgram_no_clobber (clobberError : ε)
-    (render : ByteArray → Except ε (ByteArray × ByteArray))
-    (inp out : String) (fs : FS) (b : ByteArray) (h : fs out = some b) :
-    (runFS inp out (renderProgram clobberError render) fs).2 = fs
-```
-
-The remaining three are corollaries, each with an added `fs out = none`
-hypothesis (a success or an ordinary render error can only happen once
-no-clobber has let the program past its first check): `renderProgram_error_no_write`
-(on error, nothing changed), `renderProgram_ok_output` (on success, the output
-path holds `some` the bytes), `renderProgram_ok_frame` (nothing but the
-output path ever moves), plus `renderProgram_never_overwrites` (a changed path
-was absent before).
-
-`Main.lean` writes nothing to stdout or stderr; its only other output is the
-exit code (`0` ok, `2` ok with warnings, `1` failure). `Op` has no operation
-that could print, and `tests/check_invariants.py` fails if the `lean-svg`
+Any `IO` error in steps 2–6 is caught and is exit `1`. Nothing is written to
+stdout or stderr. `tests/check_invariants.py` fails if `IO` or `System.`
+appears anywhere under `LeanSvg/`, if `Main.lean`'s file-system calls differ
+from exactly this list (one `readBinFile`, two `pathExists`, one
+`withFile … .writeNew` in the helper `writeNewFile`), or if the `lean-svg`
 main path mentions a print, stream, trace, panic or subprocess.
+
+### Where the paths come from (`LeanSvg/Cli.lean`)
+
+```lean
+theorem parse_paths_mem (h : parse args = some c) : c.input ∈ args ∧ c.output ∈ args
+theorem parse_paths_ne_empty (h : parse args = some c) : c.input ≠ "" ∧ c.output ≠ ""
+theorem parse_warnings_iff (h : parse args = some c) : c.warnings = true ↔ "--warnings" ∈ args
+theorem warnPath_ne (out : String) : warnPath out ≠ out
+```
+
+So the two paths `main` touches are command-line arguments, verbatim, and the
+warnings file is never the output file. `parse` is a pure function of the
+arguments, so the render options come from them and nothing else.
 
 ### Returned byte arrays have a bounded size
 
@@ -155,8 +105,17 @@ theorem render_size_le_const (opts : Options) (input png : ByteArray)
     (hr : render opts input = .ok png) : png.size ≤ 67452996
 ```
 
-These are claims about **function outputs only**. The filesystem, operating
-system and `execIO` are outside these theorems; no disk-space or PNG-validity
+The same bound is stated for the function `main` calls:
+
+```lean
+theorem renderWithWarnings_size_le (options : Options) (inputBytes pngBytes : ByteArray)
+    (warnings : Array String)
+    (h : renderWithWarnings options inputBytes = .ok (pngBytes, warnings)) :
+    pngBytes.size ≤ 67452996
+```
+
+These are claims about **function outputs only**. The filesystem and
+operating system are outside these theorems; no disk-space or PNG-validity
 claim is implied. Check the proofs separately from the normal build:
 
 ```bash
@@ -175,15 +134,17 @@ theorem render_rejects_large (opts : Options) (input : ByteArray) (h : input.siz
 
 `maxInput` is 64 MiB. The check is the first line of `render`, before `Xml.parse`
 runs at all, so the proof does not touch the XML/SVG pipeline.
+`renderWithWarnings_rejects_large` states the same for `renderWithWarnings`.
 
 ---
 
 ## 2. Enforced without a theorem
 
-- **There are exactly three effects.** `Op` has three constructors, `readInput`,
-  `outputExists` and `writeOutput`. A program that opens a socket or reads a
-  second file cannot be *written down*, so no theorem is needed. This is the
-  strongest guarantee in the project and it is structural.
+- **Only `Main.lean` does `IO`.** The renderer is `renderWithWarnings :
+  Options → ByteArray → Except String (ByteArray × Array String)`; its type
+  has no `IO`, and with no `unsafe` or `@[extern]` (checked below) a pure
+  function cannot open a file, a socket or a process. The invariant check in
+  section 1 keeps `IO` out of `LeanSvg/` and pins `Main.lean`'s calls.
 - **Everything terminates.** No `partial` anywhere, so Lean's termination
   checker has accepted every definition. Note what this does *not* say: it
   bounds nothing about how long.
@@ -213,29 +174,24 @@ Read this section as the specification's honest edge.
 **The output is not proved to be a valid PNG.** There is no PNG specification in
 Lean here. The encoder is ordinary code, tested against a real decoder.
 
-**No-clobber is now proved** (`renderProgram_no_clobber`, section 1). This
-entry is kept, struck through in spirit, as a record of what changed: the
-model was `FS := String → ByteArray`, every path had contents unconditionally,
-so a missing file read as empty and "this file already exists" was not
-expressible. It is now `String → Option ByteArray`.
+**No-clobber is not a theorem.** It is `main`'s `pathExists` check plus the
+exclusive create (`.writeNew`, O_EXCL), which the Lean runtime and the OS
+provide.
 
 **Input and output paths given the same value are handled by no-clobber, not
-specially.** `lean-svg a.svg a.svg` reads the file, then queries whether `a.svg`
+specially.** `lean-svg a.svg a.svg` reads the file, then checks whether `a.svg`
 (the output path) exists — it does, since it is also the input — and refuses.
 Nothing distinguishes this from any other pre-existing output; there is no
 separate "paths differ" check, by design (see `PLAN.md` M3b.0).
 
 **Time and memory are not bounded.** Termination is guaranteed, duration is not.
 
-**`Prog.execIO` is trusted, not proved.** Eleven lines mapping the three
-operations onto `System.FilePath.pathExists`, `IO.FS.readBinFile` and
-`IO.FS.writeBinFile`. The theorems describe the model; this function is the
-claim that the model corresponds to reality. It inherits whatever the Lean
-runtime and the operating system do, including symlinks, permissions and
-races — including a TOCTOU race between the `pathExists` check and the
-eventual `writeBinFile`: the model treats the check as atomic with the rest of
-the program, which a real filesystem does not guarantee under concurrent
-writers.
+**`main` is trusted, not proved.** It inherits whatever the Lean runtime and
+the operating system do, including symlinks and permissions. A file created
+at the output path between the `pathExists` check and the write makes the
+exclusive create fail (exit `1`, nothing overwritten). With `--warnings`, a
+warnings file created in that window makes the second create fail after the
+PNG was written: exit `1` with the PNG left in place.
 
 **Rendering fidelity is empirical and always will be.** Measured against resvg:
 a file passes when ≥ 99% of pixels are within 8 levels. That is a measurement,
@@ -247,15 +203,11 @@ not a claim, and the reference is another program, not a specification.
 
 In order of how much weight each carries:
 
-1. **The model.** `FS` and `runFS` define what the theorems mean. A wrong model
-   makes a correct proof worthless — no-clobber (section 1) needed the model
-   itself changed, from `String → ByteArray` to `String → Option ByteArray`,
-   before the property could even be stated, which is a live example of the
-   risk.
-2. **`execIO`**, eleven lines, unproved, including the TOCTOU gap noted above.
-3. **The Lean kernel and toolchain** (v4.34.0), and `propext`.
-4. **The invariants** in `docs/DECISIONS.md`, kept by review rather than by types.
+1. **`main` in `Main.lean`**, about 30 lines, read by eye, and the Lean
+   runtime's `readBinFile`, `pathExists` and `withFile … .writeNew`.
+2. **The Lean kernel and toolchain** (v4.34.0), and the standard axioms.
+3. **The invariants** in `docs/DECISIONS.md`, kept by review and
+   `tests/check_invariants.py` rather than by types.
 
 Everything else in the renderer is a pure function from `ByteArray` to
-`Except String ByteArray`, and the theorems above say exactly what happens to
-the filesystem on either outcome.
+`Except String (ByteArray × Array String)`.

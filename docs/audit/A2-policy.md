@@ -506,5 +506,5 @@ follow-up task, not part of this audit.
   that no longer exists. Recommend cleaning up `DESIGN.md` §3.11's
   leftover "not implemented" paragraph and removing or repurposing the dead
   `isKnownUnsupported` stub in a follow-up (out of scope for this
-  policy audit itself, and `LeanSvg/Filter.lean` isn't `Effect.lean`, but
+  policy audit itself, and `LeanSvg/Filter.lean` isn't the I/O code, but
   it's still a code change this task didn't set out to make).
