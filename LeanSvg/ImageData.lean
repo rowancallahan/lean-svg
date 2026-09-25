@@ -6,7 +6,7 @@ The shared type between the embedded-image decoders (`PngDecode`,
 the SVG reach a decoder: `href="data:..."`. There is no path from here to a
 file or a URL.
 
-Contract every decoder must meet (T61–T63), each proved in `proofs/`:
+Contract every decoder must meet (T61–T63), each proved in `spec/`:
 * total: a plain function `ByteArray → Option Decoded`, no `partial`;
 * `none` on anything malformed, truncated, unsupported or over budget;
 * `some d → d.px.size = d.w * d.h * 4 ∧ 0 < d.w ∧ 0 < d.h ∧ d.w * d.h ≤ maxPixels`,

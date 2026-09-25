@@ -18,6 +18,9 @@
    links) must not mention a print, a standard stream, a debug trace, a
    panic or a subprocess; the only outputs are the files `main` writes and
    the exit code.
+5. No `theorem` under `LeanSvg/`: theorems live in `spec/`, where the axiom
+   audit and `spec/README.md` find them.  Small `example`s next to the code
+   are fine.
 
 The dev tools (`FontDump.lean`, `ShapeDump.lean`, ...) are separate
 executables that `lean-svg` does not link, and `docs/learn/*.lean` is a
@@ -186,11 +189,26 @@ def check_no_output_on_main_path() -> None:
     print("-- no-output: no print/stream/trace/panic/process on the lean-svg main path")
 
 
+THEOREM_RE = re.compile(r"^\s*(?:private\s+|protected\s+|noncomputable\s+)*theorem\b")
+
+
+def check_no_theorems_in_library() -> None:
+    offenders = []
+    for path in [REPO / "LeanSvg.lean"] + lean_files():
+        stripped = strip_comments_and_strings(path.read_text())
+        for lineno, line in enumerate(stripped.splitlines(), start=1):
+            if THEOREM_RE.match(line):
+                offenders.append(f"{path.relative_to(REPO)}:{lineno}: {line.strip()}")
+    assert not offenders, "FAIL [spec]: theorem outside spec/:\n" + "\n".join(offenders)
+    print("-- spec: no theorem under LeanSvg/ (they are in spec/)")
+
+
 def main() -> None:
     check_no_io_in_library()
     check_main_fs_calls()
     check_no_output_on_main_path()
     check_mechanical_invariants()
+    check_no_theorems_in_library()
     print("invariants ok")
 
 

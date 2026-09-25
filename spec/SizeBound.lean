@@ -16,7 +16,7 @@ Public bounds:
   current limits.  `renderWithWarnings_rejects_large` and
   `renderWithWarnings_size_le` state the same for `renderWithWarnings`.
 
-Check with `lake env lean proofs/SizeBound.lean`.
+Check with `lake env lean spec/SizeBound.lean`.
 -/
 import LeanSvg.Render
 
@@ -255,7 +255,7 @@ end LeanSvg.Png.SizeBound
 
 namespace LeanSvg
 
-/-- **Max input size.** `render` rejects an oversized input before parsing.
+/-- `render` rejects an input over `maxInput` (64 MiB) before parsing.
 This is the whole theorem: the check is the first line of `render`, so
 nothing about the XML/SVG pipeline is involved. -/
 theorem render_rejects_large (opts : Options) (input : ByteArray) (h : input.size > maxInput) :

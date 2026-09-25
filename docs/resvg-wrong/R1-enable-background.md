@@ -82,7 +82,7 @@ disagree with the suite PNG on every file.
 
 **Classification, all 20 files: (c), deliberately not supported.** Two
 independent reasons converge: (1) resvg 0.48.1, our reference implementation
-per `SPEC.md`, does not implement it and explicitly will not
+per `spec/SPEC.md`, does not implement it and explicitly will not
 ("not planed"); (2) implementing real accumulation requires re-rendering an
 unbounded number of earlier-painted sibling subtrees into an offscreen buffer
 on demand, sized by however far back the nearest `new` boundary is — exactly

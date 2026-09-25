@@ -525,7 +525,7 @@ and would settle it.
 
 Note for whoever does it: this is also the first dependency the project would
 take, so it widens the trusted computing base from "Lean core only". That is
-a real trade and should be stated in `SPEC.md` when it lands. A verified
+a real trade and should be stated in `spec/SPEC.md` when it lands. A verified
 compressor is still far better than an unverified one, and better than
 shipping 55× files.
 

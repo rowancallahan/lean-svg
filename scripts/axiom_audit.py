@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Axiom audit for the proof boundary (T43/T43b).
 
-Discovers every `theorem` in `LeanSvg/Cli.lean` (the command-line
-theorems) and under `proofs/*.lean` by scanning the source -- not from a
-hand-maintained list, so a new theorem cannot silently dodge the audit --
-then elaborates a `#print axioms` for each and checks that it depends on a
-subset of the standard three axioms (`propext`, `Classical.choice`,
-`Quot.sound`) and nothing else.  `sorryAx` or any other axiom fails the
-audit, as does a theorem that fails to elaborate at all.
+Discovers every `theorem` in `spec/*.lean` by scanning the source -- not
+from a hand-maintained list, so a new theorem cannot silently dodge the
+audit -- then elaborates a `#print axioms` for each and checks that it
+depends on a subset of the standard three axioms (`propext`,
+`Classical.choice`, `Quot.sound`) and nothing else.  `sorryAx` or any
+other axiom fails the audit, as does a theorem that fails to elaborate.
 """
 import re
 import subprocess
@@ -103,18 +102,15 @@ def audit(names: list[str], prelude: str, label: str) -> None:
 
 
 def main() -> None:
-    cli_file = REPO / "LeanSvg" / "Cli.lean"
-    audit(theorems_in(cli_file), "import LeanSvg", str(cli_file.relative_to(REPO)))
-
-    proofs_dir = REPO / "proofs"
-    found_proof_theorem = False
-    for path in sorted(proofs_dir.glob("*.lean")):
+    spec_dir = REPO / "spec"
+    found = False
+    for path in sorted(spec_dir.glob("*.lean")):
         names = theorems_in(path)
         if not names:
             continue
-        found_proof_theorem = True
+        found = True
         audit(names, path.read_text(), str(path.relative_to(REPO)))
-    assert found_proof_theorem, "no theorem found under proofs/ -- check the glob"
+    assert found, "no theorem found under spec/ -- check the glob"
 
     print("axioms ok")
 

@@ -3759,8 +3759,7 @@ def strokeBoxOf (st : Style) (cmds : Array PathCmd) : Option Box := Id.run do
         b := Box.cover b p
   return b
 
-/-- `Use.expand` must not let `use` nest deeper than compositing layers may. -/
-theorem use_maxDepth_le : Use.maxDepth ≤ maxLayerDepth := by decide
+-- `Use.maxDepth ≤ maxLayerDepth` is proved in spec/Svg.lean (`use_maxDepth_le`).
 
 /-- The rect percentages resolve against at the root, as `defsScan` computes
 it: the root's `viewBox` size, else its own resolved size (T47 hands it to

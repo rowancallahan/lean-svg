@@ -9,12 +9,13 @@ exists (with `--warnings`, also if `<out>.warnings.txt` exists); run the pure
 (O_EXCL) and write the PNG; with `--warnings` and a non-empty warnings text,
 create and write `<out>.warnings.txt` the same way. Any `IO` error is exit 1.
 `tests/check_invariants.py` pins this list of calls and keeps `IO` out of
-`LeanSvg/`. SPEC.md section 1 has the details.
+`LeanSvg/`. `spec/SPEC.md` section 1 has the details.
 
-**Claimed and machine-checked:** `LeanSvg/Cli.lean` (the paths are
-command-line arguments verbatim, non-empty; `--warnings` mode iff the flag is
-given; the warnings path is not the output path) and `proofs/*.lean` (output
-size bound, input size limit, decoder and locality results). Axioms: at most
+**Claimed and machine-checked** (`spec/`, listed in `spec/README.md`):
+`spec/Cli.lean` (the paths are command-line arguments verbatim, non-empty;
+`--warnings` mode iff the flag is given; the warnings path is not the output
+path) and the other `spec/*.lean` (output size bound, input size limit,
+decoder and locality results). Axioms: at most
 the standard three, no `sorry` (`scripts/axiom_audit.py`).
 
 **Claimed by construction** (enforced by the language, checked by grep):
@@ -27,7 +28,7 @@ the standard three, no `sorry` (`scripts/axiom_audit.py`).
 - No floats anywhere.
 - Bounded resources: output canvas ≤ 16384 px per side and ≤ 2^24 px; input
   size ≤ 64 MiB, rejected before parsing (`render_rejects_large`,
-  `proofs/SizeBound.lean`); every parsed number clamped to ±2^22 px; XML depth
+  `spec/SizeBound.lean`); every parsed number clamped to ±2^22 px; XML depth
   ≤ 64; elements ≤ 10^6.
 
 **Not claimed:** pixel-level correctness. SVG has no formal rendering
@@ -51,7 +52,7 @@ An attacker controls the input file completely. Goals we defend against:
 | Memory exhaustion via dimensions | canvas alloc | dimension and pixel caps checked before allocation |
 | CPU exhaustion via numbers (`1e999999999`, megabytes of digits) | number parsing, big-int math | 18 significant digits kept, exponent saturates at 10^5 and clamps at ±60, result clamped |
 | Malformed input crashes | parser | every read past the end returns 0; every array op is bounds-checked |
-| Writing somewhere unexpected | I/O layer | `main` writes only the output path and `Cli.warnPath` of it; `parse_paths_mem` |
+| Writing somewhere unexpected | I/O layer | `main` writes only the output path and `Cli.warnPath` of it; `parse_paths_mem` (`spec/Cli.lean`) |
 | Overwriting an existing file at the output path | I/O layer | `pathExists` checked before any write, and the create is exclusive (`.writeNew`, O_EXCL) |
 | Memory exhaustion via input file size | file read | input capped at 64 MiB, checked before parsing; `render_rejects_large` |
 
@@ -482,7 +483,7 @@ Render time per 200×200 file: 28–43 ms including process start.
 | file | role |
 |---|---|
 | `Main.lean` | `main`: every file-system call (trusted, read by eye) |
-| `LeanSvg/Cli.lean` | argument parsing, `warnPath`, theorems about where paths come from |
+| `LeanSvg/Cli.lean` | argument parsing, `warnPath` |
 | `LeanSvg/Bytes.lean` | byte scanning helpers, all bounded |
 | `LeanSvg/Fixed.lean` | `Fx`, number and length parsing with cost bounds |
 | `LeanSvg/Geom.lean` | `Pt`, `Mat`, trig, `PathCmd`, `flatten`, stroker |
@@ -501,6 +502,7 @@ Render time per 200×200 file: 28–43 ms including process start.
 | `LeanSvg/Units.lean` | CSS Values 4 units (T92): viewport and Noto Sans font metrics |
 | `LeanSvg/BasicShape.lean` | CSS basic shapes for `clip-path` (T92) |
 | `LeanSvg/Render.lean` | `Options`, caps, `canvasSetup`, `drawShape`, layer stack, `render` |
+| `spec/` | theorems about the modules above; `spec/README.md` lists them |
 | `tests/svg/` | fidelity corpus; `tests/adversarial/` hostile inputs |
 
 ## 6. Per-file pass criteria (T100)

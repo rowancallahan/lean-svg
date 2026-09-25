@@ -8,11 +8,11 @@ outwards) cut to the window being painted (`SvgImage.layerBox`), and
 sub-document draws, the layer is all that is composited, so no pixel outside
 the viewport's device box changes: `svgImage_in_box`.
 
-The argument is `compositeNormal_local` of `proofs/Locality.lean` (repeated
+The argument is `compositeNormal_local` of `spec/Locality.lean` (repeated
 here since proof files do not import each other), sharpened by the loop's own
 `x ≥ w` break so that it speaks of pixel coordinates rather than flat indices.
 
-Check with `lake env lean proofs/SvgImageLocality.lean`.
+Check with `lake env lean spec/SvgImageLocality.lean`.
 -/
 import LeanSvg.SvgImage
 

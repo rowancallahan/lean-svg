@@ -645,7 +645,7 @@ def decodeRaw (bs : ByteArray) : Option ImageData.Decoded := Id.run do
   return some ⟨f.w, f.h, px⟩
 
 /-- Decode a JPEG to straight RGBA8. The final check makes the
-`ImageData` contract hold by construction (`proofs/JpegDecode.lean`). -/
+`ImageData` contract hold by construction (`spec/JpegDecode.lean`). -/
 def decode (bs : ByteArray) : Option ImageData.Decoded :=
   match decodeRaw bs with
   | some d =>
