@@ -124,8 +124,10 @@ Real-world test corpus — tests/corpora/realworld/ (test inputs only, not in
     universe/t/texlive-base/texlive-base_2023.20240207-1_all.deb, member
     usr/share/doc/texlive-doc/fonts/amsfonts/OFL.txt.gz, decompressed).
 
-Original artwork — tests/svg/*.svg, docs/readme/*.svg and the PNG images in
-  README.md. Apache-2.0, authored for this project.
+Original artwork — tests/svg/*.svg, docs/readme/*.svg and the README's renders
+  of them. Apache-2.0, authored for this project. The README's renders of
+  real-world charts (docs/readme/*.png) carry the licence shown beside each
+  chart in README.md.
 
 ALGORITHMS RE-IMPLEMENTED
 
