@@ -102,10 +102,6 @@ def f32OfDec (neg : Bool) (mant : Nat) (e : Int) : F32 :=
   let v := if e ≥ 0 then ofRatBig (mant * 10 ^ e.toNat) 1 else ofRatBig mant (10 ^ (-e).toNat)
   if neg then F32.neg v else v
 
-/-- A signed binary32 from a 16.16 value (a fixed-point computation's result). -/
-def f32Of16 (v : Int) : F32 :=
-  if v < 0 then F32.neg (ofRatBig (-v).toNat 65536) else ofRatBig v.toNat 65536
-
 /-- π to 50 digits, as `piNum / piDen`. -/
 def piNum : Nat := 314159265358979323846264338327950288419716939937510
 def piDen : Nat := 100000000000000000000000000000000000000000000000000
@@ -463,9 +459,6 @@ is of the viewport's `ref`.  16.16 in, 16.16 out. -/
 def convLen (obb : Bool) (ref : Fx) : Len → Int
   | .num v => v
   | .pct v => if obb then Int.ediv v 100 else Int.ediv (v * ref) 25600
-
-/-- `x * bbox.w + bbox.x` with `x` a 16.16 fraction and the box in `Fx`. -/
-def fracX (f : Int) (o len : Fx) : Fx := Int.ediv (f * len) 65536 + o
 
 /-- `NonZeroRect::from_xywh`. -/
 def mkRect (x y w h : Fx) : Option URect := if w > 0 && h > 0 then some ⟨x, y, w, h⟩ else none

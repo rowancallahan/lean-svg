@@ -152,15 +152,6 @@ def notoSansKR : Nat := 5
 /-- The number of embedded fonts. -/
 def count : Nat := entries.size
 
-/-- The index of the first font whose family is exactly `name` (0 for "Noto
-Sans", whose bold/italic faces `Text` picks by weight/style). -/
-def familyIndex (name : ByteArray) : Option Nat := Id.run do
-  for i in [0:entries.size] do
-    match entries[i]? with
-    | some e => if name == e.family.toUTF8 then return some i
-    | none => pure ()
-  return none
-
 /-- The embedded font whose `LeanSvg.Fonts` module name is `name`, exactly as
 the renderer loads it (for `fontdump --embedded`). -/
 def byModule (name : String) : Option Font :=

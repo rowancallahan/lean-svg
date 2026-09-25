@@ -1966,7 +1966,7 @@ def parseTextLenList (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs :
 
 /-- `stroke-dasharray`: a whitespace/comma separated list of lengths, resolved
 like `parseTextLen` (`em`/`ex` against `fontSize`, `%` against `refLen`), but
-all-or-nothing like `parseAbsLengthList` — one bad item drops the whole list,
+all-or-nothing — one bad item drops the whole list,
 matching `Geom.dashPattern`'s downstream fallback to an undashed stroke. -/
 def parseDashLengthList (fontSize refLen : Fx) (rootFontSize : Units.RootLen) (bs : ByteArray) : Option (Array Fx) := Id.run do
   let t := trim bs

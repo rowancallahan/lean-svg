@@ -3,7 +3,7 @@ import LeanSvg.Geom
 /-!
 # Dash segments with curve tangents (T107)
 
-`flatten` keeps only points, so `dashPoly` has to take a dash end's direction
+`flatten` keeps only points, so a dash end's direction would have to come
 from the chord it falls on.  tiny-skia dashes the curve itself and caps each
 dash along the curve's tangent, so every dash end on a curve was rotated by up
 to half a chord's angle against resvg.  `flattenSegs` flattens exactly as

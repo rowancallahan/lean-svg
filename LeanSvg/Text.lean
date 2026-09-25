@@ -509,20 +509,14 @@ def glyphCmdsLin (f : Font) (gid : Nat) (sizeFx : Fx) (la lb lc ld : Int) (ox oy
     out := out.push .close
   return out
 
-/-- The rotation-only linear part `glyphCmds` feeds `glyphCmdsLin`, factored
-out so `T81`'s text-bbox rectangle (below) can rotate by the exact same
-matrix a glyph's own outline does. -/
+/-- The rotation-only linear part fed to `glyphCmdsLin` (the identity when
+`rot` is zero), shared with `T81`'s text-bbox rectangle (below) so it rotates
+by the exact same matrix a glyph's own outline does. -/
 def rotMat16 (rot : Fx) : Int × Int × Int × Int :=
   if rot == 0 then (65536, 0, 0, 65536)
   else
     let (sn, cs) := sinCos16 (degToRad16 rot)
     (cs, sn, -sn, cs)
-
-/-- `glyphCmdsLin` with the linear part a rotation by `rot` degrees (the
-identity, which maps every point exactly to itself, when `rot` is zero). -/
-def glyphCmds (f : Font) (gid : Nat) (sizeFx : Fx) (rot : Fx) (ox oy : Int) : Array PathCmd :=
-  let (la, lb, lc, ld) := rotMat16 rot
-  glyphCmdsLin f gid sizeFx la lb lc ld ox oy
 
 /-! ## Text bounding box (T81)
 
@@ -596,7 +590,7 @@ structure DecorRun where
 deriving Inhabited
 
 /-- Round `v * size256 / upem` to the nearest integer, ties away from zero.
-Unlike `glyphCmds`'s `tr` (which works in doubled font units so a contour's
+Unlike `glyphCmdsLin`'s `tr` (which works in doubled font units so a contour's
 implied midpoints come out exact), a decoration metric is a plain scalar, so
 a symmetric round is simpler and exactly as correct. -/
 def roundScale (v size256 upem : Int) : Int :=
@@ -605,7 +599,7 @@ def roundScale (v size256 upem : Int) : Int :=
   else -(Int.ediv (-v * size256 + upem / 2) upem)
 
 /-- One decoration run's rectangle, already rotated and translated to the
-`<text>` element's user space — the same final transform `glyphCmds` applies
+`<text>` element's user space — the same final transform `glyphCmdsLin` applies
 to a contour, just to four straight corners instead of control points.
 `#[]` for a run with zero or negative width (`letter-spacing` collapsed it
 away, or the character never advanced): a rectangle here is drawn only from
@@ -736,8 +730,8 @@ same running pen — in a *local* frame where the pen still advances along
 (`crates/usvg/src/text/layout.rs`, `layout_text`'s `text_ts.pre_rotate_at
 (90.0, x, y)`).  We reproduce that net rotation directly at the point each
 glyph's final position and angle are computed, rather than building and then
-rotating an intermediate transform, since `glyphCmds` already takes a single
-rotation angle and a single pen position:
+rotating an intermediate transform, since `glyphCmdsLin` already takes a single
+rotation (`rotMat16`) and a single pen position:
 
 * the incoming `dx`/`dy` swap axes (`y -= dx; x += dy`, usvg's
   `resolve_clusters_positions_horizontal`), because usvg's local `x` is
@@ -745,7 +739,7 @@ rotation angle and a single pen position:
   whichever screen axis they end up on;
 * a glyph's own outline additionally rotates 90° (`apply_writing_mode`'s
   per-cluster rotation composes with the chunk's), which for us means adding
-  90° to the explicit `rotate` value fed to `glyphCmds`;
+  90° to the explicit `rotate` value fed to `rotMat16`;
 * usvg also centers each glyph on the column by shifting it a
   `(ascent + descent) / 2` along local `y` before the rotation
   (`apply_writing_mode`'s "could not find a spec that explains this" shift,
