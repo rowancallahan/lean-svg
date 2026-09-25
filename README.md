@@ -80,6 +80,7 @@ brew install resvg        # oracle
 make test                 # fidelity vs resvg → tests/out/report.html
 make adversarial          # hostile inputs: no crash, no hang, no stray files
 make tiles                # --viewport tiles stitch back to the full render
+make full-check           # every test, whole corpus, byte lock (before finalizing)
 ```
 
 ## Licensing and credits

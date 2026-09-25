@@ -281,6 +281,16 @@ Totals: lean-svg 304 s, resvg 45 s, Chromium 10 s. Medians: 58, 18 and
 start-up is 16 ms (resvg 3 ms). Rowan: do not go deep on speed in Lean; the
 plan is the Rust rewrite proved equal with Aeneas (phase 6).
 
+## Before finalizing, and before the Rust + Aeneas conversion (Rowan, 2026-09-25)
+
+Every time:
+
+1. Prune dead files and dead code again (nothing references it, not a current doc).
+2. `scripts/full-check.sh` (`make full-check`): every test over the entire
+   corpus; must end with the byte lock identical.
+3. `python3 tests/check_licenses.py --online`.
+4. Re-review the chart verdicts (`tests/realworld_verdicts.csv`).
+
 ## Code invariants (Rowan; moved from `tasks/README.md`, 2026-09-25)
 
 For every `LeanSvg/*.lean` (items 1–2 are checked by `tests/check_invariants.py`):
