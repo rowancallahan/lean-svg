@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Axiom audit for the proof boundary (T43/T43b).
 
-Discovers every `theorem` under `proofs/*.lean` (excluding `*-wip.lean`) and
+Discovers every `theorem` under `proofs/*.lean` and
 `LeanSvg/Effect.lean` by scanning the source -- not from a hand-maintained
 list, so a new theorem cannot silently dodge the audit -- then elaborates a
 `#print axioms` for each and checks the result:
@@ -117,8 +117,6 @@ def main() -> None:
     proofs_dir = REPO / "proofs"
     found_proof_theorem = False
     for path in sorted(proofs_dir.glob("*.lean")):
-        if path.name.endswith("-wip.lean"):
-            continue
         names = theorems_in(path)
         if not names:
             continue

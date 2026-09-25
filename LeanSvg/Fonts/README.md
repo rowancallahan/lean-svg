@@ -140,7 +140,7 @@ glyphs it draws, not for the font. The table bytes themselves are unchanged
 checks against the original subset for every mapped codepoint.
 
 Base64 costs 4/3 of the font size in the binary where T25's hex cost 2×;
-`lake build` compiles the 25 MB of source in seconds (see `tasks/T91-fonts.md`).
+`lake build` compiles the 25 MB of source in seconds.
 `python3 tests/gen_font_module.py --from-module <Module>` re-emits a module in
 the current layout from the bytes it already embeds.
 
@@ -233,7 +233,7 @@ python3 tests/gen_font_module.py NotoSans-ExtraCondensed.ttf NotoSansExtraConden
   and §3 forbids a Modified Version from using the RFN without Adobe's written
   permission. It is not embedded, and must not be without that permission,
   under its own name or another name that `font-family="Source Sans Pro"`
-  resolves to (see `tasks/T118-font-stretch.md`).
+  resolves to.
 - **Emoji**: not now (Rowan's decision); colour emoji are bitmap/COLR, not `glyf`.
 - T106, skipped: Liberation fonts themselves (download refused, see above;
   Arimo/Tinos/Cousine used instead); matplotlib's BaKoMa `cmr10.ttf` etc.

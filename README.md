@@ -80,7 +80,6 @@ brew install resvg        # oracle
 make test                 # fidelity vs resvg → tests/out/report.html
 make adversarial          # hostile inputs: no crash, no hang, no stray files
 make tiles                # --viewport tiles stitch back to the full render
-python3 playground/server.py   # http://127.0.0.1:8765 — draw and compare
 ```
 
 ## Licensing and credits

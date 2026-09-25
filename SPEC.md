@@ -188,7 +188,7 @@ runs at all, so the proof does not touch the XML/SVG pipeline.
   checker has accepted every definition. Note what this does *not* say: it
   bounds nothing about how long.
 - **No floats, no FFI, no `unsafe`, no dependencies.** Project invariants in
-  `tasks/README.md`, kept by review and the build, not by a proof.
+  `docs/DECISIONS.md`, kept by review and the build, not by a proof.
 
 ---
 
@@ -254,7 +254,7 @@ In order of how much weight each carries:
    risk.
 2. **`execIO`**, eleven lines, unproved, including the TOCTOU gap noted above.
 3. **The Lean kernel and toolchain** (v4.34.0), and `propext`.
-4. **The invariants** in `tasks/README.md`, kept by review rather than by types.
+4. **The invariants** in `docs/DECISIONS.md`, kept by review rather than by types.
 
 Everything else in the renderer is a pure function from `ByteArray` to
 `Except String ByteArray`, and the theorems above say exactly what happens to

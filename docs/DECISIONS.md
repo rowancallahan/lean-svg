@@ -280,3 +280,20 @@ Totals: lean-svg 304 s, resvg 45 s, Chromium 10 s. Medians: 58, 18 and
 7 ms. The 34 files with embedded `<image>` take 140 s of our 304 s; process
 start-up is 16 ms (resvg 3 ms). Rowan: do not go deep on speed in Lean; the
 plan is the Rust rewrite proved equal with Aeneas (phase 6).
+
+## Code invariants (Rowan; moved from `tasks/README.md`, 2026-09-25)
+
+For every `LeanSvg/*.lean` (items 1–2 are checked by `tests/check_invariants.py`):
+
+1. No `partial`, `unsafe`, `@[extern]`, `panic!` or `!`-indexing
+   (`arr[i]!`, `get!`, `set!`). Use `getD` / `setIfInBounds` or carry proofs.
+2. No `Float`. Fixed point only (`Fx = Int`, 1/256 px; matrices 16.16).
+3. Every loop is a `for` over a range bounded by the input size or a
+   constant; recursion uses structurally decreasing fuel.
+4. Hot loops in `Nat` (Lean's unboxed `Int` is 31-bit; `Nat` is 63-bit).
+5. `lake build` finishes with no errors and no new warnings.
+6. `LeanSvg/Effect.lean` changes only when the work is about it.
+
+`tasks/` (per-task notes and reports) was deleted on 2026-09-25. Comments
+that cite `tasks/<name>.md` refer to git history:
+`git show $(git log -1 --format=%h --diff-filter=D -- tasks)^:tasks/<name>.md`.

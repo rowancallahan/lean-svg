@@ -2,8 +2,8 @@
 """External-corpus fidelity harness: score lean-svg against resvg on SVG files
 we did not write.
 
-Three corpora are expected under tests/corpora/ (clone them with the commands
-in tasks/T15-external-corpora.md; the directory is gitignored):
+Three corpora are expected under tests/corpora/ (git clone --depth 1 from
+GitHub; the directory is gitignored):
 
     resvg-test-suite   linebender/resvg-test-suite  (MIT)   tests/**/*.svg
     simple-icons       simple-icons/simple-icons    (CC0)   icons/*.svg

@@ -73,5 +73,3 @@ harness/
     Harness/Adapter.lean asRender + per-core contract statements
     Generated/<tool>/  Aeneas output (do not edit)
 ```
-
-Status: see `tasks/T9-aeneas-spike.md`.

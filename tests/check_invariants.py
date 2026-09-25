@@ -8,7 +8,7 @@
 3. No `IO.` outside the effect layer: `LeanSvg/*.lean` other than
    `Effect.lean` must not mention `IO.` (comments and string literals don't
    count).
-4. Mechanical invariants from tasks/README.md across `LeanSvg/`: no
+4. Mechanical invariants from docs/DECISIONS.md across `LeanSvg/`: no
    `partial`, `unsafe`, `@[extern]`, `panic!`, `Float`, or `!`-indexing
    (`]!`, `get!`, `set!`); comments and string literals are stripped first
    so prose ("never needs `partial`") and string contents can't trigger it.
