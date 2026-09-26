@@ -1,23 +1,49 @@
 # lean-svg
 
-Licence: [Apache-2.0](LICENSE). Third-party fonts, data and test files: [LICENSING.md](LICENSING.md).
-
 ## Overview
 An experiment in specification based programming.
 Programming in Lean allows you to prove properties about your code that are then machine checked.
-While programming languages like rust can help provide assurances about bugs like use-after-free, Lean can go further and allow you to prove properties about its inputs and outputs.
+While programming languages like rust can help provide assurances about bugs like use-after-free, Lean goes further and allows you to prove properties about code behavior.
 
-As a demonstration of the potential advantages, this is an SVG -> PNG rendering program modelled after resvg in rust the main loop can be found in Main.lean.
-The main loop ensures that no matter what the rendering function only renders to the output file (and warning file) with no other "side effects", and only reads from the input file.
-Certain properties about it are proven in the spec folder suchas input file never equals output file, along with a few other.
+As a demonstration of the potential advantages, this repository is an SVG -> PNG rendering program modeled after the rust program resvg.
+The main loop which can be found in main.lean ensures that no matter what inputs enter the rendering function it only renders to the output file (and warning file) with no other "side effects", and only reads from the input file.
+Other properties about the program are proven in the spec folder; for example the input file never equals output file.
 
-With the effects proven we can have more trust that this program wont have issues such as remote code execution when opening a potentially "hostile" svg.
+With the effects guaranteed by the main loop proven we can be more certain that this program wont have issues like [remote code execution][https://nvd.nist.gov/vuln/detail/cve-2026-5026].
 We also have guarantees that this program will not read and write files its not supposed to regardless of what code exists in its internal function.
 
-With these features set we then took a large corpus of images including the resvg test suite and various charting library example SVG and let an agent autonomously generate almost all of the code. 
-The only job for the human is to decide on images that are borderline. Identical images are automatically accepted, and bad matches mean this feature must be implemented.
-This repository contains the mostly finished results of running this loop combined with decisions on some image drawing behavior, and some edits of the main file for clarity.
+With these feature guarantees we then took a large corpus of images including the resvg test suite and various charting library example SVG and let an agent autonomously generate almost all of the code with little human oversight. 
+The only job for the human is to decide on images that are borderline, and answer general code organization questions as needed. Identical images are automatically accepted, and renders where pixels don't match close enough mean this SVG feature must be implemented.
+This repository contains the results of running this loop combined along with decisions on some image drawing behavior as well as some human oversight over organization,prioritization, and main function clarity.
 
+It is important to note that this project would not be possible without using resvg and chrome as a raference, the resvg test corpus, and others. I am extremely grateful for the work done by these teams.
+
+## Build and run
+
+```bash
+lake build
+.lake/build/bin/lean-svg tests/svg/01_triangle.svg out.png
+.lake/build/bin/lean-svg in.svg out.png --width 800 --background white
+# one 512x512 tile of a 4000 px wide image, for a zoomable viewer
+.lake/build/bin/lean-svg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
+```
+
+## Test
+
+```bash
+brew install resvg        # oracle
+make test                 # fidelity vs resvg → tests/out/report.html
+make adversarial          # hostile inputs: no crash, no hang, no stray files
+make tiles                # --viewport tiles stitch back to the full render
+make full-check           # every test, whole corpus, byte lock (before finalizing)
+```
+
+What is proved: [spec/README.md](spec/README.md) (check with `scripts/check-theorems.sh`).
+
+## Licensing and credits
+
+lean-svg is Apache-2.0. Third-party fonts, data, algorithms and test files, with
+their verbatim licence texts: [LICENSING.md](LICENSING.md).
 
 ## Examples
 
@@ -46,29 +72,4 @@ Charts from the real-world test corpus at 1000 px on white, lean-svg vs Chromium
 <tr><td>Chromium</td><td><img src="docs/readme/surface_3d-chromium.png" width="300" alt="3D surface (matplotlib), Chromium"></td></tr>
 </table>
 
-## Build and run
 
-```bash
-lake build
-.lake/build/bin/lean-svg tests/svg/01_triangle.svg out.png
-.lake/build/bin/lean-svg in.svg out.png --width 800 --background white
-# one 512x512 tile of a 4000 px wide image, for a zoomable viewer
-.lake/build/bin/lean-svg in.svg tile.png --width 4000 --viewport 1744 1744 512 512
-```
-
-## Test
-
-```bash
-brew install resvg        # oracle
-make test                 # fidelity vs resvg → tests/out/report.html
-make adversarial          # hostile inputs: no crash, no hang, no stray files
-make tiles                # --viewport tiles stitch back to the full render
-make full-check           # every test, whole corpus, byte lock (before finalizing)
-```
-
-What is proved: [spec/README.md](spec/README.md) (check with `scripts/check-theorems.sh`).
-
-## Licensing and credits
-
-lean-svg is Apache-2.0. Third-party fonts, data, algorithms and test files, with
-their verbatim licence texts: [LICENSING.md](LICENSING.md).
