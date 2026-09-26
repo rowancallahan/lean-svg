@@ -9,7 +9,7 @@ As a demonstration of the potential advantages, this repository is an SVG -> PNG
 The main loop which can be found in main.lean ensures that no matter what inputs enter the rendering function it only renders to the output file (and warning file) with no other "side effects", and only reads from the input file.
 Other properties about the program are proven in the spec folder; for example the input file never equals output file.
 
-With the effects guaranteed by the main loop proven we can be more certain that this program wont have issues like [remote code execution][https://nvd.nist.gov/vuln/detail/cve-2026-5026].
+With the effects guaranteed by the main loop proven we can be more certain that this program wont have issues like [remote code execution](https://nvd.nist.gov/vuln/detail/cve-2026-5026).
 We also have guarantees that this program will not read and write files its not supposed to regardless of what code exists in its internal function.
 
 With these feature guarantees we then took a large corpus of images including the resvg test suite and various charting library example SVG and let an agent autonomously generate almost all of the code with little human oversight. 
